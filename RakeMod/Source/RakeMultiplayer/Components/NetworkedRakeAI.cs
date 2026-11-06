@@ -27,6 +27,14 @@ namespace RakeMultiplayer
         private byte lastSentState;
         private float lastSentHealth;
 
+        // Interpolation targets for clients
+        private Vector3 targetPosition;
+        private Quaternion targetRotation;
+        private byte targetState;
+        private float targetHealth;
+        private bool hasTargetPosition = false;
+        private bool hasTargetRotation = false;
+
         private bool _initialized = false;
 
         public enum RakeState : byte
@@ -47,6 +55,8 @@ namespace RakeMultiplayer
             audioSource = GetComponent<AudioSource>();
 
             lastSentPosition = transform.position;
+            targetPosition = transform.position;
+            targetRotation = transform.rotation;
         }
 
         private IEnumerator Start()
@@ -69,14 +79,30 @@ namespace RakeMultiplayer
             if (!_initialized) return;
 
             // Only server syncs Rake
-            if (!RakeMultiplayerPlugin.isServer) return;
-            if (!RakeMultiplayerPlugin.isConnected) return;
-
-            sendTimer += Time.deltaTime;
-            if (sendTimer >= syncRate)
+            if (RakeMultiplayerPlugin.isServer)
             {
-                SendRakeState();
-                sendTimer = 0f;
+                if (!RakeMultiplayerPlugin.isConnected) return;
+
+                sendTimer += Time.deltaTime;
+                if (sendTimer >= syncRate)
+                {
+                    SendRakeState();
+                    sendTimer = 0f;
+                }
+            }
+            else
+            {
+                // Client: interpolate to target values
+                if (!RakeMultiplayerPlugin.isConnected) return;
+
+                if (hasTargetPosition)
+                {
+                    transform.position = Vector3.Lerp(transform.position, targetPosition, Time.deltaTime * 15f);
+                }
+                if (hasTargetRotation)
+                {
+                    transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, Time.deltaTime * 15f);
+                }
             }
         }
 
@@ -117,25 +143,29 @@ namespace RakeMultiplayer
 
         private byte GetCurrentState()
         {
-            if (enemyAI == null) return (byte)RakeState.Idle;
+            if (enemyAI == null) return 0;
 
-            // Map Enemy_AI states to our enum
-            var stateField = typeof(Enemy_AI).GetField("currentState", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            if (stateField != null)
+            // Enemy_AI uses boolean flags (no single currentState field)
+            // Encode as bitmask: bit0=bDanger, bit1=bHaunt, bit2=bVisible, bit3=bPlayerHount,
+            // bit4=bKillingProccess, bit5=bPlayerKilling, bit6=bCameraBreak, bit7=bHungry
+            byte state = 0;
+            string[] flagNames = new string[] { "bDanger", "bHaunt", "bVisible", "bPlayerHount", "bKillingProccess", "bPlayerKilling", "bCameraBreak", "bHungry" };
+
+            for (int i = 0; i < flagNames.Length; i++)
             {
-                var stateValue = stateField.GetValue(enemyAI);
-                if (stateValue is int intState)
+                var field = typeof(Enemy_AI).GetField(flagNames[i], System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                if (field != null && (bool)field.GetValue(enemyAI))
                 {
-                    return (byte)Mathf.Clamp(intState, 0, 6);
+                    state |= (byte)(1 << i);
                 }
             }
-            return (byte)RakeState.Idle;
+            return state;
         }
 
         private float GetCurrentHealth()
         {
             if (enemyAI == null) return 100f;
-            var healthField = typeof(Enemy_AI).GetField("health", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            var healthField = typeof(Enemy_AI).GetField("Health", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
             if (healthField != null)
             {
                 return Convert.ToSingle(healthField.GetValue(enemyAI));
@@ -148,21 +178,33 @@ namespace RakeMultiplayer
         {
             if (RakeMultiplayerPlugin.isServer) return; // Don't apply on server
 
-            transform.position = position;
-            transform.rotation = rotation;
+            // Set interpolation targets instead of direct assignment
+            targetPosition = position;
+            targetRotation = rotation;
+            hasTargetPosition = true;
+            hasTargetRotation = true;
+            targetState = state;
+            targetHealth = health;
+
+            // Apply state/health immediately (they don't interpolate)
             ApplyState(state);
             ApplyHealth(health);
         }
 
         private void ApplyState(byte state)
         {
-            // Apply state to Enemy_AI
+            // Decode bitmask and set boolean flags on Enemy_AI
             if (enemyAI != null)
             {
-                var stateField = typeof(Enemy_AI).GetField("currentState", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-                if (stateField != null)
+                string[] flagNames = new string[] { "bDanger", "bHaunt", "bVisible", "bPlayerHount", "bKillingProccess", "bPlayerKilling", "bCameraBreak", "bHungry" };
+
+                for (int i = 0; i < flagNames.Length; i++)
                 {
-                    stateField.SetValue(enemyAI, (int)state);
+                    var field = typeof(Enemy_AI).GetField(flagNames[i], System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                    if (field != null)
+                    {
+                        field.SetValue(enemyAI, (state & (1 << i)) != 0);
+                    }
                 }
             }
 
@@ -176,7 +218,7 @@ namespace RakeMultiplayer
         {
             if (enemyAI != null)
             {
-                var healthField = typeof(Enemy_AI).GetField("health", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                var healthField = typeof(Enemy_AI).GetField("Health", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
                 if (healthField != null)
                 {
                     healthField.SetValue(enemyAI, health);

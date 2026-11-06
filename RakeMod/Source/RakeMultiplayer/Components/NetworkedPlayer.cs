@@ -115,9 +115,11 @@ namespace RakeMultiplayer
             isLocalPlayer = false;
             enabled = true; // NetworkedPlayer stays enabled to receive sync data
 
-            // Disable input/control components on remote players
+            // FPSController, WeaponManager, PlayerMovement уже отключены в SpawnRemotePlayer ДО Start()
+            // Здесь добираем остальное и гарантируем отключение рендера рук/оружия
+
             var fps = GetComponent<FPSController>();
-            if (fps) fps.enabled = false;
+            if (fps) fps.enabled = false; // На случай, если вызвано не из SpawnRemotePlayer
 
             var pm = GetComponent<PlayerMovement>();
             if (pm) pm.enabled = false;
@@ -167,37 +169,23 @@ namespace RakeMultiplayer
             if (listener) listener.enabled = false;
 
             // CRITICAL: Disable weapon camera (weapCam) which renders the view model (hands/weapon)
-            if (fps != null)
+            // Используем прямое поле (public в FPSController), а не рефлексию
+            if (fps != null && fps.weapCam != null)
             {
-                var weapCamField = typeof(FPSController).GetField("weapCam");
-                if (weapCamField != null)
-                {
-                    var weapCam = weapCamField.GetValue(fps) as Camera;
-                    if (weapCam != null)
-                    {
-                        weapCam.enabled = false;
-                        RakeMultiplayerPlugin.Log?.LogInfo("[3.5] Disabled weapCam (weapon view model camera)");
-                    }
-                }
+                fps.weapCam.enabled = false;
+                RakeMultiplayerPlugin.Log?.LogInfo("[3.5] Disabled weapCam (weapon view model camera) via direct field");
             }
 
             // CRITICAL: Disable all weapon objects (view model) in WeaponManager
-            if (wm != null)
+            // WeaponManager.playerWeapons — public List<Transform>
+            if (wm != null && wm.playerWeapons != null)
             {
-                var playerWeaponsField = typeof(WeaponManager).GetField("playerWeapons");
-                if (playerWeaponsField != null)
+                foreach (var weapon in wm.playerWeapons)
                 {
-                    var playerWeapons = playerWeaponsField.GetValue(wm) as System.Collections.Generic.List<Transform>;
-                    if (playerWeapons != null)
+                    if (weapon != null && weapon.gameObject != null)
                     {
-                        foreach (var weapon in playerWeapons)
-                        {
-                            if (weapon != null && weapon.gameObject != null)
-                            {
-                                weapon.gameObject.SetActive(false);
-                                RakeMultiplayerPlugin.Log?.LogInfo($"[3.5] Disabled weapon view model: {weapon.name}");
-                            }
-                        }
+                        weapon.gameObject.SetActive(false);
+                        RakeMultiplayerPlugin.Log?.LogInfo($"[3.5] Disabled weapon view model: {weapon.name}");
                     }
                 }
             }

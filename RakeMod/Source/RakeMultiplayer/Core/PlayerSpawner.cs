@@ -76,7 +76,31 @@ namespace RakeMultiplayer
 
             var playerObj = (GameObject)Instantiate(playerPrefab, spawnPosition, Quaternion.identity);
             playerObj.name = $"RemotePlayer_{playerId}";
-            
+
+            // ===== КРИТИЧЕСКИЙ ФИКС СИНГЛТОНОВ =====
+            // Отключаем FPSController и WeaponManager ДО их Start().
+            // Awake() уже отработал при Instantiate(), но Start() вызовется только на первом кадре
+            // для ВКЛЮЧЁННЫХ компонентов. Отключая их сейчас — предотвращаем перезапись instance.
+            var fps = playerObj.GetComponent<FPSController>();
+            if (fps != null)
+            {
+                fps.enabled = false;
+                RakeMultiplayerPlugin.Log?.LogInfo($"[3.3] Disabled FPSController on remote player {playerId} BEFORE Start()");
+            }
+
+            var wm = playerObj.GetComponent<WeaponManager>();
+            if (wm != null)
+            {
+                wm.enabled = false;
+                RakeMultiplayerPlugin.Log?.LogInfo($"[3.3] Disabled WeaponManager on remote player {playerId} BEFORE Start()");
+            }
+
+            var pm = playerObj.GetComponent<PlayerMovement>();
+            if (pm != null)
+            {
+                pm.enabled = false;
+            }
+
             // Reset Animator to default state (idle/grounded) to avoid first-frame visual glitch
             var anim = playerObj.GetComponentInChildren<Animator>();
             if (anim != null)
@@ -102,7 +126,7 @@ namespace RakeMultiplayer
             }
 
             netPlayer.SetPlayerId(playerId);
-            netPlayer.SetAsRemotePlayer();
+            netPlayer.SetAsRemotePlayer(); // Отключит рендеры, камеры, руки
 
             _remotePlayers[playerId] = netPlayer;
             RakeMultiplayerPlugin.Log?.LogInfo($"[3.3] Spawned remote player {playerId} at {spawnPosition}");

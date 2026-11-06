@@ -190,14 +190,16 @@ namespace RakeMultiplayer
                     ShooterId = 1, 
                     TargetId = 2, 
                     Amount = 100, 
-                    DamageType = "SniperShot" 
+                    DamageType = "SniperShot",
+                    ShooterPosition = new Vector3(1.5f, 2.5f, 3.5f)
                 };
                 var bytes = original.Serialize();
                 var restored = PacketSerializer.Deserialize(bytes) as DamageRequestPacket;
                 if (restored.ShooterId == 1
                     && restored.TargetId == 2
                     && restored.Amount == 100
-                    && restored.DamageType == "SniperShot")
+                    && restored.DamageType == "SniperShot"
+                    && restored.ShooterPosition == new Vector3(1.5f, 2.5f, 3.5f))
                 { passed++; Log.LogInfo("[SerTest] DamageRequest: OK (" + bytes.Length + " bytes)"); }
                 else { failed++; Log.LogError("[SerTest] DamageRequest: FAILED (values mismatch)"); }
             }
@@ -268,12 +270,13 @@ namespace RakeMultiplayer
                 ShooterId = 1, 
                 TargetId = 2, 
                 Amount = 100, 
-                DamageType = "SniperShot" 
+                DamageType = "SniperShot",
+                ShooterPosition = new Vector3(1.5f, 2.5f, 3.5f)
             };
             var damageBytes = damagePacket.Serialize();
             var damageRestored = PacketSerializer.Deserialize(damageBytes);
 
-            if (damageRestored is DamageRequestPacket dr && dr.DamageType == "SniperShot")
+            if (damageRestored is DamageRequestPacket dr && dr.DamageType == "SniperShot" && dr.ShooterPosition == new Vector3(1.5f, 2.5f, 3.5f))
                 RakeMultiplayerPlugin.Log?.LogInfo("[DispatchTest] DamageRequest routing: OK");
             else
                 RakeMultiplayerPlugin.Log?.LogError("[DispatchTest] DamageRequest routing: FAILED");

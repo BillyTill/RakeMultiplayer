@@ -46,8 +46,11 @@ namespace RakeMultiplayer
         private Enemy_AI _cachedEnemyAI;
         private float _cacheTimer = 0f;
 
-        // Item registry for networked items (key = instance ID)
+        // Item registry for networked items (key = deterministic network ID)
         private Dictionary<int, Item> _networkedItems = new Dictionary<int, Item>();
+        // Reverse lookup: Item -> assigned network ID (for consistent ID retrieval)
+        private Dictionary<Item, int> _itemToNetworkId = new Dictionary<Item, int>();
+        private int _nextItemNetworkId = 1;
 
         /// <summary>
         /// Get total known player count (server: connected clients + host; client: known players from packets)
@@ -182,6 +185,7 @@ namespace RakeMultiplayer
             }
             _playerStates.Clear();
             _connectedClients.Clear();
+            _networkedItems.Clear();
             RakeMultiplayerPlugin.isConnected = false;
         }
 
@@ -195,6 +199,7 @@ namespace RakeMultiplayer
             }
             // Clear client-side player tracking
             _knownPlayerIds.Clear();
+            _networkedItems.Clear();
             RakeMultiplayerPlugin.isConnected = false;
         }
 
@@ -333,8 +338,9 @@ namespace RakeMultiplayer
             RakeMultiplayerPlugin.Log?.LogInfo($"[Net] Server: client {connectionId} disconnected");
             _connectedClients.Remove(connectionId);
             _playerStates.Remove(connectionId);
+            _networkedItems.Clear(); // Clear items to avoid ghost items for remaining players
 
-            var packet = new PlayerDisconnectedPacket { PlayerId = connectionId };
+            var packet = new PlayerDisconnectedPacket { PlayerId = connectionId + 1 };
             var data = packet.Serialize();
             foreach (var connId in _connectedClients)
             {
@@ -399,9 +405,9 @@ namespace RakeMultiplayer
             }
         }
 
-        private void HandleServerDamageRequest(int connectionId, DamageRequestPacket packet, byte[] rawData)
+        public void HandleServerDamageRequest(int connectionId, DamageRequestPacket packet, byte[] rawData)
         {
-            RakeMultiplayerPlugin.Log?.LogInfo($"[3.4] Server received DamageRequest from C{connectionId}: shooter={packet.ShooterId}, target={packet.TargetId}, amount={packet.Amount}, type={packet.DamageType}");
+            RakeMultiplayerPlugin.Log?.LogInfo($"[3.4] Server received DamageRequest from C{connectionId}: shooter={packet.ShooterId}, target={packet.TargetId}, amount={packet.Amount}, type={packet.DamageType}, shooterPos={packet.ShooterPosition}");
 
             // Use cached Enemy_AI (server-authoritative)
             if (_cachedEnemyAI == null)
@@ -412,6 +418,35 @@ namespace RakeMultiplayer
 
             // Apply damage via reflection (TakeDamage method or health field)
             float newHealth = ApplyDamageToEnemy(_cachedEnemyAI, packet.Amount, packet.DamageType);
+
+            // ===== КРИТИЧЕСКИЙ ФИКС: Заставляем Рейка среагировать на выстрел (Danger state) =====
+            // Enemy_AI.Start() подписывается на NotificationsManager.Instance.AddListener("Event_PlayerFire")
+            // При получении уведомления он вызывает Event_PlayerFire(Component sender)
+            // который проверяет дистанцию до sender и вызывает SetDangerState()
+            // Мы создаём временный GameObject на позиции стрелка и вызываем Event_PlayerFire через рефлексию
+            try
+            {
+                var fakeShooter = new GameObject("FakeShooter_ForRakeReaction");
+                fakeShooter.transform.position = packet.ShooterPosition;
+                var fakeComponent = fakeShooter.AddComponent<Component>(); // Component is abstract, use a dummy MonoBehaviour
+                
+                // Actually we need a Component that has a Transform. Let's use a different approach:
+                // Create a MonoBehaviour on the fake object
+                var dummyBehaviour = fakeShooter.AddComponent<MonoBehaviour>();
+                
+                var eventMethod = typeof(Enemy_AI).GetMethod("Event_PlayerFire", 
+                    System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                if (eventMethod != null)
+                {
+                    eventMethod.Invoke(_cachedEnemyAI, new object[] { dummyBehaviour });
+                    RakeMultiplayerPlugin.Log?.LogInfo($"[3.4] Forced Rake to react to shot from {packet.ShooterPosition} (Danger state)");
+                }
+                UnityEngine.Object.Destroy(fakeShooter);
+            }
+            catch (Exception ex)
+            {
+                RakeMultiplayerPlugin.Log?.LogError($"[3.4] Failed to trigger Rake Event_PlayerFire: {ex.Message}");
+            }
 
             // Broadcast DamageApplied to all clients
             var appliedPacket = new DamageAppliedPacket
@@ -430,8 +465,8 @@ namespace RakeMultiplayer
                 // Signature: public void TakeDamage(int amount, string damageType)
                 enemyAI.TakeDamage(amount, damageType ?? "Bullet");
                 
-                // Get updated health via reflection (field may be private)
-                var healthField = typeof(Enemy_AI).GetField("health", 
+                // Get updated health via reflection (field is public float Health)
+                var healthField = typeof(Enemy_AI).GetField("Health", 
                     System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
                 if (healthField != null)
                 {
@@ -449,7 +484,7 @@ namespace RakeMultiplayer
                     {
                         takeDamageMethod.Invoke(enemyAI, new object[] { amount, damageType ?? "Bullet" });
                         
-                        var healthField = typeof(Enemy_AI).GetField("health", 
+                        var healthField = typeof(Enemy_AI).GetField("Health", 
                             System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
                         if (healthField != null)
                         {
@@ -478,8 +513,122 @@ namespace RakeMultiplayer
                 return;
             }
 
+            // Get the item to clean up reverse lookup
+            var item = _networkedItems[packet.ItemNetworkId];
+            
             // Remove from server registry immediately to prevent double-pickup
             _networkedItems.Remove(packet.ItemNetworkId);
+            if (item != null) _itemToNetworkId.Remove(item);
+
+            // ===== Give item to the player on the server (host) =====
+            // Find the WeaponManager for this player and call AddWeapon/AddAmmo
+            // PlayerId 1 = Host, PlayerId > 1 = Clients (connectionId = PlayerId - 1)
+            try
+            {
+                WeaponManager weaponManager = null;
+                
+                if (packet.PlayerId == 1)
+                {
+                    // Host player - find WeaponManager on the local player
+                    if (PlayerSpawner.Instance != null && PlayerSpawner.Instance.LocalPlayer != null)
+                    {
+                        weaponManager = PlayerSpawner.Instance.LocalPlayer.GetComponent<WeaponManager>();
+                    }
+                }
+                else
+                {
+                    // Remote player (client) - find their NetworkedPlayer
+                    if (PlayerSpawner.Instance != null && PlayerSpawner.Instance.TryGetRemotePlayer(packet.PlayerId, out var remotePlayer))
+                    {
+                        weaponManager = remotePlayer.GetComponent<WeaponManager>();
+                    }
+                }
+
+                if (weaponManager != null && item != null)
+                {
+                    // Determine what to give based on item type
+                    // This mimics the logic in Item.PickupItem overrides
+                    string itemType = packet.ItemType;
+                    int weaponId = 0;
+                    int ammoCount = 1;
+                    bool isNewWeapon = false;
+
+                    switch (itemType)
+                    {
+                        case "Medkit_item":
+                            weaponId = 8; // Medkit weapon ID
+                            isNewWeapon = !weaponManager.CheckWeapon(weaponId);
+                            break;
+                        case "Rifle_item":
+                            weaponId = 1; // Rifle weapon ID
+                            ammoCount = 2;
+                            isNewWeapon = !weaponManager.CheckWeapon(weaponId);
+                            break;
+                        case "RifleAmmo_item":
+                            weaponId = 1;
+                            ammoCount = 2;
+                            isNewWeapon = false; // Ammo only
+                            break;
+                        case "SniperRifle_item":
+                            weaponId = 6; // Sniper weapon ID
+                            isNewWeapon = !weaponManager.CheckWeapon(weaponId);
+                            break;
+                        case "SniperAmmo_item":
+                            weaponId = 6;
+                            ammoCount = 2;
+                            isNewWeapon = false;
+                            break;
+                        case "Trap_item":
+                            weaponId = 4;
+                            isNewWeapon = !weaponManager.CheckWeapon(weaponId);
+                            break;
+                        case "Camera_item":
+                            weaponId = 2;
+                            ammoCount = 1;
+                            isNewWeapon = !weaponManager.CheckWeapon(weaponId);
+                            break;
+                        case "Binocular_weapon":
+                        case "Binocular_item":
+                            weaponId = 7;
+                            isNewWeapon = !weaponManager.CheckWeapon(weaponId);
+                            break;
+                        case "MapCase_weapon":
+                        case "MapCase_item":
+                            weaponId = 3;
+                            isNewWeapon = !weaponManager.CheckWeapon(weaponId);
+                            break;
+                        case "Food_item":
+                            weaponId = 5;
+                            isNewWeapon = !weaponManager.CheckWeapon(weaponId);
+                            break;
+                        default:
+                            RakeMultiplayerPlugin.Log?.LogWarning($"[3.5] Unknown item type for server pickup: {itemType}");
+                            break;
+                    }
+
+                    if (weaponId > 0)
+                    {
+                        if (isNewWeapon)
+                        {
+                            weaponManager.AddWeapon(weaponId, ammoCount, true);
+                            RakeMultiplayerPlugin.Log?.LogInfo($"[3.5] Server gave weapon {weaponId} to player {packet.PlayerId}");
+                        }
+                        else
+                        {
+                            weaponManager.AddAmmo(weaponId, ammoCount);
+                            RakeMultiplayerPlugin.Log?.LogInfo($"[3.5] Server gave ammo {ammoCount} for weapon {weaponId} to player {packet.PlayerId}");
+                        }
+                    }
+                }
+                else
+                {
+                    RakeMultiplayerPlugin.Log?.LogWarning($"[3.5] Could not find WeaponManager for player {packet.PlayerId} or item was null");
+                }
+            }
+            catch (Exception ex)
+            {
+                RakeMultiplayerPlugin.Log?.LogError($"[3.5] Error giving item to player on server: {ex.Message}");
+            }
 
             var destroyedPacket = new ItemDestroyedPacket
             {
@@ -652,6 +801,7 @@ namespace RakeMultiplayer
                 {
                     UnityEngine.Object.Destroy(item.gameObject);
                     _networkedItems.Remove(packet.ItemNetworkId);
+                    _itemToNetworkId.Remove(item); // Clean up reverse lookup
                     RakeMultiplayerPlugin.Log?.LogInfo($"[3.5] Client destroyed item {packet.ItemNetworkId} ({item.name})");
                 }
                 else
@@ -787,35 +937,79 @@ namespace RakeMultiplayer
 
         // === Item Registry (Stage 3.5) ===
         /// <summary>
-        /// Generate deterministic network ID for an item based on position + name
-        /// Uses rounded integers to avoid float precision mismatches between host/client
+        /// Get deterministic network ID for an item.
+        /// Uses assigned sequential index (set during RegisterItem) to guarantee
+        /// identical IDs on host and client without float precision issues.
         /// </summary>
-        public static int GetItemNetworkId(Item item)
+        public int GetItemNetworkId(Item item)
         {
             if (item == null) return 0;
-            // Round to integers to avoid float precision issues
-            int x = Mathf.RoundToInt(item.transform.position.x);
-            int y = Mathf.RoundToInt(item.transform.position.y);
-            int z = Mathf.RoundToInt(item.transform.position.z);
-            string posKey = $"{x}_{y}_{z}_{item.name}";
-            return posKey.GetHashCode();
+            if (_itemToNetworkId.TryGetValue(item, out int id))
+                return id;
+            // Fallback: generate from position (for items not yet registered)
+            int x = Mathf.RoundToInt(item.transform.position.x * 100f);
+            int y = Mathf.RoundToInt(item.transform.position.y * 100f);
+            int z = Mathf.RoundToInt(item.transform.position.z * 100f);
+            return (x * 73856093) ^ (y * 19349663) ^ (z * 83492791) ^ item.name.GetHashCode();
         }
 
-        public void RegisterItem(Item item)
+        /// <summary>
+        /// Register an item with the next available deterministic network ID.
+        /// Call this on BOTH host and client during scene initialization (GameEntryPatch).
+        /// Items are assigned sequential IDs based on FindObjectsOfType order.
+        /// </summary>
+        public void RegisterItem(Item item, int preferredId = -1)
         {
             if (item == null) return;
-            int id = GetItemNetworkId(item);
+
+            // Если у предмета уже есть назначенный ID (например, при регистрации с preferredId), используем его
+            if (_itemToNetworkId.TryGetValue(item, out int existingId))
+            {
+                if (!_networkedItems.ContainsKey(existingId))
+                    _networkedItems[existingId] = item;
+                RakeMultiplayerPlugin.Log?.LogInfo($"[3.5] Item already registered: {item.GetType().Name} (ID={existingId})");
+                return;
+            }
+
+            int id;
+            if (preferredId > 0)
+            {
+                id = preferredId;
+                // Убеждаемся, что следующий ID не конфликтует
+                if (_nextItemNetworkId <= id) _nextItemNetworkId = id + 1;
+            }
+            else
+            {
+                id = _nextItemNetworkId++;
+            }
+
             if (!_networkedItems.ContainsKey(id))
             {
                 _networkedItems[id] = item;
+                _itemToNetworkId[item] = id;
                 RakeMultiplayerPlugin.Log?.LogInfo($"[3.5] Registered networked item: {item.GetType().Name} (ID={id})");
+            }
+            else
+            {
+                // Редкий случай коллизии — ищем свободный
+                while (_networkedItems.ContainsKey(_nextItemNetworkId))
+                    _nextItemNetworkId++;
+                id = _nextItemNetworkId++;
+                _networkedItems[id] = item;
+                _itemToNetworkId[item] = id;
+                RakeMultiplayerPlugin.Log?.LogWarning($"[3.5] ID collision resolved for {item.GetType().Name}, new ID={id}");
             }
         }
 
         public void UnregisterItem(Item item)
         {
             if (item == null) return;
-            _networkedItems.Remove(GetItemNetworkId(item));
+            if (_itemToNetworkId.TryGetValue(item, out int id))
+            {
+                _networkedItems.Remove(id);
+                _itemToNetworkId.Remove(item);
+                RakeMultiplayerPlugin.Log?.LogInfo($"[3.5] Unregistered networked item: {item.GetType().Name} (ID={id})");
+            }
         }
 
         /// <summary>

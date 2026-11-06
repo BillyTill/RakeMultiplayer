@@ -84,11 +84,12 @@ namespace RakeMultiplayer
             if (RakeNetworkManager.Instance != null)
             {
                 var items = UnityEngine.Object.FindObjectsOfType<Item>();
-                foreach (var item in items)
+                for (int i = 0; i < items.Length; i++)
                 {
-                    RakeNetworkManager.Instance.RegisterItem(item);
+                    // Присваиваем детерминированный ID на основе индекса (1-based)
+                    RakeNetworkManager.Instance.RegisterItem(items[i], i + 1);
                 }
-                RakeMultiplayerPlugin.Log?.LogInfo($"[GameEntry] Registered {items.Length} networked items");
+                RakeMultiplayerPlugin.Log?.LogInfo($"[GameEntry] Registered {items.Length} networked items with deterministic IDs");
             }
 
             // If host, update and broadcast host position now that local player is initialized

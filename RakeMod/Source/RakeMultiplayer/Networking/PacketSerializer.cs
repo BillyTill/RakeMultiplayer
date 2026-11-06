@@ -9,6 +9,9 @@ namespace RakeMultiplayer.Networking
     /// </summary>
     public static class PacketSerializer
     {
+        private const int MAX_PACKET_SIZE = 65536; // 64KB
+        private const int MAX_STRING_LENGTH = 256;
+
         /// <summary>
         /// Deserializes byte array to NetworkPacket
         /// </summary>
@@ -16,6 +19,9 @@ namespace RakeMultiplayer.Networking
         {
             if (data == null || data.Length == 0)
                 throw new ArgumentException("Empty packet data");
+
+            if (data.Length > MAX_PACKET_SIZE)
+                throw new ArgumentException($"Packet too large: {data.Length} bytes (max {MAX_PACKET_SIZE})");
 
             using (var ms = new MemoryStream(data))
             using (var reader = new BinaryReader(ms))
@@ -31,6 +37,8 @@ namespace RakeMultiplayer.Networking
                     PacketType.DamageApplied => new DamageAppliedPacket(),
                     PacketType.FireVisuals => new FireVisualsPacket(),
                     PacketType.StartGame => new StartGamePacket(),
+                    PacketType.ItemPickup => new ItemPickupPacket(),
+                    PacketType.ItemDestroyed => new ItemDestroyedPacket(),
                     _ => throw new InvalidOperationException($"Unknown packet type: {type} (byte value: {(byte)type})")
                 };
                 packet.Read(reader);
@@ -47,5 +55,10 @@ namespace RakeMultiplayer.Networking
                 throw new ArgumentNullException(nameof(packet));
             return packet.Serialize();
         }
+
+        // TODO: String serialization currently uses BinaryReader.ReadString() without limits.
+        // For production, implement length-prefixed strings:
+        // Write: writer.Write((ushort)str.Length); writer.Write(Encoding.UTF8.GetBytes(str));
+        // Read: int len = reader.ReadUInt16(); if (len > MAX_STRING_LENGTH) throw...; return Encoding.UTF8.GetString(reader.ReadBytes(len));
     }
 }
