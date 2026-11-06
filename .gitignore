@@ -1,0 +1,103 @@
+# Unity build artifacts
+[Ll]ibrary/
+[Tt]emp/
+[Oo]bj/
+[Bb]uild/
+[Bb]uilds/
+[Ll]ogs/
+[Uu]ser[Ss]ettings/
+
+# Unity generated files
+*.pidb
+*.suo
+*.user
+*.unityproj
+*.sln
+*.csproj
+*.csproj.user
+*.pidb
+*.booproj
+*.svd
+*.pdb
+*.mdb
+*.opendb
+*.VC.db
+
+# Visual Studio
+.vs/
+
+# Rider
+.idea/
+
+# VS Code
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Game build
+Rake/
+Rake_Multiplayer/
+Rake(multiplayer).exe
+Rake(multiplayer)_Data/
+
+# BepInEx runtime
+BepInEx/
+doorstop_config.ini
+winhttp.dll
+
+# Decompiled source (large - only keep ARCHITECTURE_NOTES.md)
+Decompiled_Source/*
+!Decompiled_Source/ARCHITECTURE_NOTES.md
+DecompiledFirstPass/
+Decompiled/
+Assembly-CSharp*.dll
+*_structure.txt
+*.log
+err.log
+out.log
+
+# Build scripts output
+*.bat
+*.ps1
+*.exe
+decompile_*.exe
+
+# Extracted assets
+_extracted*/
+_temp*/
+TempApp/
+
+# Large files
+*.zip
+*.rar
+*.7z
+
+# Mirror build project (large)
+RakeMod/Mirror_BuildProject/
+
+# Mirror extracted plugins (large)
+RakeMod/Plugins/Mirror_Extract*/
+
+# Mono.Cecil
+Mono.Cecil.dll
+Mono.Cecil.Mdb.dll
+Mono.Cecil.Pdb.dll
+Mono.Cecil.Rocks.dll
+
+# Bin/obj folders
+RakeMod/Source/RakeMultiplayer/bin/
+RakeMod/Source/RakeMultiplayer/obj/
+
+# Keep these for reference
+!README.md
+!ARCHITECTURE_NOTES.md
+!RakeMod/Source/
+!RakeMod/README.md
+!RakeMod/DEVELOPER_REPORT.md
+!RakeMod/BuildMod.bat
+!RakeMod/InstallMod.bat
+!RakeMod/RakeMultiplayer.csproj
+!RakeMod/Plugins/Telepathy.dll
+!RakeMod/Plugins/UnityEngine.CoreModule.dll

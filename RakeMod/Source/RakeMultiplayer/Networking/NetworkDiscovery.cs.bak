@@ -1,0 +1,118 @@
+using System;
+using System.Collections.Generic;
+using UnityEngine;
+using Mirror;
+using Mirror.Discovery;
+
+namespace RakeMultiplayer.Networking
+{
+    public class RakeNetworkDiscovery : NetworkDiscovery
+    {
+        [Header("Discovery Settings")]
+        public string gameName = "Rake Multiplayer";
+        public string gameVersion = "1.0.0";
+
+        private Dictionary<long, ServerResponse> discoveredServers = new Dictionary<long, ServerResponse>();
+
+        public override void Start()
+        {
+            base.Start();
+        }
+
+        public void StartDiscovery()
+        {
+            if (Transport.activeTransport != null)
+            {
+                AdvertiseServer();
+            }
+        }
+
+        public void StopDiscovery()
+        {
+            StopBroadcast();
+        }
+
+        public override void OnServerFound(ServerResponse response)
+        {
+            base.OnServerFound(response);
+            
+            long serverId = response.EndPoint.Address.GetHashCode() ^ response.EndPoint.Port;
+            discoveredServers[serverId] = response;
+            
+            RakeMultiplayerPlugin.Log?.LogInfo($"Found server: {response.uri} - {response.ServerName}");
+            
+            // Update UI
+            var multiplayerMenu = FindObjectOfType<UI.MultiplayerMenu>();
+            if (multiplayerMenu != null)
+            {
+                // Add to server list
+            }
+        }
+
+        public override void OnServerLost(ServerResponse response)
+        {
+            base.OnServerLost(response);
+            
+            long serverId = response.EndPoint.Address.GetHashCode() ^ response.EndPoint.Port;
+            discoveredServers.Remove(serverId);
+        }
+
+        public List<ServerResponse> GetDiscoveredServers()
+        {
+            return new List<ServerResponse>(discoveredServers.Values);
+        }
+    }
+
+    // Custom NetworkManager with Rake-specific overrides
+    public class RakeNetworkManagerExtended : NetworkManager
+    {
+        public static new RakeNetworkManagerExtended singleton;
+
+        public override void Awake()
+        {
+            singleton = this;
+            base.Awake();
+        }
+
+        public override void OnServerAddPlayer(NetworkConnectionToClient conn)
+        {
+            var playerSpawner = FindObjectOfType<PlayerSpawner>();
+            if (playerSpawner != null)
+            {
+                playerSpawner.SpawnPlayer(conn);
+            }
+            else
+            {
+                base.OnServerAddPlayer(conn);
+            }
+        }
+
+        public override void OnServerSceneChanged(string sceneName)
+        {
+            base.OnServerSceneChanged(sceneName);
+            
+            // Re-spawn Rake and camera system after scene change
+            if (sceneName != "MainMenu" && sceneName != "Lobby")
+            {
+                var playerSpawner = FindObjectOfType<PlayerSpawner>();
+                if (playerSpawner != null)
+                {
+                    playerSpawner.SpawnRake();
+                    playerSpawner.SpawnCameraSystem();
+                }
+            }
+        }
+
+        public override void OnClientSceneChanged()
+        {
+            base.OnClientSceneChanged();
+            
+            // Find local player and setup
+            var localPlayer = FindObjectOfType<NetworkedPlayer>();
+            if (localPlayer != null && localPlayer.isLocalPlayer)
+            {
+                // Player already setup via OnStartLocalPlayer
+            }
+        }
+    }
+}
