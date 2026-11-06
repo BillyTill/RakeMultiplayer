@@ -136,6 +136,7 @@ namespace RakeMultiplayer.Networking
         public int TargetId;
         public int Amount;
         public string DamageType;
+        public Vector3 ShooterPosition; // Position of shooter for AI reaction (danger state)
 
         public override void Write(BinaryWriter writer)
         {
@@ -143,6 +144,9 @@ namespace RakeMultiplayer.Networking
             writer.Write(TargetId);
             writer.Write(Amount);
             writer.Write(DamageType ?? string.Empty);
+            writer.Write(ShooterPosition.x);
+            writer.Write(ShooterPosition.y);
+            writer.Write(ShooterPosition.z);
         }
 
         public override void Read(BinaryReader reader)
@@ -151,6 +155,7 @@ namespace RakeMultiplayer.Networking
             TargetId = reader.ReadInt32();
             Amount = reader.ReadInt32();
             DamageType = reader.ReadString();
+            ShooterPosition = new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
         }
     }
 
