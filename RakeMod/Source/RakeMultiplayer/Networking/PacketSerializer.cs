@@ -39,6 +39,8 @@ namespace RakeMultiplayer.Networking
                     PacketType.StartGame => new StartGamePacket(),
                     PacketType.ItemPickup => new ItemPickupPacket(),
                     PacketType.ItemDestroyed => new ItemDestroyedPacket(),
+                    PacketType.PhaseChange => new PhaseChangePacket(),
+                    PacketType.SessionState => new SessionStatePacket(),
                     _ => throw new InvalidOperationException($"Unknown packet type: {type} (byte value: {(byte)type})")
                 };
                 packet.Read(reader);

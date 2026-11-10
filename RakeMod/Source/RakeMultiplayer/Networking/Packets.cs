@@ -5,6 +5,15 @@ using UnityEngine;
 namespace RakeMultiplayer.Networking
 {
     /// <summary>
+    /// Day/Night phase enumeration
+    /// </summary>
+    public enum Phase : byte
+    {
+        Day = 0,
+        Night = 1
+    }
+
+    /// <summary>
     /// Player state synchronization packet
     /// Client -> Server (local player), Server -> All (remote players)
     /// </summary>
@@ -265,6 +274,85 @@ namespace RakeMultiplayer.Networking
         {
             ItemNetworkId = reader.ReadInt32();
             PickerId = reader.ReadInt32();
+        }
+    }
+
+    /// <summary>
+    /// Day/Night phase change notification
+    /// Server -> All (broadcast on phase transition)
+    /// </summary>
+    public class PhaseChangePacket : NetworkPacket
+    {
+        public override PacketType Type => PacketType.PhaseChange;
+
+        public Phase Phase;
+        public float RemainingTime;
+        public int NightNumber;
+
+        public override void Write(BinaryWriter writer)
+        {
+            writer.Write((byte)Phase);
+            writer.Write(RemainingTime);
+            writer.Write(NightNumber);
+        }
+
+        public override void Read(BinaryReader reader)
+        {
+            Phase = (Phase)reader.ReadByte();
+            RemainingTime = reader.ReadSingle();
+            NightNumber = reader.ReadInt32();
+        }
+    }
+
+    /// <summary>
+    /// Session state enumeration
+    /// </summary>
+    public enum SessionState : byte
+    {
+        Waiting = 0,    // Waiting for players / in lobby
+        Active = 1,     // Session in progress (3-night cycle)
+        GameOver = 2,   // Session ended
+        Victory = 3     // Victory achieved
+    }
+
+    /// <summary>
+    /// Victory type enumeration
+    /// </summary>
+    public enum VictoryType : byte
+    {
+        None = 0,
+        HuntersWin = 1,  // All 3 nights survived / Rake defeated
+        RakeWin = 2,     // All hunters eliminated
+        Timeout = 3      // Session time expired
+    }
+
+    /// <summary>
+    /// Session state synchronization packet
+    /// Server -> All (broadcast on session state changes)
+    /// </summary>
+    public class SessionStatePacket : NetworkPacket
+    {
+        public override PacketType Type => PacketType.SessionState;
+
+        public int CurrentNight;
+        public SessionState State;
+        public float RakeHealth;
+        public VictoryType VictoryType;
+
+        public override void Write(BinaryWriter writer)
+        {
+            writer.Write(CurrentNight);
+            writer.Write((byte)State);
+            writer.Write(RakeHealth);
+            writer.Write((byte)VictoryType);
+        }
+
+        public override void Read(BinaryReader reader)
+        {
+            CurrentNight = reader.ReadInt32();
+            State = (SessionState)reader.ReadByte();
+            RakeHealth = reader.ReadSingle();
+            VictoryType = (VictoryType)reader.ReadByte();
         }
     }
 }

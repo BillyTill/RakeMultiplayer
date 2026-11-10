@@ -1,6 +1,7 @@
 using System.Collections;
 using UnityEngine;
 using RakeMultiplayer.UI;
+using RakeMultiplayer.Networking;
 
 namespace RakeMultiplayer
 {
@@ -20,6 +21,10 @@ namespace RakeMultiplayer
         public RakeNetworkManager networkManager;
         public PlayerSpawner playerSpawner;
         public MultiplayerMenu multiplayerMenu;
+
+        // Core systems that persist across scenes
+        private DayNightManager _dayNightManager;
+        private SessionManager _sessionManager;
 
         private bool isInitialized = false;
         private string lastSceneName;
@@ -60,6 +65,9 @@ namespace RakeMultiplayer
         {
             RakeMultiplayerPlugin.Log?.LogInfo($"[SceneManager] Scene changed to: {sceneName}");
 
+            // Re-bind persistent managers after scene load
+            RebindPersistentManagers();
+
             if (sceneName == gameScene)
             {
                 OnGameSceneLoaded();
@@ -74,12 +82,58 @@ namespace RakeMultiplayer
             }
         }
 
+        private void RebindPersistentManagers()
+        {
+            // Find DayNightManager and SessionManager (they have DontDestroyOnLoad)
+            _dayNightManager = UnityEngine.Object.FindObjectOfType<DayNightManager>();
+            _sessionManager = UnityEngine.Object.FindObjectOfType<SessionManager>();
+
+            // Re-bind network manager and player spawner references
+            if (networkManager == null)
+                networkManager = UnityEngine.Object.FindObjectOfType<RakeNetworkManager>();
+            if (playerSpawner == null)
+                playerSpawner = UnityEngine.Object.FindObjectOfType<PlayerSpawner>();
+            if (multiplayerMenu == null)
+                multiplayerMenu = UnityEngine.Object.FindObjectOfType<MultiplayerMenu>();
+
+            // Refresh network state after scene load
+            if (networkManager != null)
+            {
+                networkManager.ReregisterHandlers();
+                networkManager.Refresh();
+            }
+
+            if (playerSpawner != null)
+            {
+                playerSpawner.Refresh();
+            }
+
+            RakeMultiplayerPlugin.Log?.LogInfo("[SceneManager] Persistent managers re-bound after scene load");
+        }
+
         private void OnGameSceneLoaded()
         {
+            // Re-bind in case not done yet
+            if (_dayNightManager == null) _dayNightManager = UnityEngine.Object.FindObjectOfType<DayNightManager>();
+            if (_sessionManager == null) _sessionManager = UnityEngine.Object.FindObjectOfType<SessionManager>();
+
             if (playerSpawner != null && RakeMultiplayerPlugin.isServer)
             {
                 playerSpawner.SpawnRake();
                 playerSpawner.SpawnItems();
+            }
+
+            // If session is running, ensure DayNightManager is synced
+            if (_sessionManager != null && _sessionManager.IsRunning && _dayNightManager != null)
+            {
+                // DayNightManager already persists, just ensure it's initialized
+                if (!_dayNightManager.IsRunning && _sessionManager.CurrentState == SessionState.Active)
+                {
+                    // Session is active but day/night cycle isn't running - restart it
+                    bool isNight = _dayNightManager.CurrentPhase == Phase.Night;
+                    int nightNum = _sessionManager.CurrentNight > 0 ? _sessionManager.CurrentNight - 1 : 0;
+                    _dayNightManager.StartCycle(isNight, nightNum);
+                }
             }
         }
 

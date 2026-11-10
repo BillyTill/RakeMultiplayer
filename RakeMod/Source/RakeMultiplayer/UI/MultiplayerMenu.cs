@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 using RakeMultiplayer.Networking;
+using RakeMultiplayer;
 
 namespace RakeMultiplayer.UI
 {
@@ -87,6 +88,43 @@ namespace RakeMultiplayer.UI
             }
 
             UpdateConnectionStatus();
+            UpdateHUD();
+        }
+
+        private void UpdateHUD()
+        {
+            if (_uiBuilder == null) return;
+
+            var dayNight = DayNightManager.Instance;
+            var session = SessionManager.Instance;
+
+            if (dayNight == null || session == null)
+            {
+                // Hide HUD if managers not ready
+                _uiBuilder.SetHUDVisible(false);
+                return;
+            }
+
+            // Show HUD only during active session
+            bool sessionActive = session.IsRunning && (session.CurrentState == SessionState.Active);
+            _uiBuilder.SetHUDVisible(sessionActive);
+
+            if (!sessionActive) return;
+
+            // Phase text
+            string phaseText = dayNight.CurrentPhase == Phase.Day ? "ДЕНЬ" : "НОЧЬ";
+            _uiBuilder.UpdatePhaseText(phaseText);
+
+            // Night counter (1-based, TotalNights from config)
+            int currentNight = Mathf.Max(1, session.CurrentNight);
+            int totalNights = session.TotalNightsConfig > 0 ? session.TotalNightsConfig : 3;
+            _uiBuilder.UpdateNightText($"Ночь: {currentNight}/{totalNights}");
+
+            // Timer
+            float remaining = dayNight.GetRemainingTime();
+            int minutes = Mathf.FloorToInt(remaining / 60f);
+            int seconds = Mathf.FloorToInt(remaining % 60f);
+            _uiBuilder.UpdateTimerText($"{minutes:00}:{seconds:00}");
         }
 
         public void ToggleMenu()

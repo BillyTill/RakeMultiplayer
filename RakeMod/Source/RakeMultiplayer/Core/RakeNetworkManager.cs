@@ -366,6 +366,9 @@ namespace RakeMultiplayer
                     case PacketType.ItemPickup:
                         HandleServerItemPickup(connectionId, (ItemPickupPacket)packet, data);
                         break;
+                    case PacketType.StartGame:
+                        HandleServerStartGame(connectionId, (StartGamePacket)packet, data);
+                        break;
                     default:
                         RakeMultiplayerPlugin.Log?.LogWarning($"[Net] Server: unexpected {packet.Type} from C{connectionId}");
                         break;
@@ -417,7 +420,7 @@ namespace RakeMultiplayer
             }
 
             // Apply damage via reflection (TakeDamage method or health field)
-            float newHealth = ApplyDamageToEnemy(_cachedEnemyAI, packet.Amount, packet.DamageType);
+            float newHealth = ApplyDamageToEnemy(_cachedEnemyAI, packet.Amount, packet.DamageType, packet.ShooterPosition);
 
             // ===== КРИТИЧЕСКИЙ ФИКС: Заставляем Рейка среагировать на выстрел (Danger state) =====
             // Enemy_AI.Start() подписывается на NotificationsManager.Instance.AddListener("Event_PlayerFire")
@@ -457,13 +460,31 @@ namespace RakeMultiplayer
             ServerBroadcast(appliedPacket.Serialize());
         }
 
-        private float ApplyDamageToEnemy(Enemy_AI enemyAI, int amount, string damageType)
+        private float ApplyDamageToEnemy(Enemy_AI enemyAI, int amount, string damageType, Vector3 shooterPosition)
         {
             try
             {
+                // Calculate damage reduction if NetworkedRakeAI is present
+                int finalAmount = amount;
+                Vector3 hitDirection = Vector3.zero;
+                var rakeAI = enemyAI.GetComponent<NetworkedRakeAI>();
+                
+                if (rakeAI != null)
+                {
+                    // hitDirection: direction FROM shooter TO target (enemy)
+                    hitDirection = (enemyAI.transform.position - shooterPosition).normalized;
+                    float reduction = rakeAI.CalculateDamageReduction(hitDirection, enemyAI.transform.forward);
+                    finalAmount = Mathf.RoundToInt(amount * reduction);
+                    
+                    // Notify AI of damage for state reactions (blocking, stealth break, etc.)
+                    rakeAI.OnDamageTaken(hitDirection, amount, damageType ?? "Bullet");
+                    
+                    RakeMultiplayerPlugin.Log?.LogInfo($"[3.4] Damage reduction applied: {amount} -> {finalAmount} (reduction: {(1f-reduction)*100:F0}%)");
+                }
+
                 // Direct call (Enemy_AI is in Assembly-CSharp.dll which we reference)
                 // Signature: public void TakeDamage(int amount, string damageType)
-                enemyAI.TakeDamage(amount, damageType ?? "Bullet");
+                enemyAI.TakeDamage(finalAmount, damageType ?? "Bullet");
                 
                 // Get updated health via reflection (field is public float Health)
                 var healthField = typeof(Enemy_AI).GetField("Health", 
@@ -482,7 +503,18 @@ namespace RakeMultiplayer
                         System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
                     if (takeDamageMethod != null)
                     {
-                        takeDamageMethod.Invoke(enemyAI, new object[] { amount, damageType ?? "Bullet" });
+                        // Apply reduction in fallback too
+                        int finalAmount = amount;
+                        Vector3 hitDirection = Vector3.zero;
+                        var rakeAI = enemyAI.GetComponent<NetworkedRakeAI>();
+                        if (rakeAI != null)
+                        {
+                            hitDirection = (enemyAI.transform.position - shooterPosition).normalized;
+                            float reduction = rakeAI.CalculateDamageReduction(hitDirection, enemyAI.transform.forward);
+                            finalAmount = Mathf.RoundToInt(amount * reduction);
+                            rakeAI.OnDamageTaken(hitDirection, amount, damageType ?? "Bullet");
+                        }
+                        takeDamageMethod.Invoke(enemyAI, new object[] { finalAmount, damageType ?? "Bullet" });
                         
                         var healthField = typeof(Enemy_AI).GetField("Health", 
                             System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
@@ -639,6 +671,32 @@ namespace RakeMultiplayer
             RakeMultiplayerPlugin.Log?.LogInfo($"[3.5] Server authorized pickup of item {packet.ItemNetworkId} by player {packet.PlayerId}");
         }
 
+        private void HandleServerStartGame(int connectionId, StartGamePacket packet, byte[] rawData)
+        {
+            RakeMultiplayerPlugin.Log?.LogInfo($"[Net] Server received StartGame from C{connectionId}: scene={packet.SceneName}");
+
+            // Only host can start the game
+            if (connectionId != 0) // 0 would be host, but host doesn't send to self
+            {
+                // Verify this is the host (playerId == 1)
+                int playerId = connectionId + 1;
+                if (playerId != 1)
+                {
+                    RakeMultiplayerPlugin.Log?.LogWarning($"[Net] Non-host player {playerId} attempted to start game");
+                    return;
+                }
+            }
+
+            // Start the session
+            if (SessionManager.Instance != null)
+            {
+                SessionManager.Instance.StartSession();
+            }
+
+            // Broadcast StartGame to all clients
+            ServerBroadcast(packet.Serialize());
+        }
+
         private void OnClientDataReceived(byte[] data)
         {
             try
@@ -671,6 +729,12 @@ namespace RakeMultiplayer
                         break;
                     case PacketType.ItemDestroyed:
                         HandleClientItemDestroyed((ItemDestroyedPacket)packet);
+                        break;
+                    case PacketType.PhaseChange:
+                        HandleClientPhaseChange((PhaseChangePacket)packet);
+                        break;
+                    case PacketType.SessionState:
+                        HandleClientSessionState((SessionStatePacket)packet);
                         break;
                     default:
                         RakeMultiplayerPlugin.Log?.LogWarning($"[Net] Client: unexpected {packet.Type}");
@@ -816,6 +880,34 @@ namespace RakeMultiplayer
             finally
             {
                 RakeMultiplayerPlugin.IsApplyingNetworkDestroy = false;
+            }
+        }
+
+        private void HandleClientPhaseChange(PhaseChangePacket packet)
+        {
+            RakeMultiplayerPlugin.Log?.LogInfo($"[DayNight] Client received PhaseChange: phase={packet.Phase}, remaining={packet.RemainingTime:F1}s, night={packet.NightNumber + 1}");
+
+            if (DayNightManager.Instance != null)
+            {
+                DayNightManager.Instance.HandlePhaseChangePacket(packet);
+            }
+            else
+            {
+                RakeMultiplayerPlugin.Log?.LogWarning("[DayNight] DayNightManager not initialized yet, phase change will be applied on init");
+            }
+        }
+
+        private void HandleClientSessionState(SessionStatePacket packet)
+        {
+            RakeMultiplayerPlugin.Log?.LogInfo($"[Session] Client received SessionState: state={packet.State}, night={packet.CurrentNight}, rakeHP={packet.RakeHealth}, victory={packet.VictoryType}");
+
+            if (SessionManager.Instance != null)
+            {
+                SessionManager.Instance.HandleSessionStatePacket(packet);
+            }
+            else
+            {
+                RakeMultiplayerPlugin.Log?.LogWarning("[Session] SessionManager not initialized yet, session state will be applied on init");
             }
         }
 
@@ -1050,6 +1142,23 @@ namespace RakeMultiplayer
         public int GetConnectedClientCount()
         {
             return _connectedClients.Count;
+        }
+
+        /// <summary>
+        /// Re-register packet handlers after scene load
+        /// </summary>
+        public void ReregisterHandlers()
+        {
+            RakeMultiplayerPlugin.Log?.LogInfo("[RakeNetworkManager] Re-registering packet handlers");
+            // Just need to ensure PlayerSpawner is refreshed
+        }
+
+        /// <summary>
+        /// Refresh network manager state after scene load
+        /// </summary>
+        public void Refresh()
+        {
+            RakeMultiplayerPlugin.Log?.LogInfo("[RakeNetworkManager] Refreshed after scene load");
         }
     }
 }

@@ -1,6 +1,8 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using UnityEngine;
 using RakeMultiplayer.Networking;
 
@@ -8,12 +10,32 @@ namespace RakeMultiplayer
 {
     /// <summary>
     /// Networked Rake AI - server-authoritative Rake synchronization
-    /// Uses new RakeStatePacket protocol
+    /// Implements 5-phase AI behavior: Follow, Stealth, Chase, Blocking, FeignedRetreat
+    /// Uses RakeStatePacket protocol for 15Hz state sync
     /// </summary>
     public class NetworkedRakeAI : MonoBehaviour
     {
         [Header("Sync Settings")]
         public float syncRate = 0.066f; // 15Hz unified rate
+
+        [Header("AI Configuration")]
+        public float followMinDistance = 15f;
+        public float followMaxDistance = 25f;
+        public float stealthTransitionDistance = 20f;
+        public float stealthLookConeAngle = 30f;
+        public float stealthLookRange = 20f;
+        public float blockingDurationMin = 2f;
+        public float blockingDurationMax = 3f;
+        public float blockingFrontalAngle = 45f;
+        public float blockingDamageReduction = 0.8f; // 80% reduction
+        public float feignedRetreatHealthThreshold = 0.3f; // 30%
+        public float feignedRetreatNoTargetTime = 3f;
+        public float feignedRetreatWaitTime = 5f;
+        public float feignedRetreatTeleportOffsetMin = 5f;
+        public float feignedRetreatTeleportOffsetMax = 10f;
+        public float feignedRetreatCooldown = 60f;
+        public float attackRange = 3f;
+        public float chaseVocalizationInterval = 3f;
 
         private Enemy_AI enemyAI;
         private Animator animator;
@@ -35,8 +57,10 @@ namespace RakeMultiplayer
         private bool hasTargetPosition = false;
         private bool hasTargetRotation = false;
 
-        private bool _initialized = false;
+        // Client-side state tracking for animator triggers
+        private byte lastAppliedState = 255;
 
+        // AI State Machine
         public enum RakeState : byte
         {
             Idle = 0,
@@ -45,8 +69,56 @@ namespace RakeMultiplayer
             Attack = 3,
             Search = 4,
             Stunned = 5,
-            Dead = 6
+            Dead = 6,
+            Follow = 7,
+            Stealth = 8,
+            Blocking = 9,
+            FeignedRetreat = 10
         }
+
+        // Current state tracking
+        private RakeState currentState = RakeState.Idle;
+        private RakeState previousState = RakeState.Idle;
+
+        // State-specific data
+        private Transform currentTarget;
+        private float stateTimer = 0f;
+        private float chaseVocalizationTimer = 0f;
+        private float noTargetTimer = 0f;
+        private float feignedRetreatCooldownTimer = 0f;
+        private Transform caveTransform;
+        private bool isBlocking = false;
+        private float blockingEndTime = 0f;
+        private Vector3 lastDamageDirection;
+        private float lastDamageTime = 0f;
+
+        // Hunter tracking
+        private List<Transform> hunters = new List<Transform>();
+        private Transform nearestHunter;
+        private Transform isolatedHunter;
+
+        // Cave transform refresh
+        private float caveRefreshTimer = 0f;
+        private const float CaveRefreshInterval = 30f; // Refresh cave transform every 30 seconds
+
+        // Constants for magic numbers
+        private const float PositionDeltaThreshold = 0.05f;
+        private const float DamageTimeWindow = 0.5f;
+        private const float NavMeshSampleRadius = 5f;
+        private const float HealthDeltaThreshold = 1f;
+
+        // Reflection cache for Enemy_AI
+        private System.Reflection.FieldInfo enemyHealthField;
+        private System.Reflection.FieldInfo enemyMaxHealthField;
+        private System.Reflection.FieldInfo enemyAgentField;
+        private System.Reflection.FieldInfo enemyChaseVocalsField;
+        private System.Reflection.MethodInfo enemyAttackMethod;
+        private System.Reflection.MethodInfo enemyTakeDamageMethod;
+
+        // Cached original agent speed for restoration
+        private float originalAgentSpeed = 5f;
+
+        private bool _initialized = false;
 
         private void Awake()
         {
@@ -57,6 +129,36 @@ namespace RakeMultiplayer
             lastSentPosition = transform.position;
             targetPosition = transform.position;
             targetRotation = transform.rotation;
+
+            // Cache reflection for Enemy_AI
+            CacheEnemyAIReflection();
+
+            // Find cave transform
+            FindCaveTransform();
+        }
+
+        private void CacheEnemyAIReflection()
+        {
+            if (enemyAI == null) return;
+            var type = typeof(Enemy_AI);
+            var flags = System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance;
+
+            enemyHealthField = type.GetField("Health", flags);
+            enemyMaxHealthField = type.GetField("MaxHealth", flags);
+            enemyAgentField = type.GetField("agent", flags);
+            enemyChaseVocalsField = type.GetField("chaseVocals", flags);
+            enemyAttackMethod = type.GetMethod("Attack", flags);
+            enemyTakeDamageMethod = type.GetMethod("TakeDamage", flags);
+
+            // Cache original agent speed for restoration after silent movement
+            if (enemyAgentField != null)
+            {
+                var agent = enemyAgentField.GetValue(enemyAI) as NavMeshAgent;
+                if (agent != null)
+                {
+                    originalAgentSpeed = agent.speed;
+                }
+            }
         }
 
         private IEnumerator Start()
@@ -70,6 +172,12 @@ namespace RakeMultiplayer
                 enemyAI.enabled = false;
             }
 
+            // Initial state: Follow at session start
+            if (RakeMultiplayerPlugin.isServer)
+            {
+                TransitionToState(RakeState.Follow);
+            }
+
             _initialized = true;
         }
 
@@ -78,11 +186,29 @@ namespace RakeMultiplayer
             if (!RakeMultiplayerPlugin.Enabled.Value) return;
             if (!_initialized) return;
 
-            // Only server syncs Rake
+            // Only server runs AI logic
             if (RakeMultiplayerPlugin.isServer)
             {
                 if (!RakeMultiplayerPlugin.isConnected) return;
 
+                // Update hunter list
+                UpdateHunterList();
+
+                // Periodically refresh cave transform (in case it was added/loaded after Awake)
+                caveRefreshTimer += Time.deltaTime;
+                if (caveRefreshTimer >= CaveRefreshInterval)
+                {
+                    caveRefreshTimer = 0f;
+                    if (caveTransform == null)
+                    {
+                        FindCaveTransform();
+                    }
+                }
+
+                // Run state machine
+                UpdateStateMachine();
+
+                // Sync at 15Hz
                 sendTimer += Time.deltaTime;
                 if (sendTimer >= syncRate)
                 {
@@ -106,16 +232,666 @@ namespace RakeMultiplayer
             }
         }
 
+        private void FindCaveTransform()
+        {
+            var caveObj = GameObject.Find("Cave");
+            if (caveObj == null)
+            {
+                caveObj = GameObject.Find("RakeCave");
+            }
+            if (caveObj != null)
+            {
+                caveTransform = caveObj.transform;
+                RakeMultiplayerPlugin.Log?.LogInfo($"[AI] Found cave transform: {caveTransform.name}");
+            }
+            else
+            {
+                RakeMultiplayerPlugin.Log?.LogWarning("[AI] Cave transform not found - FeignedRetreat will use fallback");
+            }
+        }
+
+        private void UpdateHunterList()
+        {
+            hunters.Clear();
+
+            // Local player (host)
+            if (PlayerSpawner.Instance != null && PlayerSpawner.Instance.LocalPlayer != null)
+            {
+                hunters.Add(PlayerSpawner.Instance.LocalPlayer.transform);
+            }
+
+            // Remote players - use public API instead of reflection
+            if (PlayerSpawner.Instance != null)
+            {
+                foreach (var transform in PlayerSpawner.Instance.GetAllRemotePlayerTransforms())
+                {
+                    hunters.Add(transform);
+                }
+            }
+
+            // Update nearest and isolated hunters
+            UpdateHunterTargets();
+        }
+
+        private void UpdateHunterTargets()
+        {
+            nearestHunter = null;
+            isolatedHunter = null;
+            float nearestDist = float.MaxValue;
+            float maxIsolationScore = -1f;
+
+            foreach (var hunter in hunters)
+            {
+                if (hunter == null) continue;
+
+                float dist = Vector3.Distance(transform.position, hunter.position);
+                
+                // Nearest hunter
+                if (dist < nearestDist)
+                {
+                    nearestDist = dist;
+                    nearestHunter = hunter;
+                }
+
+                // Isolated hunter: furthest from other hunters
+                float isolationScore = 0f;
+                foreach (var other in hunters)
+                {
+                    if (other == hunter) continue;
+                    isolationScore += Vector3.Distance(hunter.position, other.position);
+                }
+                
+                if (isolationScore > maxIsolationScore)
+                {
+                    maxIsolationScore = isolationScore;
+                    isolatedHunter = hunter;
+                }
+            }
+
+            // Prefer isolated hunter for Follow/Stealth targeting
+            currentTarget = isolatedHunter ?? nearestHunter;
+        }
+
+        private void UpdateStateMachine()
+        {
+            stateTimer += Time.deltaTime;
+            feignedRetreatCooldownTimer = Mathf.Max(0f, feignedRetreatCooldownTimer - Time.deltaTime);
+
+            // Check for death
+            float health = GetCurrentHealth();
+            if (health <= 0f && currentState != RakeState.Dead)
+            {
+                TransitionToState(RakeState.Dead);
+                return;
+            }
+
+            // Check for stunned (trap trigger) - could be expanded with actual trap detection
+            // For now, we'll assume external code sets a stunned flag on Enemy_AI
+
+            // State-specific updates
+            switch (currentState)
+            {
+                case RakeState.Idle:
+                    UpdateIdle();
+                    break;
+                case RakeState.Follow:
+                    UpdateFollow();
+                    break;
+                case RakeState.Stealth:
+                    UpdateStealth();
+                    break;
+                case RakeState.Chase:
+                    UpdateChase();
+                    break;
+                case RakeState.Attack:
+                    UpdateAttack();
+                    break;
+                case RakeState.Blocking:
+                    UpdateBlocking();
+                    break;
+                case RakeState.FeignedRetreat:
+                    UpdateFeignedRetreat();
+                    break;
+                case RakeState.Search:
+                    UpdateSearch();
+                    break;
+                case RakeState.Stunned:
+                    UpdateStunned();
+                    break;
+                case RakeState.Dead:
+                    UpdateDead();
+                    break;
+            }
+
+            // Update animator state integer
+            if (animator != null)
+            {
+                animator.SetInteger("State", (int)currentState);
+            }
+        }
+
+        private void UpdateIdle()
+        {
+            // Idle -> Follow (session start)
+            TransitionToState(RakeState.Follow);
+        }
+
+        private void UpdateFollow()
+        {
+            if (currentTarget == null)
+            {
+                // No hunters found, stay idle
+                return;
+            }
+
+            // Silent movement - no footstep sounds
+            // Maintain 15-25m distance from nearest hunter
+            float distToNearest = Vector3.Distance(transform.position, nearestHunter.position);
+            
+            Vector3 targetPos;
+            if (distToNearest < followMinDistance)
+            {
+                // Too close - move away
+                Vector3 awayDir = (transform.position - nearestHunter.position).normalized;
+                targetPos = nearestHunter.position + awayDir * followMaxDistance;
+            }
+            else if (distToNearest > followMaxDistance)
+            {
+                // Too far - move closer
+                Vector3 towardDir = (nearestHunter.position - transform.position).normalized;
+                targetPos = transform.position + towardDir * (distToNearest - followMaxDistance * 0.5f);
+            }
+            else
+            {
+                // In range - circle around isolated hunter
+                if (isolatedHunter == null)
+                {
+                    // No isolated hunter - stay in place or move to nearest
+                    return;
+                }
+                Vector3 toIsolated = (isolatedHunter.position - transform.position).normalized;
+                Vector3 perpendicular = Vector3.Cross(toIsolated, Vector3.up).normalized;
+                targetPos = isolatedHunter.position + perpendicular * followMinDistance;
+            }
+
+            // Avoid line of sight using raycasts
+            if (Physics.Raycast(transform.position, (targetPos - transform.position).normalized, 
+                out RaycastHit hit, Vector3.Distance(transform.position, targetPos), 
+                LayerMask.GetMask("Default", "Terrain")))
+            {
+                // Obstacle in way - adjust path
+                targetPos = hit.point + hit.normal * 2f;
+            }
+
+            // Move towards target position silently
+            MoveToTarget(targetPos, silent: true);
+
+            // Face the isolated hunter
+            if (isolatedHunter != null)
+            {
+                Vector3 lookDir = (isolatedHunter.position - transform.position).normalized;
+                lookDir.y = 0;
+                if (lookDir != Vector3.zero)
+                {
+                    transform.rotation = Quaternion.Slerp(transform.rotation, 
+                        Quaternion.LookRotation(lookDir), Time.deltaTime * 5f);
+                }
+            }
+
+            // Transition checks
+            float distToIsolated = isolatedHunter != null ? 
+                Vector3.Distance(transform.position, isolatedHunter.position) : float.MaxValue;
+
+            // Follow -> Stealth: close enough (< 20m) and not seen
+            if (distToIsolated < stealthTransitionDistance && !IsHunterLookingAtRake(isolatedHunter))
+            {
+                TransitionToState(RakeState.Stealth);
+                return;
+            }
+
+            // Follow -> Chase: spotted by any hunter
+            foreach (var hunter in hunters)
+            {
+                if (IsHunterLookingAtRake(hunter))
+                {
+                    TransitionToState(RakeState.Chase);
+                    return;
+                }
+            }
+        }
+
+        private void UpdateStealth()
+        {
+            // Cache currentTarget to avoid race condition with UpdateHunterList
+            var target = currentTarget;
+            if (target == null)
+            {
+                TransitionToState(RakeState.Follow);
+                return;
+            }
+
+            // Maintain stealth position behind/around target
+            Vector3 toTarget = (target.position - transform.position).normalized;
+            Vector3 stealthPos = target.position - toTarget * 10f + Vector3.up * 0.5f;
+            
+            // Silent movement
+            MoveToTarget(stealthPos, silent: true);
+
+            // Face target
+            Vector3 lookDir = (target.position - transform.position).normalized;
+            lookDir.y = 0;
+            if (lookDir != Vector3.zero)
+            {
+                transform.rotation = Quaternion.Slerp(transform.rotation, 
+                    Quaternion.LookRotation(lookDir), Time.deltaTime * 3f);
+            }
+
+            // Hunter look detection: raycast from Camera.main, 30° cone, 20m range
+            if (IsHunterLookingAtRake(currentTarget))
+            {
+                TransitionToState(RakeState.Chase);
+                return;
+            }
+
+            // Stealth -> Follow: losing track of hunters
+            if (currentTarget == null || Vector3.Distance(transform.position, currentTarget.position) > stealthLookRange * 1.5f)
+            {
+                TransitionToState(RakeState.Follow);
+                return;
+            }
+
+            // Stealth -> Chase: close enough to attack
+            if (Vector3.Distance(transform.position, currentTarget.position) < attackRange)
+            {
+                TransitionToState(RakeState.Attack);
+                return;
+            }
+        }
+
+        private void UpdateChase()
+        {
+            // Play chase vocalizations
+            chaseVocalizationTimer += Time.deltaTime;
+            if (chaseVocalizationTimer >= chaseVocalizationInterval)
+            {
+                PlayChaseVocalization();
+                chaseVocalizationTimer = 0f;
+            }
+
+            if (currentTarget == null)
+            {
+                noTargetTimer += Time.deltaTime;
+                
+                // FeignedRetreat trigger: health < 30% AND no target for 3s
+                float health = GetCurrentHealth();
+                float maxHealth = GetMaxHealth();
+                if (maxHealth > 0f && health / maxHealth < feignedRetreatHealthThreshold && noTargetTimer >= feignedRetreatNoTargetTime)
+                {
+                    if (feignedRetreatCooldownTimer <= 0f)
+                    {
+                        TransitionToState(RakeState.FeignedRetreat);
+                        return;
+                    }
+                }
+                
+                // Search for target
+                if (noTargetTimer > 5f)
+                {
+                    TransitionToState(RakeState.Search);
+                }
+                return;
+            }
+            else
+            {
+                noTargetTimer = 0f;
+            }
+
+            // Direct pathfinding to target
+            MoveToTarget(currentTarget.position, silent: false);
+
+            // Face target
+            Vector3 lookDir = (currentTarget.position - transform.position).normalized;
+            lookDir.y = 0;
+            if (lookDir != Vector3.zero)
+            {
+                transform.rotation = Quaternion.Slerp(transform.rotation, 
+                    Quaternion.LookRotation(lookDir), Time.deltaTime * 10f);
+            }
+
+            // Check for frontal damage (Blocking trigger)
+            if (WasHitFromFront())
+            {
+                TransitionToState(RakeState.Blocking);
+                return;
+            }
+
+            // Chase -> Attack: close to target
+            if (Vector3.Distance(transform.position, currentTarget.position) < attackRange)
+            {
+                TransitionToState(RakeState.Attack);
+                return;
+            }
+
+            // Chase -> FeignedRetreat: health < 30% & no target for 3s (handled above)
+        }
+
+        private void UpdateAttack()
+        {
+            if (currentTarget == null)
+            {
+                TransitionToState(RakeState.Chase);
+                return;
+            }
+
+            // Face target
+            Vector3 lookDir = (currentTarget.position - transform.position).normalized;
+            lookDir.y = 0;
+            if (lookDir != Vector3.zero)
+            {
+                transform.rotation = Quaternion.Slerp(transform.rotation, 
+                    Quaternion.LookRotation(lookDir), Time.deltaTime * 15f);
+            }
+
+            // Attack logic - delegate to Enemy_AI using cached reflection
+            if (enemyAI != null && enemyAttackMethod != null)
+            {
+                enemyAttackMethod.Invoke(enemyAI, null);
+            }
+
+            // Attack -> Chase: target escaped (moved out of range)
+            if (Vector3.Distance(transform.position, currentTarget.position) > attackRange * 2f)
+            {
+                TransitionToState(RakeState.Chase);
+                return;
+            }
+        }
+
+        private void UpdateBlocking()
+        {
+            // Face the attacker during block
+            if (lastDamageDirection != Vector3.zero)
+            {
+                Vector3 faceDir = -lastDamageDirection;
+                faceDir.y = 0;
+                if (faceDir != Vector3.zero)
+                {
+                    transform.rotation = Quaternion.Slerp(transform.rotation, 
+                        Quaternion.LookRotation(faceDir), Time.deltaTime * 15f);
+                }
+            }
+
+            // Blocking -> Chase: timer expired
+            if (Time.time >= blockingEndTime)
+            {
+                isBlocking = false;
+                TransitionToState(RakeState.Chase);
+                RakeMultiplayerPlugin.Log?.LogInfo("[AI] Blocking ended, returning to Chase");
+            }
+        }
+
+        private void UpdateFeignedRetreat()
+        {
+            // Run to cave transform
+            if (caveTransform != null)
+            {
+                MoveToTarget(caveTransform.position, silent: false);
+                
+                if (Vector3.Distance(transform.position, caveTransform.position) < 2f)
+                {
+                    // At cave - wait 5 seconds
+                    if (stateTimer >= feignedRetreatWaitTime)
+                    {
+                        // Teleport behind nearest hunter
+                        TeleportBehindNearestHunter();
+                        
+                        // Set cooldown
+                        feignedRetreatCooldownTimer = feignedRetreatCooldown;
+                        stateTimer = 0f;
+                        
+                        // Transition to Follow
+                        TransitionToState(RakeState.Follow);
+                    }
+                }
+            }
+            else
+            {
+                // No cave found - just wait and teleport
+                if (stateTimer >= feignedRetreatWaitTime)
+                {
+                    TeleportBehindNearestHunter();
+                    feignedRetreatCooldownTimer = feignedRetreatCooldown;
+                    stateTimer = 0f;
+                    TransitionToState(RakeState.Follow);
+                }
+            }
+        }
+
+        private void UpdateSearch()
+        {
+            // Simple search pattern - could be expanded
+            if (stateTimer > 10f)
+            {
+                TransitionToState(RakeState.Follow);
+            }
+        }
+
+        private void UpdateStunned()
+        {
+            // Wait for stun to end (external system should clear stun)
+            // For now, auto-recover after 3 seconds
+            if (stateTimer > 3f)
+            {
+                TransitionToState(RakeState.Follow);
+            }
+        }
+
+        private void UpdateDead()
+        {
+            // Dead state - disable AI
+            if (enemyAI != null)
+            {
+                enemyAI.enabled = false;
+            }
+        }
+
+        private void TransitionToState(RakeState newState)
+        {
+            if (currentState == newState) return;
+
+            previousState = currentState;
+            currentState = newState;
+            stateTimer = 0f;
+
+            // State entry actions
+            switch (newState)
+            {
+                case RakeState.Stealth:
+                    if (animator != null) animator.SetBool("Crouch", true);
+                    break;
+                case RakeState.Follow:
+                case RakeState.Idle:
+                case RakeState.Patrol:
+                case RakeState.Chase:
+                case RakeState.Attack:
+                case RakeState.Search:
+                case RakeState.Stunned:
+                case RakeState.Blocking:
+                case RakeState.FeignedRetreat:
+                case RakeState.Dead:
+                    if (animator != null) animator.SetBool("Crouch", false);
+                    if (newState == RakeState.Chase)
+                        chaseVocalizationTimer = 0f; // Reset vocalization timer on Chase entry
+                    if (newState == RakeState.Blocking)
+                        isBlocking = true; // Set immediately on entry
+                    if (newState == RakeState.FeignedRetreat && animator != null)
+                        animator.SetTrigger("Flee");
+                    if (newState == RakeState.Blocking && animator != null)
+                        animator.SetTrigger("Block");
+                    break;
+            }
+
+            RakeMultiplayerPlugin.Log?.LogInfo($"[AI] State transition: {previousState} -> {currentState}");
+        }
+
+        private void MoveToTarget(Vector3 targetPos, bool silent)
+        {
+            if (enemyAI == null) return;
+
+            // Use Enemy_AI's movement system via reflection (cached)
+            if (enemyAgentField != null)
+            {
+                var agent = enemyAgentField.GetValue(enemyAI) as NavMeshAgent;
+                if (agent != null && agent.isOnNavMesh)
+                {
+                    agent.SetDestination(targetPos);
+                    
+                    // Silent movement: reduce speed to minimize footstep sounds
+                    if (silent)
+                    {
+                        agent.speed = Mathf.Min(originalAgentSpeed, 2f); // Slow, quiet movement
+                    }
+                    else
+                    {
+                        // Restore original speed from Enemy_AI
+                        agent.speed = originalAgentSpeed;
+                    }
+                }
+            }
+        }
+
+        private bool IsHunterLookingAtRake(Transform hunter)
+        {
+            if (hunter == null) return false;
+
+            // Get hunter's camera (local player only; remote players won't have Camera component)
+            var camera = hunter.GetComponentInChildren<Camera>();
+            Vector3 lookOrigin;
+            Vector3 lookForward;
+
+            if (camera != null)
+            {
+                // Local player: use camera position and forward
+                lookOrigin = camera.transform.position;
+                lookForward = camera.transform.forward;
+            }
+            else
+            {
+                // Remote player: fallback to hunter's transform (head/body forward)
+                lookOrigin = hunter.position + Vector3.up * 1.6f; // Approximate eye level
+                lookForward = hunter.forward;
+            }
+
+            Vector3 toRake = (transform.position - lookOrigin).normalized;
+            float angle = Vector3.Angle(lookForward, toRake);
+            float distance = Vector3.Distance(lookOrigin, transform.position);
+
+            return angle <= stealthLookConeAngle && distance <= stealthLookRange;
+        }
+
+        private bool WasHitFromFront()
+        {
+            // Check if we took damage recently from the front
+            if (Time.time - lastDamageTime > DamageTimeWindow) return false; // Only check recent damage
+            
+            Vector3 toRake = -lastDamageDirection.normalized;
+            Vector3 rakeForward = transform.forward;
+            
+            float angle = Vector3.Angle(rakeForward, toRake);
+            return angle < blockingFrontalAngle;
+        }
+
+        public float CalculateDamageReduction(Vector3 hitDirection, Vector3 rakeForward)
+        {
+            // hitDirection: direction FROM which the hit came (e.g., shooter to target)
+            // rakeForward: Rake's forward vector
+            
+            Vector3 toRake = -hitDirection.normalized;
+            float angle = Vector3.Angle(rakeForward, toRake);
+            
+            // Frontal: angle < 45° → 80% reduction (return 0.2f multiplier)
+            // Side/back: angle >= 45° → normal damage (return 1.0f multiplier)
+            if (angle < blockingFrontalAngle)
+            {
+                return 1f - blockingDamageReduction; // 0.2f for 80% reduction
+            }
+            return 1f;
+        }
+
+        private void TeleportBehindNearestHunter()
+        {
+            // Prefer isolated hunter for teleport (consistent with Follow/Stealth targeting)
+            Transform targetHunter = isolatedHunter ?? nearestHunter;
+            if (targetHunter == null) return;
+
+            Vector3 behindDir = -targetHunter.forward;
+            behindDir.y = 0;
+            behindDir.Normalize();
+            
+            float offset = UnityEngine.Random.Range(feignedRetreatTeleportOffsetMin, feignedRetreatTeleportOffsetMax);
+            Vector3 teleportPos = targetHunter.position + behindDir * offset;
+            
+            // Ensure position on NavMesh
+            NavMeshHit hit;
+            if (NavMesh.SamplePosition(teleportPos, out hit, NavMeshSampleRadius, NavMesh.AllAreas))
+            {
+                teleportPos = hit.position;
+            }
+
+            transform.position = teleportPos;
+            targetPosition = teleportPos; // For client interpolation
+            
+            RakeMultiplayerPlugin.Log?.LogInfo($"[AI] FeignedRetreat teleport behind hunter at {teleportPos}");
+        }
+
+        private void PlayChaseVocalization()
+        {
+            if (audioSource != null && enemyChaseVocalsField != null)
+            {
+                var clips = enemyChaseVocalsField.GetValue(enemyAI) as AudioClip[];
+                if (clips != null && clips.Length > 0)
+                {
+                    audioSource.PlayOneShot(clips[UnityEngine.Random.Range(0, clips.Length)]);
+                }
+            }
+        }
+
+        // Called by damage system when Rake takes damage
+        public void OnDamageTaken(Vector3 hitDirection, int amount, string damageType)
+        {
+            lastDamageDirection = hitDirection;
+            lastDamageTime = Time.time;
+
+            // Apply damage reduction if blocking
+            if (currentState == RakeState.Blocking && WasHitFromFront())
+            {
+                float reduction = CalculateDamageReduction(hitDirection, transform.forward);
+                // The actual damage application happens in RakeNetworkManager.ApplyDamageToEnemy
+                // This method is for AI reaction only
+                RakeMultiplayerPlugin.Log?.LogInfo($"[AI] Blocking frontal damage! Reduction: {reduction * 100}%");
+            }
+
+            // Stealth -> Chase on damage
+            if (currentState == RakeState.Stealth)
+            {
+                TransitionToState(RakeState.Chase);
+            }
+            // Follow -> Chase on damage
+            else if (currentState == RakeState.Follow)
+            {
+                TransitionToState(RakeState.Chase);
+            }
+        }
+
         private void SendRakeState()
         {
             Vector3 currentPos = transform.position;
-            byte currentState = GetCurrentState();
+            byte currentStateByte = (byte)currentState; // Use our enum directly
             float currentHealth = GetCurrentHealth();
 
             // Delta compression check
-            bool posChanged = Vector3.Distance(currentPos, lastSentPosition) > 0.05f;
-            bool stateChanged = currentState != lastSentState;
-            bool healthChanged = Math.Abs(currentHealth - lastSentHealth) > 1f;
+            bool posChanged = Vector3.Distance(currentPos, lastSentPosition) > PositionDeltaThreshold;
+            bool stateChanged = currentStateByte != lastSentState;
+            bool healthChanged = Math.Abs(currentHealth - lastSentHealth) > HealthDeltaThreshold;
 
             if (!posChanged && !stateChanged && !healthChanged) return;
 
@@ -123,7 +899,7 @@ namespace RakeMultiplayer
             {
                 Position = currentPos,
                 Rotation = transform.rotation,
-                State = currentState,
+                State = currentStateByte,
                 Health = currentHealth
             };
 
@@ -137,40 +913,41 @@ namespace RakeMultiplayer
             }
 
             lastSentPosition = currentPos;
-            lastSentState = currentState;
+            lastSentState = currentStateByte;
             lastSentHealth = currentHealth;
         }
 
-        private byte GetCurrentState()
+        private byte GetCurrentStateByte()
         {
-            if (enemyAI == null) return 0;
-
-            // Enemy_AI uses boolean flags (no single currentState field)
-            // Encode as bitmask: bit0=bDanger, bit1=bHaunt, bit2=bVisible, bit3=bPlayerHount,
-            // bit4=bKillingProccess, bit5=bPlayerKilling, bit6=bCameraBreak, bit7=bHungry
-            byte state = 0;
-            string[] flagNames = new string[] { "bDanger", "bHaunt", "bVisible", "bPlayerHount", "bKillingProccess", "bPlayerKilling", "bCameraBreak", "bHungry" };
-
-            for (int i = 0; i < flagNames.Length; i++)
-            {
-                var field = typeof(Enemy_AI).GetField(flagNames[i], System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-                if (field != null && (bool)field.GetValue(enemyAI))
-                {
-                    state |= (byte)(1 << i);
-                }
-            }
-            return state;
+            return (byte)currentState;
         }
 
         private float GetCurrentHealth()
         {
             if (enemyAI == null) return 100f;
-            var healthField = typeof(Enemy_AI).GetField("Health", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            if (healthField != null)
+            if (enemyHealthField != null)
             {
-                return Convert.ToSingle(healthField.GetValue(enemyAI));
+                return Convert.ToSingle(enemyHealthField.GetValue(enemyAI));
             }
+            RakeMultiplayerPlugin.Log?.LogWarning("[AI] Enemy_AI Health field not found via reflection - using fallback 100f");
             return 100f;
+        }
+
+        private float GetMaxHealth()
+        {
+            if (enemyAI == null) return 100f;
+            if (enemyMaxHealthField != null)
+            {
+                return Convert.ToSingle(enemyMaxHealthField.GetValue(enemyAI));
+            }
+            // Try common alternative names
+            var altField = typeof(Enemy_AI).GetField("maxHealth", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            if (altField != null)
+            {
+                return Convert.ToSingle(altField.GetValue(enemyAI));
+            }
+            RakeMultiplayerPlugin.Log?.LogWarning("[AI] Enemy_AI MaxHealth field not found via reflection - using fallback 100f");
+            return 100f; // Default fallback
         }
 
         // Client-side apply (for 3.4)
@@ -193,21 +970,59 @@ namespace RakeMultiplayer
 
         private void ApplyState(byte state)
         {
-            // Decode bitmask and set boolean flags on Enemy_AI
-            if (enemyAI != null)
+            // Update our state machine from network
+            RakeState newState = (RakeState)state;
+            bool stateChanged = currentState != newState;
+            
+            if (stateChanged)
             {
-                string[] flagNames = new string[] { "bDanger", "bHaunt", "bVisible", "bPlayerHount", "bKillingProccess", "bPlayerKilling", "bCameraBreak", "bHungry" };
-
-                for (int i = 0; i < flagNames.Length; i++)
-                {
-                    var field = typeof(Enemy_AI).GetField(flagNames[i], System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-                    if (field != null)
-                    {
-                        field.SetValue(enemyAI, (state & (1 << i)) != 0);
-                    }
-                }
+                previousState = currentState;
+                currentState = newState;
+                stateTimer = 0f;
             }
 
+            // State entry effects for clients - ONLY fire triggers on actual state transitions
+            // Track lastAppliedState to avoid re-firing triggers on repeated packets
+            if (state != lastAppliedState)
+            {
+                lastAppliedState = state;
+                
+                switch (newState)
+                {
+                    case RakeState.Stealth:
+                        if (animator != null) animator.SetBool("Crouch", true);
+                        isBlocking = false; // Explicitly clear blocking when entering Stealth
+                        break;
+                    case RakeState.Follow:
+                    case RakeState.Idle:
+                    case RakeState.Patrol:
+                    case RakeState.Chase:
+                    case RakeState.Attack:
+                    case RakeState.Search:
+                    case RakeState.Stunned:
+                    case RakeState.Dead:
+                        if (animator != null) animator.SetBool("Crouch", false);
+                        isBlocking = false; // Clear blocking for all non-Blocking states
+                        break;
+                    case RakeState.Blocking:
+                        if (animator != null) animator.SetBool("Crouch", false);
+                        isBlocking = true;
+                        if (animator != null) animator.SetTrigger("Block");
+                        break;
+                    case RakeState.FeignedRetreat:
+                        if (animator != null) animator.SetBool("Crouch", false);
+                        isBlocking = false; // Clear blocking
+                        if (animator != null) animator.SetTrigger("Flee");
+                        break;
+                }
+            }
+            else if (newState != RakeState.Blocking)
+            {
+                // Ensure isBlocking is cleared when not in Blocking state (handles packet loss/reordering)
+                isBlocking = false;
+            }
+
+            // Update animator
             if (animator != null)
             {
                 animator.SetInteger("State", state);

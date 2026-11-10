@@ -149,6 +149,18 @@ namespace RakeMultiplayer
             return false;
         }
 
+        /// <summary>
+        /// Get transforms of all remote players for AI targeting
+        /// </summary>
+        public IEnumerable<Transform> GetAllRemotePlayerTransforms()
+        {
+            foreach (var kvp in _remotePlayers)
+            {
+                if (kvp.Value != null && kvp.Value.transform != null)
+                    yield return kvp.Value.transform;
+            }
+        }
+
         public void SpawnPlayerForConnection(NetworkedPlayer playerPrefab, int connectionId)
         {
             Vector3 spawnPos = GetPlayerSpawnPoint(connectionId);
@@ -201,6 +213,25 @@ namespace RakeMultiplayer
                     }
                 }
             }
+        }
+
+        /// <summary>
+        /// Refresh player spawner state after scene load
+        /// </summary>
+        public void Refresh()
+        {
+            RakeMultiplayerPlugin.Log?.LogInfo("[PlayerSpawner] Refreshed after scene load");
+            // Clear remote players dictionary to prevent stale references
+            _remotePlayers.Clear();
+            LocalPlayer = null;
+        }
+
+        /// <summary>
+        /// Get all remote players (read-only access for iteration)
+        /// </summary>
+        public System.Collections.Generic.IEnumerable<System.Collections.Generic.KeyValuePair<int, NetworkedPlayer>> GetAllRemotePlayers()
+        {
+            return _remotePlayers;
         }
     }
 }

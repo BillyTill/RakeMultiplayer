@@ -30,6 +30,12 @@ namespace RakeMultiplayer.UI
 
         private Transform _playerListContainer;
 
+        // HUD elements (visible during gameplay)
+        private GameObject _hudPanel;
+        private Text _phaseText;
+        private Text _nightText;
+        private Text _timerText;
+
         private RakeNetworkManager _networkManager;
         private MultiplayerMenu _menu;
 
@@ -38,6 +44,7 @@ namespace RakeMultiplayer.UI
             _menu = menu;
             _networkManager = UnityEngine.Object.FindObjectOfType<RakeNetworkManager>();
             BuildUI();
+            BuildHUD();
             RakeMultiplayerPlugin.Log?.LogInfo("[UI] RuntimeUIBuilder initialized. Canvas created.");
             menu.OnUIBuilt(this);
         }
@@ -344,5 +351,53 @@ namespace RakeMultiplayer.UI
         public Transform PlayerListContainer => _playerListContainer;
 
         public Canvas Canvas => _canvas;
+
+        // HUD accessors for MultiplayerMenu to update
+        public void SetHUDVisible(bool visible)
+        {
+            if (_hudPanel != null) _hudPanel.SetActive(visible);
+        }
+
+        public void UpdatePhaseText(string text)
+        {
+            if (_phaseText != null) _phaseText.text = text;
+        }
+
+        public void UpdateNightText(string text)
+        {
+            if (_nightText != null) _nightText.text = text;
+        }
+
+        public void UpdateTimerText(string text)
+        {
+            if (_timerText != null) _timerText.text = text;
+        }
+
+        private void BuildHUD()
+        {
+            if (_canvas == null) return;
+
+            // HUD Panel - top center, always visible during gameplay
+            _hudPanel = CreatePanel(_canvas.transform, "HUDPanel", new Vector2(300, 100), new Vector2(0, -60), new Vector2(0.5f, 1f), new Vector2(0.5f, 1f));
+            _hudPanel.SetActive(false); // Hidden until session starts
+
+            var hudBg = _hudPanel.GetComponent<Image>();
+            hudBg.color = new Color(0f, 0f, 0f, 0.6f); // Semi-transparent black
+
+            // Phase indicator (Day/Night)
+            _phaseText = CreateTitle(_hudPanel.transform, "ДЕНЬ", 24, new Vector2(0, 30));
+            _phaseText.fontStyle = FontStyle.Bold;
+            _phaseText.color = Color.yellow;
+
+            // Night counter
+            _nightText = CreateTitle(_hudPanel.transform, "Ночь: 0/3", 18, new Vector2(0, 0));
+            _nightText.color = Color.white;
+
+            // Timer
+            _timerText = CreateTitle(_hudPanel.transform, "05:00", 28, new Vector2(0, -30));
+            _timerText.fontStyle = FontStyle.Bold;
+            _timerText.color = Color.white;
+            _timerText.fontSize = 28;
+        }
     }
 }

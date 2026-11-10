@@ -66,6 +66,24 @@ namespace RakeMultiplayer
                 spawnerObj.AddComponent<PlayerSpawner>();
             }
 
+            // Add DayNightManager if not exists
+            var dayNightObj = GameObject.Find("DayNightManager");
+            if (dayNightObj == null)
+            {
+                dayNightObj = new GameObject("DayNightManager");
+                UnityEngine.Object.DontDestroyOnLoad(dayNightObj);
+                dayNightObj.AddComponent<DayNightManager>();
+            }
+
+            // Add SessionManager if not exists
+            var sessionObj = GameObject.Find("SessionManager");
+            if (sessionObj == null)
+            {
+                sessionObj = new GameObject("SessionManager");
+                UnityEngine.Object.DontDestroyOnLoad(sessionObj);
+                sessionObj.AddComponent<SessionManager>();
+            }
+
             // Assign playerPrefab from the existing scene player (FPSController) so SpawnRemotePlayer works
             var spawner = PlayerSpawner.Instance;
             if (spawner != null && spawner.playerPrefab == null)
