@@ -355,4 +355,241 @@ namespace RakeMultiplayer.Networking
             VictoryType = (VictoryType)reader.ReadByte();
         }
     }
+
+    /// <summary>
+    /// Camera synchronization packet
+    /// Server -> All (full camera state sync)
+    /// </summary>
+    public class CameraSyncPacket : NetworkPacket
+    {
+        public override PacketType Type => PacketType.CameraSync;
+
+        public uint CameraId;
+        public Vector3 Position;
+        public Quaternion Rotation;
+        public bool IsActive;
+        public bool IsBroken;
+        public float BatteryLevel;
+        public int PlacedByPlayerId;
+
+        public override void Write(BinaryWriter writer)
+        {
+            writer.Write(CameraId);
+            writer.Write(Position.x);
+            writer.Write(Position.y);
+            writer.Write(Position.z);
+            writer.Write(Rotation.x);
+            writer.Write(Rotation.y);
+            writer.Write(Rotation.z);
+            writer.Write(Rotation.w);
+            writer.Write(IsActive);
+            writer.Write(IsBroken);
+            writer.Write(BatteryLevel);
+            writer.Write(PlacedByPlayerId);
+        }
+
+        public override void Read(BinaryReader reader)
+        {
+            CameraId = reader.ReadUInt32();
+            Position = new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
+            Rotation = new Quaternion(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
+            IsActive = reader.ReadBoolean();
+            IsBroken = reader.ReadBoolean();
+            BatteryLevel = reader.ReadSingle();
+            PlacedByPlayerId = reader.ReadInt32();
+        }
+    }
+
+    /// <summary>
+    /// Camera spawn notification
+    /// Server -> All (new camera placed)
+    /// </summary>
+    public class CameraSpawnPacket : NetworkPacket
+    {
+        public override PacketType Type => PacketType.CameraSpawn;
+
+        public uint CameraId;
+        public Vector3 Position;
+        public Quaternion Rotation;
+        public int PlacedByPlayerId;
+
+        public override void Write(BinaryWriter writer)
+        {
+            writer.Write(CameraId);
+            writer.Write(Position.x);
+            writer.Write(Position.y);
+            writer.Write(Position.z);
+            writer.Write(Rotation.x);
+            writer.Write(Rotation.y);
+            writer.Write(Rotation.z);
+            writer.Write(Rotation.w);
+            writer.Write(PlacedByPlayerId);
+        }
+
+        public override void Read(BinaryReader reader)
+        {
+            CameraId = reader.ReadUInt32();
+            Position = new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
+            Rotation = new Quaternion(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
+            PlacedByPlayerId = reader.ReadInt32();
+        }
+    }
+
+    /// <summary>
+    /// Camera destroy notification
+    /// Server -> All (camera removed/destroyed)
+    /// </summary>
+    public class CameraDestroyPacket : NetworkPacket
+    {
+        public override PacketType Type => PacketType.CameraDestroy;
+
+        public uint CameraId;
+
+        public override void Write(BinaryWriter writer)
+        {
+            writer.Write(CameraId);
+        }
+
+        public override void Read(BinaryReader reader)
+        {
+            CameraId = reader.ReadUInt32();
+        }
+    }
+
+    /// <summary>
+    /// Quest trigger packet (camera break, bait taken, trap triggered)
+    /// Server -> All (Rake alert, etc.)
+    /// </summary>
+    public class QuestTriggerPacket : NetworkPacket
+    {
+        public override PacketType Type => PacketType.QuestTrigger;
+
+        public byte TriggerType; // 0=CameraBreak, 1=BaitTaken, 2=TrapTriggered
+        public Vector3 Position;
+        public uint CameraId; // Optional: which camera/pig triggered
+
+        public override void Write(BinaryWriter writer)
+        {
+            writer.Write(TriggerType);
+            writer.Write(Position.x);
+            writer.Write(Position.y);
+            writer.Write(Position.z);
+            writer.Write(CameraId);
+        }
+
+        public override void Read(BinaryReader reader)
+        {
+            TriggerType = reader.ReadByte();
+            Position = new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
+            CameraId = reader.ReadUInt32();
+        }
+    }
+
+    /// <summary>
+    /// Pig AI state synchronization packet
+    /// Server -> All (pig position, state, camera attachment)
+    /// </summary>
+    public class PigStatePacket : NetworkPacket
+    {
+        public override PacketType Type => PacketType.PigState;
+
+        public uint PigId;
+        public Vector3 Position;
+        public Quaternion Rotation;
+        public byte State; // 0=Idle, 1=Patrol, 2=Escape, 3=CameraAttached
+        public float Health;
+        public uint CameraId; // Attached camera ID (0 if none)
+
+        public override void Write(BinaryWriter writer)
+        {
+            writer.Write(PigId);
+            writer.Write(Position.x);
+            writer.Write(Position.y);
+            writer.Write(Position.z);
+            writer.Write(Rotation.x);
+            writer.Write(Rotation.y);
+            writer.Write(Rotation.z);
+            writer.Write(Rotation.w);
+            writer.Write(State);
+            writer.Write(Health);
+            writer.Write(CameraId);
+        }
+
+        public override void Read(BinaryReader reader)
+        {
+            PigId = reader.ReadUInt32();
+            Position = new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
+            Rotation = new Quaternion(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
+            State = reader.ReadByte();
+            Health = reader.ReadSingle();
+            CameraId = reader.ReadUInt32();
+        }
+    }
+
+    /// <summary>
+    /// Map marker packet (cameras, traps, bait, safehouse, cave)
+    /// Server -> All (map UI sync)
+    /// </summary>
+    public class MapMarkerPacket : NetworkPacket
+    {
+        public override PacketType Type => PacketType.MapMarker;
+
+        public byte MarkerType; // 0=Camera, 1=Trap, 2=Bait, 3=Safehouse, 4=Cave
+        public Vector3 Position;
+        public uint MarkerId;
+        public bool IsActive;
+
+        public override void Write(BinaryWriter writer)
+        {
+            writer.Write(MarkerType);
+            writer.Write(Position.x);
+            writer.Write(Position.y);
+            writer.Write(Position.z);
+            writer.Write(MarkerId);
+            writer.Write(IsActive);
+        }
+
+        public override void Read(BinaryReader reader)
+        {
+            MarkerType = reader.ReadByte();
+            Position = new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
+            MarkerId = reader.ReadUInt32();
+            IsActive = reader.ReadBoolean();
+        }
+    }
+
+    /// <summary>
+    /// Trap state synchronization packet
+    /// Server -> All (trap armed/triggered state)
+    /// </summary>
+    public class TrapStatePacket : NetworkPacket
+    {
+        public override PacketType Type => PacketType.TrapState;
+
+        public uint TrapId;
+        public Vector3 Position;
+        public bool IsArmed;
+        public float TriggerRadius;
+        public bool IsTriggered;
+
+        public override void Write(BinaryWriter writer)
+        {
+            writer.Write(TrapId);
+            writer.Write(Position.x);
+            writer.Write(Position.y);
+            writer.Write(Position.z);
+            writer.Write(IsArmed);
+            writer.Write(TriggerRadius);
+            writer.Write(IsTriggered);
+        }
+
+        public override void Read(BinaryReader reader)
+        {
+            TrapId = reader.ReadUInt32();
+            Position = new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
+            IsArmed = reader.ReadBoolean();
+            TriggerRadius = reader.ReadSingle();
+            IsTriggered = reader.ReadBoolean();
+        }
+    }
 }

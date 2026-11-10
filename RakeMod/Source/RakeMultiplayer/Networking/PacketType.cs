@@ -32,5 +32,10 @@ namespace RakeMultiplayer.Networking
         ReconnectConfirm = 23,
         PhaseChange = 24,
         SessionState = 25,
+        PigState = 26,
+        MapMarker = 27,
+        TrapState = 28,
+        CameraSpawn = 29,
+        CameraDestroy = 30,
     }
 }

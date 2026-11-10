@@ -41,6 +41,13 @@ namespace RakeMultiplayer.Networking
                     PacketType.ItemDestroyed => new ItemDestroyedPacket(),
                     PacketType.PhaseChange => new PhaseChangePacket(),
                     PacketType.SessionState => new SessionStatePacket(),
+                    PacketType.CameraSync => new CameraSyncPacket(),
+                    PacketType.QuestTrigger => new QuestTriggerPacket(),
+                    PacketType.PigState => new PigStatePacket(),
+                    PacketType.MapMarker => new MapMarkerPacket(),
+                    PacketType.TrapState => new TrapStatePacket(),
+                    PacketType.CameraSpawn => new CameraSpawnPacket(),
+                    PacketType.CameraDestroy => new CameraDestroyPacket(),
                     _ => throw new InvalidOperationException($"Unknown packet type: {type} (byte value: {(byte)type})")
                 };
                 packet.Read(reader);
