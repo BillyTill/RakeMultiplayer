@@ -1,5 +1,4 @@
 using System;
-using System.IO;
 using UnityEngine;
 using RakeMultiplayer.Networking;
 
@@ -24,7 +23,7 @@ namespace RakeMultiplayer
         [SerializeField, ReadOnly] private float _batteryLevel = 100f;
         [SerializeField, ReadOnly] private bool _isActive = false;
         [SerializeField, ReadOnly] private bool _isBroken = false;
-        [SerializeField, ReadOnly] private uint _placedByPlayerId = 0;
+        [SerializeField, ReadOnly] private int _placedByPlayerId = 0; // Packets.cs uses int
 
         // Network identity reference
         private NetIdentity _netIdentity;
@@ -112,7 +111,7 @@ namespace RakeMultiplayer
                         // Trigger QuestTriggerPacket on server
                         if (RakeMultiplayerPlugin.isServer)
                         {
-                            SendQuestTrigger(QuestTriggerType.CameraBroken);
+                            SendQuestTrigger(0); // CameraBreak = 0
                         }
                     }
                 }
@@ -120,9 +119,9 @@ namespace RakeMultiplayer
         }
 
         /// <summary>
-        /// Network ID of the player who placed this camera
+        /// Network ID of the player who placed this camera (int to match Packets.cs)
         /// </summary>
-        public uint PlacedByPlayerId
+        public int PlacedByPlayerId
         {
             get => _placedByPlayerId;
             internal set => _placedByPlayerId = value;
@@ -199,7 +198,7 @@ namespace RakeMultiplayer
             {
                 if (RakeMultiplayerPlugin.isServer)
                 {
-                    SendCameraSync(CameraSyncAction.Update);
+                    SendCameraUpdate();
                 }
                 _syncTimer = 0f;
             }
@@ -209,7 +208,7 @@ namespace RakeMultiplayer
         {
             if (RakeMultiplayerPlugin.isServer && _netIdentity != null && NetIdentity.Registry.ContainsKey(_netIdentity.NetId))
             {
-                SendCameraSync(CameraSyncAction.Destroy);
+                SendCameraDestroy();
             }
         }
 
@@ -265,7 +264,7 @@ namespace RakeMultiplayer
 
             IsActive = true;
             RakeMultiplayerPlugin.Log?.LogInfo($"[NetworkedCamera] Camera {CameraId} activated by server");
-            SendCameraSync(CameraSyncAction.Update);
+            SendCameraUpdate();
         }
 
         /// <summary>
@@ -281,7 +280,7 @@ namespace RakeMultiplayer
 
             IsActive = false;
             RakeMultiplayerPlugin.Log?.LogInfo($"[NetworkedCamera] Camera {CameraId} deactivated by server");
-            SendCameraSync(CameraSyncAction.Update);
+            SendCameraUpdate();
         }
 
         /// <summary>
@@ -299,7 +298,7 @@ namespace RakeMultiplayer
 
             IsBroken = true;
             RakeMultiplayerPlugin.Log?.LogInfo($"[NetworkedCamera] Camera {CameraId} broken by player {brokenByPlayerId}");
-            SendCameraSync(CameraSyncAction.Break);
+            SendCameraBreak();
         }
 
         /// <summary>
@@ -311,13 +310,13 @@ namespace RakeMultiplayer
 
             BatteryLevel = Mathf.Min(100f, BatteryLevel + amount);
             RakeMultiplayerPlugin.Log?.LogInfo($"[NetworkedCamera] Camera {CameraId} recharged to {BatteryLevel:F1}%");
-            SendCameraSync(CameraSyncAction.Update);
+            SendCameraUpdate();
         }
 
         /// <summary>
         /// Server: set initial placement data
         /// </summary>
-        public void InitializePlacement(uint placedByPlayerId)
+        public void InitializePlacement(int placedByPlayerId)
         {
             if (!RakeMultiplayerPlugin.isServer) return;
 
@@ -327,7 +326,7 @@ namespace RakeMultiplayer
             _isBroken = false;
 
             RakeMultiplayerPlugin.Log?.LogInfo($"[NetworkedCamera] Camera {CameraId} placed by player {placedByPlayerId}");
-            SendCameraSync(CameraSyncAction.Spawn);
+            SendCameraSpawn();
         }
 
         #endregion
@@ -335,7 +334,7 @@ namespace RakeMultiplayer
         #region Client Sync Handling
 
         /// <summary>
-        /// Apply camera state from server (client-side)
+        /// Apply camera state from server (client-side) - uses Packets.cs CameraSyncPacket structure
         /// </summary>
         public void ApplyCameraSync(CameraSyncPacket packet)
         {
@@ -349,20 +348,49 @@ namespace RakeMultiplayer
 
             UpdateCameraVisuals();
 
-            // Handle action-specific logic
-            switch ((CameraSyncAction)packet.Action)
+            RakeMultiplayerPlugin.Log?.LogInfo($"[NetworkedCamera] Client received camera sync: {CameraId}, active={_isActive}, broken={_isBroken}, battery={_batteryLevel:F1}");
+        }
+
+        /// <summary>
+        /// Handle camera spawn notification (client-side)
+        /// </summary>
+        public void HandleCameraSpawn(CameraSpawnPacket packet)
+        {
+            if (RakeMultiplayerPlugin.isServer) return;
+
+            _cameraId = packet.CameraId;
+            _placedByPlayerId = packet.PlacedByPlayerId;
+            _batteryLevel = 100f;
+            _isActive = false;
+            _isBroken = false;
+
+            UpdateCameraVisuals();
+            RakeMultiplayerPlugin.Log?.LogInfo($"[NetworkedCamera] Client received camera spawn: {CameraId} placed by player {packet.PlacedByPlayerId}");
+        }
+
+        /// <summary>
+        /// Handle camera destroy notification (client-side)
+        /// </summary>
+        public void HandleCameraDestroy(CameraDestroyPacket packet)
+        {
+            if (RakeMultiplayerPlugin.isServer) return;
+
+            RakeMultiplayerPlugin.Log?.LogInfo($"[NetworkedCamera] Client received camera destroy: {packet.CameraId}");
+            // Object will be destroyed by NetIdentity cleanup
+        }
+
+        /// <summary>
+        /// Handle quest trigger events (client-side)
+        /// </summary>
+        public void HandleQuestTrigger(QuestTriggerPacket packet)
+        {
+            if (RakeMultiplayerPlugin.isServer) return;
+
+            // TriggerType: 0=CameraBreak, 1=BaitTaken, 2=TrapTriggered
+            if (packet.TriggerType == 0 && packet.CameraId == _cameraId)
             {
-                case CameraSyncAction.Spawn:
-                    RakeMultiplayerPlugin.Log?.LogInfo($"[NetworkedCamera] Client received camera spawn: {CameraId}");
-                    break;
-                case CameraSyncAction.Break:
-                    RakeMultiplayerPlugin.Log?.LogInfo($"[NetworkedCamera] Client received camera break: {CameraId}");
-                    OnCameraBroken?.Invoke();
-                    break;
-                case CameraSyncAction.Destroy:
-                    RakeMultiplayerPlugin.Log?.LogInfo($"[NetworkedCamera] Client received camera destroy: {CameraId}");
-                    // Object will be destroyed by NetIdentity cleanup
-                    break;
+                RakeMultiplayerPlugin.Log?.LogInfo($"[NetworkedCamera] Client received camera break trigger for camera {_cameraId}");
+                OnCameraBroken?.Invoke();
             }
         }
 
@@ -370,22 +398,23 @@ namespace RakeMultiplayer
 
         #region Network Sync
 
-        private void SendCameraSync(CameraSyncAction action)
+        /// <summary>
+        /// Send camera state update (periodic or on state change)
+        /// Uses Packets.cs CameraSyncPacket (no Action field)
+        /// </summary>
+        private void SendCameraUpdate()
         {
             if (!RakeMultiplayerPlugin.isConnected) return;
-            if (!RakeMultiplayerPlugin.isServer) return; // Only server sends sync
+            if (!RakeMultiplayerPlugin.isServer) return;
 
-            // Delta compression: skip if nothing significant changed (except for Spawn/Break/Destroy)
-            if (action == CameraSyncAction.Update)
+            // Delta compression: skip if nothing significant changed
+            bool batteryChanged = Mathf.Abs(_batteryLevel - _lastSentBattery) > 0.5f;
+            bool activeChanged = _isActive != _lastSentActive;
+            bool brokenChanged = _isBroken != _lastSentBroken;
+
+            if (!batteryChanged && !activeChanged && !brokenChanged)
             {
-                bool batteryChanged = Mathf.Abs(_batteryLevel - _lastSentBattery) > 0.5f;
-                bool activeChanged = _isActive != _lastSentActive;
-                bool brokenChanged = _isBroken != _lastSentBroken;
-
-                if (!batteryChanged && !activeChanged && !brokenChanged)
-                {
-                    return; // No significant change
-                }
+                return; // No significant change
             }
 
             var packet = new CameraSyncPacket
@@ -393,11 +422,10 @@ namespace RakeMultiplayer
                 CameraId = _cameraId,
                 Position = transform.position,
                 Rotation = transform.rotation,
-                BatteryLevel = _batteryLevel,
                 IsActive = _isActive,
                 IsBroken = _isBroken,
-                PlacedByPlayerId = _placedByPlayerId,
-                Action = (byte)action
+                BatteryLevel = _batteryLevel,
+                PlacedByPlayerId = _placedByPlayerId
             };
 
             var data = packet.Serialize();
@@ -409,7 +437,86 @@ namespace RakeMultiplayer
             _lastSentBroken = _isBroken;
         }
 
-        private void SendQuestTrigger(QuestTriggerType triggerType)
+        /// <summary>
+        /// Send camera spawn notification
+        /// Uses Packets.cs CameraSpawnPacket
+        /// </summary>
+        private void SendCameraSpawn()
+        {
+            if (!RakeMultiplayerPlugin.isConnected) return;
+            if (!RakeMultiplayerPlugin.isServer) return;
+
+            var packet = new CameraSpawnPacket
+            {
+                CameraId = _cameraId,
+                Position = transform.position,
+                Rotation = transform.rotation,
+                PlacedByPlayerId = _placedByPlayerId
+            };
+
+            var data = packet.Serialize();
+            RakeNetworkManager.Instance?.ServerBroadcast(data);
+
+            RakeMultiplayerPlugin.Log?.LogInfo($"[NetworkedCamera] Sent CameraSpawn: {CameraId}");
+        }
+
+        /// <summary>
+        /// Send camera break notification (and quest trigger)
+        /// Uses Packets.cs CameraSyncPacket with IsBroken=true, and QuestTriggerPacket
+        /// </summary>
+        private void SendCameraBreak()
+        {
+            if (!RakeMultiplayerPlugin.isConnected) return;
+            if (!RakeMultiplayerPlugin.isServer) return;
+
+            // Send updated camera state with IsBroken=true
+            var syncPacket = new CameraSyncPacket
+            {
+                CameraId = _cameraId,
+                Position = transform.position,
+                Rotation = transform.rotation,
+                IsActive = _isActive,
+                IsBroken = _isBroken,
+                BatteryLevel = _batteryLevel,
+                PlacedByPlayerId = _placedByPlayerId
+            };
+
+            var data = syncPacket.Serialize();
+            RakeNetworkManager.Instance?.ServerBroadcast(data);
+
+            // Update last sent values
+            _lastSentBattery = _batteryLevel;
+            _lastSentActive = _isActive;
+            _lastSentBroken = _isBroken;
+
+            RakeMultiplayerPlugin.Log?.LogInfo($"[NetworkedCamera] Sent CameraSync (Break): {CameraId}");
+        }
+
+        /// <summary>
+        /// Send camera destroy notification
+        /// Uses Packets.cs CameraDestroyPacket
+        /// </summary>
+        private void SendCameraDestroy()
+        {
+            if (!RakeMultiplayerPlugin.isConnected) return;
+            if (!RakeMultiplayerPlugin.isServer) return;
+
+            var packet = new CameraDestroyPacket
+            {
+                CameraId = _cameraId
+            };
+
+            var data = packet.Serialize();
+            RakeNetworkManager.Instance?.ServerBroadcast(data);
+
+            RakeMultiplayerPlugin.Log?.LogInfo($"[NetworkedCamera] Sent CameraDestroy: {CameraId}");
+        }
+
+        /// <summary>
+        /// Send quest trigger packet (camera break, bait taken, trap triggered)
+        /// Uses Packets.cs QuestTriggerPacket (TriggerType byte, Position, CameraId)
+        /// </summary>
+        private void SendQuestTrigger(byte triggerType)
         {
             if (!RakeMultiplayerPlugin.isConnected) return;
             if (!RakeMultiplayerPlugin.isServer) return;
@@ -417,16 +524,14 @@ namespace RakeMultiplayer
             var packet = new QuestTriggerPacket
             {
                 TriggerType = triggerType,
-                RelatedNetId = _cameraId,
-                TriggeredByPlayerId = _placedByPlayerId,
                 Position = transform.position,
-                ExtraData = $"{{\"cameraId\":{_cameraId}}}"
+                CameraId = _cameraId
             };
 
             var data = packet.Serialize();
             RakeNetworkManager.Instance?.ServerBroadcast(data);
 
-            RakeMultiplayerPlugin.Log?.LogInfo($"[NetworkedCamera] Sent QuestTrigger: {triggerType} for camera {_cameraId}");
+            RakeMultiplayerPlugin.Log?.LogInfo($"[NetworkedCamera] Sent QuestTrigger: type={triggerType} for camera {_cameraId}");
         }
 
         #endregion
@@ -477,7 +582,7 @@ namespace RakeMultiplayer
     }
 
     /// <summary>
-    /// Camera sync action types
+    /// Camera sync action types (local enum for internal logic only, not serialized)
     /// </summary>
     public enum CameraSyncAction : byte
     {
@@ -485,100 +590,6 @@ namespace RakeMultiplayer
         Update = 1,
         Destroy = 2,
         Break = 3
-    }
-
-    /// <summary>
-    /// Camera synchronization packet (inline - to be moved to Packets.cs)
-    /// Server -> All (server-authoritative camera state sync)
-    /// </summary>
-    public class CameraSyncPacket : NetworkPacket
-    {
-        public override PacketType Type => PacketType.CameraSync;
-
-        public uint CameraId;
-        public Vector3 Position;
-        public Quaternion Rotation;
-        public float BatteryLevel; // 0-100%
-        public bool IsActive;
-        public bool IsBroken;
-        public uint PlacedByPlayerId;
-        public byte Action; // CameraSyncAction enum
-
-        public override void Write(BinaryWriter writer)
-        {
-            writer.Write(CameraId);
-            writer.Write(Position.x);
-            writer.Write(Position.y);
-            writer.Write(Position.z);
-            writer.Write(Rotation.x);
-            writer.Write(Rotation.y);
-            writer.Write(Rotation.z);
-            writer.Write(Rotation.w);
-            writer.Write(BatteryLevel);
-            writer.Write(IsActive);
-            writer.Write(IsBroken);
-            writer.Write(PlacedByPlayerId);
-            writer.Write(Action);
-        }
-
-        public override void Read(BinaryReader reader)
-        {
-            CameraId = reader.ReadUInt32();
-            Position = new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
-            Rotation = new Quaternion(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
-            BatteryLevel = reader.ReadSingle();
-            IsActive = reader.ReadBoolean();
-            IsBroken = reader.ReadBoolean();
-            PlacedByPlayerId = reader.ReadUInt32();
-            Action = reader.ReadByte();
-        }
-    }
-
-    /// <summary>
-    /// Quest trigger types (inline - to be moved to Packets.cs)
-    /// </summary>
-    public enum QuestTriggerType : byte
-    {
-        CameraBroken = 0,
-        CameraPlaced = 1,
-        TrapTriggered = 2,
-        BaitPlaced = 3,
-        ObjectiveComplete = 4
-    }
-
-    /// <summary>
-    /// Quest trigger packet for game events (inline - to be moved to Packets.cs)
-    /// Client -> Server (trigger event), Server -> All (broadcast event)
-    /// </summary>
-    public class QuestTriggerPacket : NetworkPacket
-    {
-        public override PacketType Type => PacketType.QuestTrigger;
-
-        public QuestTriggerType TriggerType;
-        public uint RelatedNetId; // CameraId, TrapId, etc.
-        public uint TriggeredByPlayerId;
-        public Vector3 Position;
-        public string ExtraData; // JSON or custom data
-
-        public override void Write(BinaryWriter writer)
-        {
-            writer.Write((byte)TriggerType);
-            writer.Write(RelatedNetId);
-            writer.Write(TriggeredByPlayerId);
-            writer.Write(Position.x);
-            writer.Write(Position.y);
-            writer.Write(Position.z);
-            writer.Write(ExtraData ?? string.Empty);
-        }
-
-        public override void Read(BinaryReader reader)
-        {
-            TriggerType = (QuestTriggerType)reader.ReadByte();
-            RelatedNetId = reader.ReadUInt32();
-            TriggeredByPlayerId = reader.ReadUInt32();
-            Position = new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
-            ExtraData = reader.ReadString();
-        }
     }
 
     /// <summary>
