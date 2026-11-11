@@ -498,4 +498,114 @@ namespace RakeMultiplayer.Patches
                 }
             }
         }
+    }
+    // === Stage 3.8: Bait and animal trap synchronization ===
+
+    /// <summary>
+    /// Bait is an animal attractor, so it must exist on the server.
+    /// Clients forward the placement position instead of registering it locally.
+    /// </summary>
+    [HarmonyPatch(typeof(AnimalsManager))]
+    [HarmonyPatch("AddFoodPoint")]
+    public class AnimalsManagerAddFoodPointPatch
+    {
+        [HarmonyPrefix]
+        static bool Prefix(AnimalsManager __instance, Transform point)
+        {
+            if (!RakeMultiplayerPlugin.Enabled.Value) return true;
+            if (point == null) return true;
+            if (RakeMultiplayerPlugin.isServer) return true; // server owns the AI
+
+            var marker = new RakeMultiplayer.Networking.MapMarkerPacket
+            {
+                MarkerType = 2, // Bait
+                Position = point.position,
+                MarkerId = 0,
+                IsActive = true
+            };
+            RakeNetworkManager.Instance?.ClientSend(marker.Serialize());
+            RakeMultiplayerPlugin.Log?.LogInfo($"[3.8] Client sent bait placement at {point.position}");
+
+            // Do not register locally - animal AI is server-authoritative
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Notify clients when the server closes an animal cage so the trap event is visible everywhere.
+    /// </summary>
+    [HarmonyPatch(typeof(AnimalCage_obj))]
+    [HarmonyPatch("CloseCage")]
+    public class AnimalCageClosePatch
+    {
+        [HarmonyPostfix]
+        static void Postfix(AnimalCage_obj __instance)
+        {
+            if (!RakeMultiplayerPlugin.Enabled.Value) return;
+            if (!RakeMultiplayerPlugin.isServer) return;
+            if (__instance == null) return;
+
+            var packet = new RakeMultiplayer.Networking.QuestTriggerPacket
+            {
+                TriggerType = 2, // TrapTriggered
+                Position = __instance.transform.position,
+                CameraId = 0
+            };
+            RakeNetworkManager.Instance?.ServerBroadcast(packet.Serialize());
+            RakeMultiplayerPlugin.Log?.LogInfo($"[3.8] Animal cage closed at {__instance.transform.position}");
+        }
+    }
+    // === Stage 3.9: Pig-camera attachment ===
+
+    /// <summary>
+    /// Pig cameras count toward the same 5-camera limit and are synced through
+    /// NetworkedPig (PigStatePacket.CameraId). The high bit flags a pig camera ID.
+    /// </summary>
+    [HarmonyPatch(typeof(AnimalRecordCamera_obj))]
+    [HarmonyPatch("SetupCamera")]
+    public class AnimalRecordCameraSetupPatch
+    {
+        [HarmonyPrefix]
+        static bool Prefix(AnimalRecordCamera_obj __instance)
+        {
+            if (!RakeMultiplayerPlugin.Enabled.Value) return true;
+            if (RakeMultiplayerPlugin.IsApplyingNetworkCameraState) return true;
+
+            var pig = __instance.GetComponentInParent<NetworkedPig>();
+            uint pigId = pig != null ? pig.PigId : (uint)(__instance.GetInstanceID() & 0x7FFFFFFF);
+            uint cameraId = 0x80000000u | pigId;
+
+            if (RakeMultiplayerPlugin.isServer)
+            {
+                if (!NetworkedCamera.TryReserveExternalCamera(cameraId))
+                {
+                    try { InformationUI.instance?.DrawHint($"You cannot setup no more {NetworkedCamera.MaxCameras} cameras"); }
+                    catch { /* InformationUI may be absent */ }
+                    return false;
+                }
+
+                if (pig != null)
+                {
+                    pig.SetAttachedCamera(cameraId);
+                    pig.ForceSendState();
+                }
+
+                // Let the original method enable the collar camera and destroy the pickup object
+                return true;
+            }
+
+            // Client: request authorization, then run the local visual logic
+            var request = new RakeMultiplayer.Networking.CameraSetupRequestPacket
+            {
+                CameraId = cameraId,
+                PlayerId = PlayerSpawner.Instance?.LocalPlayer?.PlayerId ?? 1,
+                IsSetup = true,
+                IsResult = false,
+                Approved = false,
+                Reason = string.Empty
+            };
+            RakeNetworkManager.Instance?.ClientSend(request.Serialize());
+            RakeMultiplayerPlugin.Log?.LogInfo($"[3.9] Client requested pig-camera setup (camera {cameraId})");
+            return true;
+        }
     }}

@@ -196,11 +196,44 @@ namespace RakeMultiplayer
         }
 
         /// <summary>
+        /// Cameras that live outside the NetworkedCamera registry (e.g. a camera
+        /// mounted on a trapped pig). They still consume a slot in the 5-camera limit.
+        /// </summary>
+        private static readonly System.Collections.Generic.HashSet<uint> _externalCameras =
+            new System.Collections.Generic.HashSet<uint>();
+
+        /// <summary>Number of external (pig) cameras currently deployed.</summary>
+        public static int GetExternalCameraCount() => _externalCameras.Count;
+
+        /// <summary>Deployed cameras across both registries.</summary>
+        public static int GetTotalUsableCameraCount() => GetUsableCameraCount() + _externalCameras.Count;
+
+        /// <summary>
+        /// Reserve a quota slot for a non-registry camera (pig camera).
+        /// Idempotent for the same ID.
+        /// </summary>
+        public static bool TryReserveExternalCamera(uint cameraId)
+        {
+            if (cameraId == 0) return false;
+            if (_externalCameras.Contains(cameraId)) return true;
+            if (GetTotalUsableCameraCount() >= MaxCameras) return false;
+            _externalCameras.Add(cameraId);
+            return true;
+        }
+
+        /// <summary>Release an external camera slot (pig died / camera removed).</summary>
+        public static void ReleaseExternalCamera(uint cameraId)
+        {
+            if (cameraId != 0) _externalCameras.Remove(cameraId);
+        }
+
+        /// <summary>
         /// Server-authoritative quota check: may another camera be deployed?
+        /// Includes pig cameras reserved via <see cref="TryReserveExternalCamera"/>.
         /// </summary>
         public static bool CanPlaceCamera()
         {
-            return GetUsableCameraCount() < MaxCameras;
+            return GetTotalUsableCameraCount() < MaxCameras;
         }
 
         /// <summary>

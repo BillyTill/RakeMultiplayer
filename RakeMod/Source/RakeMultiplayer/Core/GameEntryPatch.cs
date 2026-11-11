@@ -111,6 +111,9 @@ namespace RakeMultiplayer
 
                 // Register networked cameras with deterministic IDs (Stage 3.4)
                 RakeNetworkManager.Instance.RegisterCameras();
+
+                // Register networked animals with deterministic IDs (Stage 3.8)
+                RakeNetworkManager.Instance.RegisterAnimals();
             }
 
             // If host, update and broadcast host position now that local player is initialized

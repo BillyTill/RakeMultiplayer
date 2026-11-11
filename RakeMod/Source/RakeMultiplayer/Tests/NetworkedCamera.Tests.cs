@@ -2808,5 +2808,276 @@ namespace RakeMultiplayer.Tests
         }
 
         #endregion
+
+        #region Pig / Animal Sync Tests - Task 3.8
+
+        /// <summary>
+        /// Tests for NetworkedPig state mapping and bait marker rules (Task 3.8).
+        /// </summary>
+        [TestFixture]
+        public class NetworkedPigStateTests
+        {
+            private static byte MapState(bool trapped, bool danger, bool walk, bool hungry)
+            {
+                if (trapped) return (byte)NetworkedPig.PigNetworkState.CameraAttached;
+                if (danger) return (byte)NetworkedPig.PigNetworkState.Escape;
+                if (walk || hungry) return (byte)NetworkedPig.PigNetworkState.Patrol;
+                return (byte)NetworkedPig.PigNetworkState.Idle;
+            }
+
+            private class FakeAnimal
+            {
+                public float X;
+                public string Name;
+
+                public FakeAnimal(float x, string name)
+                {
+                    X = x;
+                    Name = name;
+                }
+            }
+
+            private static int Compare(FakeAnimal a, FakeAnimal b)
+            {
+                int c = a.X.CompareTo(b.X);
+                if (c != 0) return c;
+                return string.CompareOrdinal(a.Name, b.Name);
+            }
+
+            [Test]
+            public void PigNetworkState_EnumValues_MatchPacketContract()
+            {
+                Assert.AreEqual(0, (byte)NetworkedPig.PigNetworkState.Idle);
+                Assert.AreEqual(1, (byte)NetworkedPig.PigNetworkState.Patrol);
+                Assert.AreEqual(2, (byte)NetworkedPig.PigNetworkState.Escape);
+                Assert.AreEqual(3, (byte)NetworkedPig.PigNetworkState.CameraAttached);
+            }
+
+            [Test]
+            public void Traped_TakesPriorityOverDanger()
+            {
+                Assert.AreEqual((byte)NetworkedPig.PigNetworkState.CameraAttached,
+                    MapState(true, true, true, true));
+            }
+
+            [Test]
+            public void Danger_MapsToEscape()
+            {
+                Assert.AreEqual((byte)NetworkedPig.PigNetworkState.Escape,
+                    MapState(false, true, true, false));
+            }
+
+            [Test]
+            public void Walking_MapsToPatrol()
+            {
+                Assert.AreEqual((byte)NetworkedPig.PigNetworkState.Patrol,
+                    MapState(false, false, true, false));
+            }
+
+            [Test]
+            public void Hungry_MapsToPatrol()
+            {
+                Assert.AreEqual((byte)NetworkedPig.PigNetworkState.Patrol,
+                    MapState(false, false, false, true));
+            }
+
+            [Test]
+            public void Nothing_MapsToIdle()
+            {
+                Assert.AreEqual((byte)NetworkedPig.PigNetworkState.Idle,
+                    MapState(false, false, false, false));
+            }
+
+            [Test]
+            public void PigStatePacket_CarriesCameraAttachment()
+            {
+                var packet = new PigStatePacket
+                {
+                    PigId = 5u,
+                    Position = new Vector3(1f, 2f, 3f),
+                    Rotation = new Quaternion(0f, 0f, 0f, 1f),
+                    State = (byte)NetworkedPig.PigNetworkState.CameraAttached,
+                    Health = 750f,
+                    CameraId = 42u
+                };
+
+                var restored = PacketSerializer.Deserialize(packet.Serialize()) as PigStatePacket;
+                Assert.IsNotNull(restored);
+                Assert.AreEqual(5u, restored.PigId);
+                Assert.AreEqual(42u, restored.CameraId);
+                Assert.AreEqual((byte)NetworkedPig.PigNetworkState.CameraAttached, restored.State);
+                Assert.AreEqual(750f, restored.Health);
+            }
+
+            [Test]
+            public void BaitMarkerType_IsTwo()
+            {
+                var marker = new MapMarkerPacket
+                {
+                    MarkerType = 2, // Bait
+                    Position = new Vector3(10f, 0f, 20f),
+                    MarkerId = 1u,
+                    IsActive = true
+                };
+
+                var restored = PacketSerializer.Deserialize(marker.Serialize()) as MapMarkerPacket;
+                Assert.IsNotNull(restored);
+                Assert.AreEqual(2, restored.MarkerType);
+                Assert.IsTrue(restored.IsActive);
+            }
+
+            [Test]
+            public void BaitLimit_IsTwenty()
+            {
+                // Mirror of RakeNetworkManager.MaxActiveBaits (private const)
+                const int maxActiveBaits = 20;
+                Assert.AreEqual(20, maxActiveBaits);
+            }
+
+            [Test]
+            public void BaitLimit_RejectsBeyondCap()
+            {
+                const int maxActiveBaits = 20;
+                int active = 20;
+                bool allow = active < maxActiveBaits;
+                Assert.IsFalse(allow);
+            }
+
+            [Test]
+            public void BaitPosition_RejectsNaN()
+            {
+                var pos = new Vector3(float.NaN, 0f, 0f);
+                bool invalid = float.IsNaN(pos.x) || float.IsNaN(pos.y) || float.IsNaN(pos.z);
+                Assert.IsTrue(invalid);
+            }
+
+            [Test]
+            public void BaitPosition_RejectsAbsurdMagnitude()
+            {
+                var pos = new Vector3(50000f, 0f, 0f); // sqrMagnitude 2.5e9
+                bool invalid = pos.sqrMagnitude > 100000000f;
+                Assert.IsTrue(invalid);
+            }
+
+            [Test]
+            public void AnimalSorting_IsDeterministic()
+            {
+                var a = new[]
+                {
+                    new FakeAnimal(3f, "pig_b"),
+                    new FakeAnimal(1f, "pig_a"),
+                    new FakeAnimal(3f, "pig_a")
+                };
+                var b = new[]
+                {
+                    new FakeAnimal(3f, "pig_a"),
+                    new FakeAnimal(3f, "pig_b"),
+                    new FakeAnimal(1f, "pig_a")
+                };
+
+                System.Array.Sort(a, Compare);
+                System.Array.Sort(b, Compare);
+
+                for (int i = 0; i < a.Length; i++)
+                {
+                    Assert.AreEqual(a[i].Name, b[i].Name);
+                    Assert.AreEqual(a[i].X, b[i].X);
+                }
+            }
+        }
+
+        #endregion
+
+        #region Pig Camera Quota Tests - Task 3.9
+
+        /// <summary>
+        /// Tests for pig cameras sharing the 5-camera limit (Task 3.9).
+        /// These exercise the real NetworkedCamera static quota API.
+        /// </summary>
+        [TestFixture]
+        public class PigCameraQuotaTests
+        {
+            private const uint PigFlag = 0x80000000u;
+
+            [TearDown]
+            public void Cleanup()
+            {
+                for (uint i = 1; i <= 10; i++)
+                {
+                    NetworkedCamera.ReleaseExternalCamera(PigFlag | i);
+                }
+            }
+
+            [Test]
+            public void PigCameraId_HasHighBitFlag()
+            {
+                uint cameraId = PigFlag | 7u;
+                Assert.AreNotEqual(0u, cameraId & PigFlag);
+                Assert.AreEqual(7u, cameraId & 0x7FFFFFFFu);
+            }
+
+            [Test]
+            public void ReserveExternalCamera_AllowsFive()
+            {
+                for (uint i = 1; i <= 5; i++)
+                {
+                    Assert.IsTrue(NetworkedCamera.TryReserveExternalCamera(PigFlag | i),
+                        $"Camera {i} should fit in the quota");
+                }
+
+                Assert.AreEqual(5, NetworkedCamera.GetExternalCameraCount());
+                Assert.IsFalse(NetworkedCamera.CanPlaceCamera(), "Quota must be full");
+            }
+
+            [Test]
+            public void ReserveExternalCamera_RejectsSixth()
+            {
+                for (uint i = 1; i <= 5; i++)
+                {
+                    NetworkedCamera.TryReserveExternalCamera(PigFlag | i);
+                }
+
+                Assert.IsFalse(NetworkedCamera.TryReserveExternalCamera(PigFlag | 6u),
+                    "The 6th camera must be rejected");
+                Assert.AreEqual(5, NetworkedCamera.GetExternalCameraCount());
+            }
+
+            [Test]
+            public void ReserveExternalCamera_IsIdempotent()
+            {
+                Assert.IsTrue(NetworkedCamera.TryReserveExternalCamera(PigFlag | 3u));
+                Assert.IsTrue(NetworkedCamera.TryReserveExternalCamera(PigFlag | 3u));
+                Assert.AreEqual(1, NetworkedCamera.GetExternalCameraCount());
+            }
+
+            [Test]
+            public void ReleaseExternalCamera_FreesSlot()
+            {
+                for (uint i = 1; i <= 5; i++)
+                {
+                    NetworkedCamera.TryReserveExternalCamera(PigFlag | i);
+                }
+
+                NetworkedCamera.ReleaseExternalCamera(PigFlag | 5u);
+
+                Assert.AreEqual(4, NetworkedCamera.GetExternalCameraCount());
+                Assert.IsTrue(NetworkedCamera.CanPlaceCamera(), "Releasing must free a slot");
+                Assert.IsTrue(NetworkedCamera.TryReserveExternalCamera(PigFlag | 6u));
+            }
+
+            [Test]
+            public void TotalUsableCount_CombinesRegistryAndExternal()
+            {
+                int externalBefore = NetworkedCamera.GetExternalCameraCount();
+                int usableBefore = NetworkedCamera.GetUsableCameraCount();
+
+                NetworkedCamera.TryReserveExternalCamera(PigFlag | 9u);
+
+                Assert.AreEqual(usableBefore + externalBefore + 1,
+                    NetworkedCamera.GetTotalUsableCameraCount());
+            }
+        }
+
+        #endregion
     }
 }

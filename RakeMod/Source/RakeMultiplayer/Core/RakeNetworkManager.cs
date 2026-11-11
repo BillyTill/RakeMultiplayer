@@ -25,6 +25,11 @@ namespace RakeMultiplayer
         /// </summary>
         public static event Action<int, string> OnCameraSetupRejected;
 
+        /// <summary>
+        /// Fired when a map marker (bait, trap, camera, ...) is received/updated.
+        /// </summary>
+        public static event Action<MapMarkerPacket> OnMapMarkerReceived;
+
         [Header("Player Prefabs")]
         public GameObject playerPrefab;
 
@@ -62,6 +67,14 @@ namespace RakeMultiplayer
 
         // Camera registry tracking (deterministic IDs assigned by RegisterCameras)
         private int _nextCameraNetworkId = 1;
+
+        // Map markers (bait/trap/camera...) received from the server, for MapUI
+        private readonly Dictionary<uint, MapMarkerPacket> _mapMarkers = new Dictionary<uint, MapMarkerPacket>();
+        private readonly List<Transform> _activeBaitTransforms = new List<Transform>();
+        private int _nextMarkerId = 1;
+
+        /// <summary>Map markers received from the server (MarkerId -> packet).</summary>
+        public Dictionary<uint, MapMarkerPacket> GetMapMarkers() => _mapMarkers;
         // Reverse lookup: Item -> assigned network ID (for consistent ID retrieval)
         private Dictionary<Item, int> _itemToNetworkId = new Dictionary<Item, int>();
         private int _nextItemNetworkId = 1;
@@ -402,6 +415,9 @@ namespace RakeMultiplayer
                     case PacketType.CameraSetupRequest:
                         HandleServerCameraSetupRequest(connectionId, (CameraSetupRequestPacket)packet, data);
                         break;
+                    case PacketType.MapMarker:
+                        HandleServerMapMarker(connectionId, (MapMarkerPacket)packet, data);
+                        break;
                     default:
                         RakeMultiplayerPlugin.Log?.LogWarning($"[Net] Server: unexpected {packet.Type} from C{connectionId}");
                         break;
@@ -741,6 +757,13 @@ namespace RakeMultiplayer
                 return;
             }
 
+            // Pig cameras are flagged with the high bit (0x80000000 | pigId)
+            if ((packet.CameraId & 0x80000000u) != 0)
+            {
+                HandleServerPigCameraRequest(connectionId, packet);
+                return;
+            }
+
             if (!NetworkedCamera.TryGetCamera(packet.CameraId, out var camera) || camera == null)
             {
                 RakeMultiplayerPlugin.Log?.LogWarning($"[3.4] Server: camera {packet.CameraId} not found for setup request");
@@ -760,6 +783,43 @@ namespace RakeMultiplayer
             }
 
             SendCameraSetupResult(connectionId, packet, approved, reason);
+        }
+
+        private void HandleServerPigCameraRequest(int connectionId, CameraSetupRequestPacket packet)
+        {
+            uint pigId = packet.CameraId & 0x7FFFFFFFu;
+            if (!NetworkedPig.TryGetPig(pigId, out var pig) || pig == null)
+            {
+                RakeMultiplayerPlugin.Log?.LogWarning($"[3.9] Pig {pigId} not found for pig-camera request");
+                SendCameraSetupResult(connectionId, packet, false, "NotFound");
+                return;
+            }
+
+            if (packet.IsSetup)
+            {
+                bool ok = NetworkedCamera.TryReserveExternalCamera(packet.CameraId);
+                if (ok)
+                {
+                    pig.SetAttachedCamera(packet.CameraId);
+                    pig.ForceSendState();
+                    RakeMultiplayerPlugin.Log?.LogInfo(
+                        $"[3.9] Pig camera {packet.CameraId} attached to pig {pigId} " +
+                        $"({NetworkedCamera.GetTotalUsableCameraCount()}/{NetworkedCamera.MaxCameras})");
+                }
+                else
+                {
+                    RakeMultiplayerPlugin.Log?.LogWarning(
+                        $"[3.9] Pig-camera setup rejected: limit {NetworkedCamera.MaxCameras} reached");
+                }
+                SendCameraSetupResult(connectionId, packet, ok, ok ? string.Empty : "CameraLimit");
+            }
+            else
+            {
+                NetworkedCamera.ReleaseExternalCamera(packet.CameraId);
+                pig.SetAttachedCamera(0);
+                pig.ForceSendState();
+                SendCameraSetupResult(connectionId, packet, true, string.Empty);
+            }
         }
 
         private void SendCameraSetupResult(int connectionId, CameraSetupRequestPacket request, bool approved, string reason)
@@ -816,6 +876,103 @@ namespace RakeMultiplayer
 
             _nextCameraNetworkId = Math.Max(_nextCameraNetworkId, cameras.Length + 1);
             RakeMultiplayerPlugin.Log?.LogInfo($"[3.4] Registered {cameras.Length} networked cameras with deterministic IDs");
+        }
+
+        // === Stage 3.8: Bait / animals ===
+        private const int MaxActiveBaits = 20;
+
+        private void HandleServerMapMarker(int connectionId, MapMarkerPacket packet, byte[] rawData)
+        {
+            // Clients may only place bait markers; camera/trap/etc. markers are server-owned.
+            if (packet.MarkerType != 2) // 2 = Bait
+            {
+                RakeMultiplayerPlugin.Log?.LogWarning(
+                    $"[3.8] Server: ignoring client MapMarker type {packet.MarkerType} from C{connectionId}");
+                return;
+            }
+
+            PruneDestroyedBaits();
+            if (_activeBaitTransforms.Count >= MaxActiveBaits)
+            {
+                RakeMultiplayerPlugin.Log?.LogWarning($"[3.8] Bait limit ({MaxActiveBaits}) reached, ignoring placement");
+                return;
+            }
+
+            // Sanity check position (avoid absurd coordinates from a spoofed client)
+            if (float.IsNaN(packet.Position.x) || float.IsNaN(packet.Position.y) || float.IsNaN(packet.Position.z) ||
+                packet.Position.sqrMagnitude > 100000000f)
+            {
+                RakeMultiplayerPlugin.Log?.LogWarning($"[3.8] Rejected bait placement with invalid position {packet.Position}");
+                return;
+            }
+
+            var baitGo = new GameObject($"NetworkedBait_{_nextMarkerId}");
+            baitGo.transform.position = packet.Position;
+            var foodPoint = baitGo.AddComponent<FoodPoint>();
+            foodPoint.count = 3;
+
+            _activeBaitTransforms.Add(baitGo.transform);
+
+            if (AnimalsManager.instance != null)
+            {
+                AnimalsManager.instance.AddFoodPoint(baitGo.transform);
+                RakeMultiplayerPlugin.Log?.LogInfo($"[3.8] Bait placed at {packet.Position}, attracting nearest animal");
+            }
+            else
+            {
+                RakeMultiplayerPlugin.Log?.LogWarning("[3.8] AnimalsManager not found - bait will not attract animals");
+            }
+
+            // Broadcast so every client can show the bait on the map
+            packet.MarkerId = (uint)_nextMarkerId++;
+            ServerBroadcast(packet.Serialize());
+            _mapMarkers[packet.MarkerId] = packet;
+            OnMapMarkerReceived?.Invoke(packet);
+        }
+
+        private void PruneDestroyedBaits()
+        {
+            for (int i = _activeBaitTransforms.Count - 1; i >= 0; i--)
+            {
+                if (_activeBaitTransforms[i] == null) _activeBaitTransforms.RemoveAt(i);
+            }
+        }
+
+        /// <summary>
+        /// Attach NetworkedPig to every animal in the scene and assign deterministic IDs.
+        /// Must run on BOTH host and client.
+        /// </summary>
+        public void RegisterAnimals()
+        {
+            var animals = UnityEngine.Object.FindObjectsOfType<Animal_AI>();
+            if (animals == null || animals.Length == 0)
+            {
+                RakeMultiplayerPlugin.Log?.LogInfo("[3.8] No Animal_AI found in scene");
+                return;
+            }
+
+            System.Array.Sort(animals, (a, b) =>
+            {
+                if (a == null || b == null) return 0;
+                var pa = a.transform.position;
+                var pb = b.transform.position;
+                int cmp = pa.x.CompareTo(pb.x); if (cmp != 0) return cmp;
+                cmp = pa.y.CompareTo(pb.y); if (cmp != 0) return cmp;
+                cmp = pa.z.CompareTo(pb.z); if (cmp != 0) return cmp;
+                return string.CompareOrdinal(a.gameObject.name, b.gameObject.name);
+            });
+
+            for (int i = 0; i < animals.Length; i++)
+            {
+                var animal = animals[i];
+                if (animal == null) continue;
+
+                var pig = animal.GetComponent<NetworkedPig>();
+                if (pig == null) pig = animal.gameObject.AddComponent<NetworkedPig>();
+                pig.AssignPigId((uint)(i + 1));
+            }
+
+            RakeMultiplayerPlugin.Log?.LogInfo($"[3.8] Registered {animals.Length} networked animals");
         }
 
         private void HandleServerStartGame(int connectionId, StartGamePacket packet, byte[] rawData)
@@ -897,6 +1054,12 @@ namespace RakeMultiplayer
                         break;
                     case PacketType.CameraSetupRequest:
                         HandleClientCameraSetupResult((CameraSetupRequestPacket)packet);
+                        break;
+                    case PacketType.PigState:
+                        HandleClientPigState((PigStatePacket)packet);
+                        break;
+                    case PacketType.MapMarker:
+                        HandleClientMapMarker((MapMarkerPacket)packet);
                         break;
                     case PacketType.QuestTrigger:
                         HandleClientQuestTrigger((QuestTriggerPacket)packet);
@@ -1151,6 +1314,20 @@ namespace RakeMultiplayer
             }
 
             OnCameraSetupRejected?.Invoke(packet.PlayerId, packet.Reason);
+        }
+
+        private void HandleClientPigState(PigStatePacket packet)
+        {
+            if (NetworkedPig.TryGetPig(packet.PigId, out var pig) && pig != null)
+            {
+                pig.ApplyState(packet);
+            }
+        }
+
+        private void HandleClientMapMarker(MapMarkerPacket packet)
+        {
+            _mapMarkers[packet.MarkerId] = packet;
+            OnMapMarkerReceived?.Invoke(packet);
         }
 
         private void HandleClientPhaseChange(PhaseChangePacket packet)
