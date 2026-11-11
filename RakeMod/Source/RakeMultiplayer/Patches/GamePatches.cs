@@ -56,7 +56,11 @@ namespace RakeMultiplayer.Patches
     }
 
     /// <summary>
-    /// Patch camera system for network synchronization
+    /// Patch the camera monitor for network synchronization (Task 3.6).
+    /// Cameras are scene objects replicated on every client, so view switching is
+    /// local; what must be kept in sync is the monitor list itself. When a camera
+    /// the player is watching breaks or is picked up, switch to another camera or
+    /// leave the monitor instead of rendering a dead feed.
     /// </summary>
     [HarmonyPatch(typeof(CameraComputer))]
     [HarmonyPatch("Update")]
@@ -65,10 +69,32 @@ namespace RakeMultiplayer.Patches
         static void Postfix(CameraComputer __instance)
         {
             if (!RakeMultiplayerPlugin.Enabled.Value) return;
-            
-            if (RakeMultiplayerPlugin.isServer)
+            if (__instance == null || !__instance.bWatching) return;
+
+            var manager = CameraManager.instance;
+            if (manager == null) return;
+
+            // Drop references to cameras that were picked up (SetUnsetupState removed them),
+            // then verify the currently watched camera is still usable.
+            var current = manager.currentCamera;
+            if (current == null)
             {
-                // Camera sync handled by NetworkedCameraSystem
+                if (manager.GetCameraCount() > 0) manager.ActiveCamera(0);
+                else __instance.Exit();
+                return;
+            }
+
+            var recordCamera = current.parent != null ? current.parent.GetComponent<RecordCamera_obj>() : null;
+            if (recordCamera == null) return;
+
+            var netCam = recordCamera.GetComponent<NetworkedCamera>();
+            if (netCam != null && netCam.IsBroken)
+            {
+                RakeMultiplayerPlugin.Log?.LogInfo($"[3.6] Watched camera {netCam.CameraId} was broken - switching away");
+
+                manager.RemoveCamera(current);
+                if (manager.GetCameraCount() > 0) manager.ActiveCamera(0);
+                else __instance.Exit();
             }
         }
     }
