@@ -309,6 +309,17 @@ namespace RakeMultiplayer.Patches
             
             if (RakeMultiplayerPlugin.isServer)
             {
+                // Task 3.3: server-authoritative 5-camera limit (host path).
+                // The host bypasses HandleServerItemPickup, so enforce the quota here too.
+                if (type == "Camera_item" && !NetworkedCamera.CanPlaceCamera())
+                {
+                    RakeMultiplayerPlugin.Log?.LogWarning(
+                        $"[3.3] Host pickup of camera {itemId} blocked: camera limit " +
+                        $"{NetworkedCamera.MaxCameras} reached " +
+                        $"(placed={NetworkedCamera.GetPlacedCameraCount()}, usable={NetworkedCamera.GetUsableCameraCount()})");
+                    return false; // Block local pickup, camera stays in the world
+                }
+
                 // Host: execute original PickupItem (gives effect) + broadcast destruction
                 // Original PickupItem will handle effect and call Destroy
                 RakeNetworkManager.Instance?.ServerBroadcast(

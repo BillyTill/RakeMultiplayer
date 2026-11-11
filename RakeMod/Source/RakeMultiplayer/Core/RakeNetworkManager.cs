@@ -14,6 +14,12 @@ namespace RakeMultiplayer
     {
         public static RakeNetworkManager Instance { get; private set; }
 
+        /// <summary>
+        /// Fired when the server rejects an item pickup (playerId, reason).
+        /// UI/HUD code can subscribe for player-facing feedback.
+        /// </summary>
+        public static event Action<int, string> OnPickupRejected;
+
         [Header("Player Prefabs")]
         public GameObject playerPrefab;
 
@@ -563,6 +569,30 @@ namespace RakeMultiplayer
 
             // Get the item to clean up reverse lookup
             var item = _networkedItems[packet.ItemNetworkId];
+
+            // ===== Task 3.3: 5-camera limit enforcement (server-authoritative) =====
+            // The original game allows at most 5 cameras set up at once
+            // (MP_RecordCamera_obj.CheckSetup: "You cannot setup no more 5 cameras").
+            // Reject acquiring further camera items once the quota is full so a 6th
+            // camera can never enter play. Broken cameras free a slot (see NetworkedCamera).
+            if (string.Equals(packet.ItemType, "Camera_item", StringComparison.Ordinal) && !NetworkedCamera.CanPlaceCamera())
+            {
+                RakeMultiplayerPlugin.Log?.LogWarning(
+                    $"[3.3] Server rejected camera pickup for player {packet.PlayerId}: " +
+                    $"camera limit {NetworkedCamera.MaxCameras} reached " +
+                    $"(placed={NetworkedCamera.GetPlacedCameraCount()}, usable={NetworkedCamera.GetUsableCameraCount()})");
+
+                var rejectPacket = new ItemPickupConfirmPacket
+                {
+                    PlayerId = packet.PlayerId,
+                    ItemNetworkId = packet.ItemNetworkId,
+                    Success = false,
+                    Reason = "CameraLimit"
+                };
+                _server.Send(connectionId, rejectPacket.Serialize());
+                OnPickupRejected?.Invoke(packet.PlayerId, "CameraLimit");
+                return; // Item stays in the world
+            }
             
             // Remove from server registry immediately to prevent double-pickup
             _networkedItems.Remove(packet.ItemNetworkId);
@@ -746,6 +776,9 @@ namespace RakeMultiplayer
                     case PacketType.ItemDestroyed:
                         HandleClientItemDestroyed((ItemDestroyedPacket)packet);
                         break;
+                    case PacketType.ItemPickupConfirm:
+                        HandleClientItemPickupConfirm((ItemPickupConfirmPacket)packet);
+                        break;
                     case PacketType.PhaseChange:
                         HandleClientPhaseChange((PhaseChangePacket)packet);
                         break;
@@ -909,6 +942,31 @@ namespace RakeMultiplayer
             {
                 RakeMultiplayerPlugin.IsApplyingNetworkDestroy = false;
             }
+        }
+
+        private void HandleClientItemPickupConfirm(ItemPickupConfirmPacket packet)
+        {
+            if (packet.Success)
+            {
+                RakeMultiplayerPlugin.Log?.LogInfo($"[3.3] Client: pickup {packet.ItemNetworkId} authorized for player {packet.PlayerId}");
+                return;
+            }
+
+            RakeMultiplayerPlugin.Log?.LogWarning(
+                $"[3.3] Client: pickup {packet.ItemNetworkId} REJECTED for player {packet.PlayerId}: {packet.Reason}");
+
+            switch (packet.Reason)
+            {
+                case "CameraLimit":
+                    RakeMultiplayerPlugin.Log?.LogInfo(
+                        $"[3.3] Cannot place more than {NetworkedCamera.MaxCameras} cameras at once");
+                    break;
+                default:
+                    RakeMultiplayerPlugin.Log?.LogInfo($"[3.3] Pickup rejected: {packet.Reason}");
+                    break;
+            }
+
+            OnPickupRejected?.Invoke(packet.PlayerId, packet.Reason);
         }
 
         private void HandleClientPhaseChange(PhaseChangePacket packet)

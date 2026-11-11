@@ -278,6 +278,38 @@ namespace RakeMultiplayer.Networking
     }
 
     /// <summary>
+    /// Item pickup confirmation from server (accept/reject)
+    /// Server -> Requesting client.
+    /// Successful pickups are confirmed via the ItemDestroyedPacket broadcast;
+    /// this packet is sent when the server rejects a pickup request.
+    /// </summary>
+    public class ItemPickupConfirmPacket : NetworkPacket
+    {
+        public override PacketType Type => PacketType.ItemPickupConfirm;
+
+        public int PlayerId;
+        public int ItemNetworkId;
+        public bool Success;   // true = authorized, false = rejected
+        public string Reason;  // e.g. "CameraLimit", "NotFound", "Unauthorized"
+
+        public override void Write(BinaryWriter writer)
+        {
+            writer.Write(PlayerId);
+            writer.Write(ItemNetworkId);
+            writer.Write(Success);
+            writer.Write(Reason ?? string.Empty);
+        }
+
+        public override void Read(BinaryReader reader)
+        {
+            PlayerId = reader.ReadInt32();
+            ItemNetworkId = reader.ReadInt32();
+            Success = reader.ReadBoolean();
+            Reason = reader.ReadString();
+        }
+    }
+
+    /// <summary>
     /// Day/Night phase change notification
     /// Server -> All (broadcast on phase transition)
     /// </summary>

@@ -39,6 +39,7 @@ namespace RakeMultiplayer.Networking
                     PacketType.StartGame => new StartGamePacket(),
                     PacketType.ItemPickup => new ItemPickupPacket(),
                     PacketType.ItemDestroyed => new ItemDestroyedPacket(),
+                    PacketType.ItemPickupConfirm => new ItemPickupConfirmPacket(),
                     PacketType.PhaseChange => new PhaseChangePacket(),
                     PacketType.SessionState => new SessionStatePacket(),
                     PacketType.CameraSync => new CameraSyncPacket(),

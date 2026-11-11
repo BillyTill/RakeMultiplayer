@@ -11,6 +11,13 @@ namespace RakeMultiplayer
     [RequireComponent(typeof(NetIdentity))]
     public class NetworkedCamera : MonoBehaviour
     {
+        /// <summary>
+        /// Maximum number of cameras that may be deployed at the same time
+        /// (matches the original game: "You cannot setup no more 5 cameras").
+        /// Broken cameras do not count toward this limit, so a replacement can be set up.
+        /// </summary>
+        public const int MaxCameras = 5;
+
         [Header("Camera Configuration")]
         [Tooltip("Battery drain rate per minute when camera is active (default 5%/min)")]
         public float batteryDrainPerMinute = 5f;
@@ -24,6 +31,7 @@ namespace RakeMultiplayer
         [SerializeField, ReadOnly] private bool _isActive = false;
         [SerializeField, ReadOnly] private bool _isBroken = false;
         [SerializeField, ReadOnly] private int _placedByPlayerId = 0; // Packets.cs uses int
+        [SerializeField, ReadOnly] private bool _isPlaced = false;   // Counts toward the 5-camera limit
 
         // Network identity reference
         private NetIdentity _netIdentity;
@@ -126,6 +134,16 @@ namespace RakeMultiplayer
         }
 
         /// <summary>
+        /// Whether this camera has been deployed in the world.
+        /// Only placed cameras count toward <see cref="MaxCameras"/>.
+        /// </summary>
+        public bool IsPlaced
+        {
+            get => _isPlaced;
+            private set => _isPlaced = value;
+        }
+
+        /// <summary>
         /// NetIdentity component for network synchronization
         /// </summary>
         public NetIdentity NetIdentity => _netIdentity;
@@ -148,6 +166,41 @@ namespace RakeMultiplayer
         public static bool TryGetCamera(uint cameraId, out NetworkedCamera camera)
         {
             return _cameraRegistry.TryGetValue(cameraId, out camera);
+        }
+
+        /// <summary>
+        /// Number of cameras currently deployed in the world (includes broken ones).
+        /// </summary>
+        public static int GetPlacedCameraCount()
+        {
+            int count = 0;
+            foreach (var cam in _cameraRegistry.Values)
+            {
+                if (cam != null && cam._isPlaced) count++;
+            }
+            return count;
+        }
+
+        /// <summary>
+        /// Number of deployed cameras that still count against the quota
+        /// (broken cameras free a slot so a replacement can be set up).
+        /// </summary>
+        public static int GetUsableCameraCount()
+        {
+            int count = 0;
+            foreach (var cam in _cameraRegistry.Values)
+            {
+                if (cam != null && cam._isPlaced && !cam._isBroken) count++;
+            }
+            return count;
+        }
+
+        /// <summary>
+        /// Server-authoritative quota check: may another camera be deployed?
+        /// </summary>
+        public static bool CanPlaceCamera()
+        {
+            return GetUsableCameraCount() < MaxCameras;
         }
 
         #region Unity Lifecycle
@@ -345,11 +398,13 @@ namespace RakeMultiplayer
         }
 
         /// <summary>
-        /// Server: set initial placement data
+        /// Server: set initial placement data.
+        /// Enforces the 5-camera limit (see <see cref="MaxCameras"/>).
         /// </summary>
-        public void InitializePlacement(int placedByPlayerId)
+        /// <returns>true if the camera was deployed; false if the limit rejected it.</returns>
+        public bool InitializePlacement(int placedByPlayerId)
         {
-            if (!RakeMultiplayerPlugin.isServer) return;
+            if (!RakeMultiplayerPlugin.isServer) return false;
 
             // Ensure CameraId is assigned (sole authority)
             if (_cameraId == 0 && _netIdentity != null && _netIdentity.NetId != 0)
@@ -362,13 +417,27 @@ namespace RakeMultiplayer
                 }
             }
 
+            // Enforce the 5-camera quota (server-authoritative)
+            if (!_isPlaced)
+            {
+                if (!CanPlaceCamera())
+                {
+                    RakeMultiplayerPlugin.Log?.LogWarning(
+                        $"[NetworkedCamera] Cannot setup camera {CameraId}: limit of {MaxCameras} active cameras reached " +
+                        $"(placed={GetPlacedCameraCount()}, usable={GetUsableCameraCount()})");
+                    return false;
+                }
+                _isPlaced = true;
+            }
+
             _placedByPlayerId = placedByPlayerId;
             _batteryLevel = 100f;
             _isActive = false;
             _isBroken = false;
 
-            RakeMultiplayerPlugin.Log?.LogInfo($"[NetworkedCamera] Camera {CameraId} placed by player {placedByPlayerId}");
+            RakeMultiplayerPlugin.Log?.LogInfo($"[NetworkedCamera] Camera {CameraId} placed by player {placedByPlayerId} ({GetUsableCameraCount()}/{MaxCameras})");
             SendCameraSpawn();
+            return true;
         }
 
         #endregion
@@ -419,6 +488,13 @@ namespace RakeMultiplayer
             _batteryLevel = 100f;
             _isActive = false;
             _isBroken = false;
+            _isPlaced = true;
+
+            // Ensure the client registry can resolve this camera by ID
+            if (_cameraId != 0 && !_cameraRegistry.ContainsKey(_cameraId))
+            {
+                _cameraRegistry[_cameraId] = this;
+            }
 
             UpdateCameraVisuals();
             RakeMultiplayerPlugin.Log?.LogInfo($"[NetworkedCamera] Client received camera spawn: {CameraId} placed by player {packet.PlacedByPlayerId}");
@@ -432,7 +508,14 @@ namespace RakeMultiplayer
             if (RakeMultiplayerPlugin.isServer) return;
 
             RakeMultiplayerPlugin.Log?.LogInfo($"[NetworkedCamera] Client received camera destroy: {packet.CameraId}");
-            // Object will be destroyed by NetIdentity cleanup
+
+            _isPlaced = false;
+
+            // Remove from client registry so the slot is freed locally
+            if (packet.CameraId != 0 && _cameraRegistry.ContainsKey(packet.CameraId))
+            {
+                _cameraRegistry.Remove(packet.CameraId);
+            }
         }
 
         /// <summary>

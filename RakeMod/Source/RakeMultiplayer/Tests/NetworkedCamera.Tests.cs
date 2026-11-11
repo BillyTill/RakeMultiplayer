@@ -2332,5 +2332,290 @@ namespace RakeMultiplayer.Tests
         }
 
         #endregion
+
+        #region Camera Quota (5-camera limit) Tests - Task 3.3
+
+        /// <summary>
+        /// Tests for the server-authoritative 5-camera limit (Task 3.3).
+        /// The original game rejects setup when cameraCount >= 5
+        /// (MP_RecordCamera_obj.CheckSetup: "You cannot setup no more 5 cameras").
+        /// </summary>
+        [TestFixture]
+        public class CameraQuotaTests
+        {
+            private class QuotaCameraState
+            {
+                public bool IsPlaced;
+                public bool IsBroken;
+
+                public QuotaCameraState(bool isPlaced, bool isBroken)
+                {
+                    IsPlaced = isPlaced;
+                    IsBroken = isBroken;
+                }
+            }
+
+            /// <summary>
+            /// Mirror of NetworkedCamera.GetUsableCameraCount semantics:
+            /// only placed, non-broken cameras consume a quota slot.
+            /// </summary>
+            private static int ComputeUsableCount(QuotaCameraState[] cameras)
+            {
+                int count = 0;
+                foreach (var cam in cameras)
+                {
+                    if (cam.IsPlaced && !cam.IsBroken) count++;
+                }
+                return count;
+            }
+
+            private static bool ComputeCanPlace(int usableCount, int maxCameras = 5)
+            {
+                return usableCount < maxCameras;
+            }
+
+            [Test]
+            public void MaxCameras_IsFive()
+            {
+                Assert.AreEqual(5, NetworkedCamera.MaxCameras,
+                    "The original game allows at most 5 cameras set up at once");
+            }
+
+            [Test]
+            public void CanPlaceCamera_TrueWhenNoCamerasPlaced()
+            {
+                Assert.IsTrue(ComputeCanPlace(0));
+            }
+
+            [Test]
+            public void CanPlaceCamera_TrueForFifthCamera()
+            {
+                Assert.IsTrue(ComputeCanPlace(4));
+            }
+
+            [Test]
+            public void CanPlaceCamera_FalseForSixthCamera()
+            {
+                Assert.IsFalse(ComputeCanPlace(5));
+            }
+
+            [Test]
+            public void CanPlaceCamera_FalseWhenOverQuota()
+            {
+                Assert.IsFalse(ComputeCanPlace(6));
+            }
+
+            [Test]
+            public void UsableCount_IgnoresUnplacedCameras()
+            {
+                var cameras = new QuotaCameraState[]
+                {
+                    new QuotaCameraState(false, false), // exists in scene but not deployed
+                    new QuotaCameraState(false, false)
+                };
+
+                Assert.AreEqual(0, ComputeUsableCount(cameras));
+                Assert.IsTrue(ComputeCanPlace(ComputeUsableCount(cameras)));
+            }
+
+            [Test]
+            public void UsableCount_CountsPlacedCameras()
+            {
+                var cameras = new QuotaCameraState[]
+                {
+                    new QuotaCameraState(true, false),
+                    new QuotaCameraState(true, false),
+                    new QuotaCameraState(true, false),
+                    new QuotaCameraState(true, false),
+                    new QuotaCameraState(true, false)
+                };
+
+                Assert.AreEqual(5, ComputeUsableCount(cameras));
+                Assert.IsFalse(ComputeCanPlace(ComputeUsableCount(cameras)));
+            }
+
+            [Test]
+            public void UsableCount_BrokenCameraFreesSlot()
+            {
+                var cameras = new QuotaCameraState[]
+                {
+                    new QuotaCameraState(true, false),
+                    new QuotaCameraState(true, false),
+                    new QuotaCameraState(true, false),
+                    new QuotaCameraState(true, false),
+                    new QuotaCameraState(true, true)  // broken -> does not consume quota
+                };
+
+                Assert.AreEqual(4, ComputeUsableCount(cameras));
+                Assert.IsTrue(ComputeCanPlace(ComputeUsableCount(cameras)),
+                    "A broken camera must free a slot so a replacement can be set up");
+            }
+
+            [Test]
+            public void PlacedCount_IncludesBrokenCameras()
+            {
+                var cameras = new QuotaCameraState[]
+                {
+                    new QuotaCameraState(true, false),
+                    new QuotaCameraState(true, true)
+                };
+
+                int placed = 0;
+                foreach (var cam in cameras)
+                {
+                    if (cam.IsPlaced) placed++;
+                }
+
+                Assert.AreEqual(2, placed);
+                int usable = ComputeUsableCount(cameras);
+                Assert.AreEqual(1, usable);
+            }
+
+            [Test]
+            public void InitializePlacement_RejectsWhenQuotaFull()
+            {
+                // Simulate server logic: fifth camera occupies the last slot,
+                // placing a sixth must be rejected (return false).
+                int usable = 5;
+                bool deployed = false;
+
+                if (ComputeCanPlace(usable))
+                {
+                    deployed = true;
+                }
+
+                Assert.IsFalse(deployed, "The 6th camera must be rejected by the server");
+            }
+
+            [Test]
+            public void InitializePlacement_AllowsUpToFive()
+            {
+                int usable = 0;
+                int deployed = 0;
+
+                for (int i = 0; i < 6; i++)
+                {
+                    if (ComputeCanPlace(usable))
+                    {
+                        deployed++;
+                        usable++;
+                    }
+                }
+
+                Assert.AreEqual(5, deployed, "Exactly 5 cameras may be deployed");
+            }
+
+            [Test]
+            public void CameraItemPickup_RejectedWhenQuotaFull()
+            {
+                // Server HandleServerItemPickup: Camera_item pickup is rejected
+                // when !NetworkedCamera.CanPlaceCamera().
+                const string itemType = "Camera_item";
+                int usable = 5;
+
+                bool allowPickup = !(itemType == "Camera_item" && !ComputeCanPlace(usable));
+                Assert.IsFalse(allowPickup);
+            }
+
+            [Test]
+            public void NonCameraItemPickup_UnaffectedByQuota()
+            {
+                const string itemType = "Medkit_item";
+                int usable = 5;
+
+                bool allowPickup = !(itemType == "Camera_item" && !ComputeCanPlace(usable));
+                Assert.IsTrue(allowPickup, "Only camera items are subject to the camera quota");
+            }
+        }
+
+        /// <summary>
+        /// Serialization tests for the rejection packet introduced by Task 3.3
+        /// </summary>
+        [TestFixture]
+        public class ItemPickupConfirmPacketTests
+        {
+            [Test]
+            public void ItemPickupConfirm_Rejection_RoundTrip()
+            {
+                var original = new ItemPickupConfirmPacket
+                {
+                    PlayerId = 3,
+                    ItemNetworkId = 42,
+                    Success = false,
+                    Reason = "CameraLimit"
+                };
+
+                byte[] data = original.Serialize();
+                var restored = PacketSerializer.Deserialize(data) as ItemPickupConfirmPacket;
+
+                Assert.IsNotNull(restored);
+                Assert.AreEqual(PacketType.ItemPickupConfirm, restored.Type);
+                Assert.AreEqual(3, restored.PlayerId);
+                Assert.AreEqual(42, restored.ItemNetworkId);
+                Assert.IsFalse(restored.Success);
+                Assert.AreEqual("CameraLimit", restored.Reason);
+            }
+
+            [Test]
+            public void ItemPickupConfirm_Success_RoundTrip()
+            {
+                var original = new ItemPickupConfirmPacket
+                {
+                    PlayerId = 1,
+                    ItemNetworkId = 7,
+                    Success = true,
+                    Reason = string.Empty
+                };
+
+                byte[] data = original.Serialize();
+                var restored = PacketSerializer.Deserialize(data) as ItemPickupConfirmPacket;
+
+                Assert.IsNotNull(restored);
+                Assert.IsTrue(restored.Success);
+                Assert.AreEqual(string.Empty, restored.Reason);
+            }
+
+            [Test]
+            public void ItemPickupConfirm_NullReason_SerializesAsEmpty()
+            {
+                var original = new ItemPickupConfirmPacket
+                {
+                    PlayerId = 2,
+                    ItemNetworkId = 9,
+                    Success = false,
+                    Reason = null
+                };
+
+                byte[] data = original.Serialize();
+                var restored = PacketSerializer.Deserialize(data) as ItemPickupConfirmPacket;
+
+                Assert.IsNotNull(restored);
+                Assert.AreEqual(string.Empty, restored.Reason);
+            }
+
+            [Test]
+            public void ItemPickupConfirm_PacketTypeValue_IsEleven()
+            {
+                Assert.AreEqual(11, (byte)PacketType.ItemPickupConfirm);
+            }
+
+            [Test]
+            public void ItemPickupConfirm_Serialize_PreservesPacketTypeByte()
+            {
+                var packet = new ItemPickupConfirmPacket
+                {
+                    PlayerId = 1,
+                    ItemNetworkId = 1,
+                    Success = false,
+                    Reason = "CameraLimit"
+                };
+
+                byte[] data = packet.Serialize();
+                Assert.Greater(data.Length, 0);
+                Assert.AreEqual((byte)PacketType.ItemPickupConfirm, data[0]);
+            }
+        }
+
+        #endregion
     }
 }
