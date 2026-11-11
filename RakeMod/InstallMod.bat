@@ -55,9 +55,9 @@ mkdir "%RAKE_PATH%\BepInEx\core" 2>nul
 
 :: Copy mod files
 echo [INFO] Copying mod files...
-set MOD_SOURCE=%~dp0Source\RakeMultiplayer\bin\Release
+set MOD_SOURCE=%~dp0Source\RakeMultiplayer\bin\Release\net35
 if not exist "%MOD_SOURCE%\RakeMultiplayer.dll" (
-    set MOD_SOURCE=%~dp0..\RakeMod\Source\RakeMultiplayer\bin\Release
+    set MOD_SOURCE=%~dp0..\RakeMod\Source\RakeMultiplayer\bin\Release\net35
 )
 if not exist "%MOD_SOURCE%\RakeMultiplayer.dll" (
     set MOD_SOURCE=%~dp0RakeMultiplayer.dll

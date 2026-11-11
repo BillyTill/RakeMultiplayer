@@ -58,6 +58,30 @@ namespace RakeMultiplayer
             GameSceneName = Config.Bind("Network", "GameSceneName", "level1", "Name of the game scene to load (must match build settings, e.g. level1)");
 
             // Initialize Harmony — ВСЕГДА (для F1 меню)
+            // Diagnostic: verify that every type in this assembly can be loaded by the
+            // game's Mono runtime (mismatched mscorlib/System.Core versions show up here).
+            try
+            {
+                var loadedTypes = typeof(RakeMultiplayerPlugin).Assembly.GetTypes();
+                Log?.LogInfo($"[Diag] Assembly types loaded: {loadedTypes.Length}");
+            }
+            catch (System.Reflection.ReflectionTypeLoadException ex)
+            {
+                int count = ex.LoaderExceptions != null ? ex.LoaderExceptions.Length : 0;
+                Log?.LogError($"[Diag] Type load failures: {count}");
+                if (ex.LoaderExceptions != null)
+                {
+                    for (int i = 0; i < ex.LoaderExceptions.Length && i < 20; i++)
+                    {
+                        Log?.LogError($"  [{i + 1}] {ex.LoaderExceptions[i]}");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Log?.LogError($"[Diag] Assembly type scan failed: {ex.Message}");
+            }
+
             var harmony = new HarmonyLib.Harmony(PluginInfo.GUID);
             var applied = 0;
             var failed = 0;

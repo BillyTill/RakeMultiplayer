@@ -44,7 +44,7 @@ if %errorLevel% neq 0 (
 
 echo.
 echo [OK] Build successful!
-echo Output: %~dp0Source\RakeMultiplayer\bin\%BUILD_CONFIG%\net40\RakeMultiplayer.dll
+echo Output: %~dp0Source\RakeMultiplayer\bin\%BUILD_CONFIG%\net35\RakeMultiplayer.dll
 echo.
 
 :: Copy to game folder for testing
@@ -52,8 +52,8 @@ set GAME_PATH=D:\Rake Multiplayer\Rake
 if exist "%GAME_PATH%\Rake.exe" (
     echo [INFO] Copying to game folder for testing...
     mkdir "%GAME_PATH%\BepInEx\plugins" 2>nul
-    copy /Y "%~dp0Source\RakeMultiplayer\bin\%BUILD_CONFIG%\net40\RakeMultiplayer.dll" "%GAME_PATH%\BepInEx\plugins\"
-    copy /Y "%~dp0Source\RakeMultiplayer\bin\%BUILD_CONFIG%\net40\RakeMultiplayer.pdb" "%GAME_PATH%\BepInEx\plugins\" 2>nul
+    copy /Y "%~dp0Source\RakeMultiplayer\bin\%BUILD_CONFIG%\net35\RakeMultiplayer.dll" "%GAME_PATH%\BepInEx\plugins\"
+    copy /Y "%~dp0Source\RakeMultiplayer\bin\%BUILD_CONFIG%\net35\RakeMultiplayer.pdb" "%GAME_PATH%\BepInEx\plugins\" 2>nul
     echo [OK] Copied to game folder
 ) else (
     echo [WARN] Game folder not found at %GAME_PATH%

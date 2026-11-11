@@ -48,7 +48,7 @@ Cooperative multiplayer mod for **Rake (2015)** by Konsordo. Adds 2–4 player c
 - **Game**: Rake (2015), original Steam release
 - **OS**: Windows 10/11
 - **BepInEx**: 5.x (Mono / Unity 5.x build)
-- **.NET Framework**: 4.7.2+ runtime (the mod targets `net40` assemblies)
+- **.NET Framework**: 3.5 profile (Unity 5 Mono). The mod is built as `net35` to match BepInEx/Harmony.
 
 ---
 
@@ -151,7 +151,10 @@ cd RakeMod
 dotnet build Source/RakeMultiplayer/RakeMultiplayer.csproj -c Release
 ```
 
-Output: `RakeMod/Source/RakeMultiplayer/bin/Release/net40/RakeMultiplayer.dll`
+Output: `RakeMod/Source/RakeMultiplayer/bin/Release/net35/RakeMultiplayer.dll`
+
+> The project targets **net35** because Rake runs Unity 5.0 Mono (mscorlib 2.0 / System.Core 3.5).
+> Building against net40 produces a DLL that fails to load some types at runtime (TypeLoadException).
 
 Reference paths in the `.csproj` point at `D:\Rake Multiplayer\Rake`; adjust them for your installation.
 
