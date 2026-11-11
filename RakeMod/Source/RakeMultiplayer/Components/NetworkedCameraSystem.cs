@@ -449,6 +449,7 @@ namespace RakeMultiplayer
             SendCameraBreak();
             // Send QuestTriggerPacket to alert Rake AI (CameraBreak = 0)
             SendQuestTrigger(0);
+            BroadcastMapMarker(false); // mark the broken camera on the minimap
         }
 
         /// <summary>
@@ -507,6 +508,7 @@ namespace RakeMultiplayer
             ApplySetupVisuals();
 
             SendCameraSpawn();
+            BroadcastMapMarker(true);
             return true;
         }
 
@@ -524,6 +526,7 @@ namespace RakeMultiplayer
 
             ApplyUnsetupVisuals();
             SendCameraDestroy();
+            BroadcastMapMarker(false);
 
             RakeMultiplayerPlugin.Log?.LogInfo($"[NetworkedCamera] Camera {CameraId} picked up ({GetUsableCameraCount()}/{MaxCameras})");
             return true;
@@ -731,6 +734,25 @@ namespace RakeMultiplayer
             _lastSentBroken = _isBroken;
 
             RakeMultiplayerPlugin.Log?.LogInfo($"[NetworkedCamera] Sent CameraSync (Break): {CameraId}");
+        }
+
+        /// <summary>
+        /// Broadcast this camera as a minimap marker (MarkerType 0 = Camera).
+        /// </summary>
+        private void BroadcastMapMarker(bool active)
+        {
+            if (!RakeMultiplayerPlugin.isServer) return;
+
+            var marker = new MapMarkerPacket
+            {
+                MarkerType = 0, // Camera
+                Position = transform.position,
+                MarkerId = CameraId,
+                IsActive = active
+            };
+
+            RakeNetworkManager.Instance?.RegisterLocalMapMarker(marker);
+            RakeNetworkManager.Instance?.ServerBroadcast(marker.Serialize());
         }
 
         /// <summary>

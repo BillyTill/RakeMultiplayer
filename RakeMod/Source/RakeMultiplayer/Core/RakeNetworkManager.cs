@@ -76,6 +76,16 @@ namespace RakeMultiplayer
 
         /// <summary>Map markers received from the server (MarkerId -> packet).</summary>
         public Dictionary<uint, MapMarkerPacket> GetMapMarkers() => _mapMarkers;
+
+        /// <summary>
+        /// Register a server-originated marker locally (the host does not receive its own broadcasts).
+        /// </summary>
+        public void RegisterLocalMapMarker(MapMarkerPacket marker)
+        {
+            if (marker == null) return;
+            _mapMarkers[marker.MarkerId] = marker;
+            OnMapMarkerReceived?.Invoke(marker);
+        }
         // Reverse lookup: Item -> assigned network ID (for consistent ID retrieval)
         private Dictionary<Item, int> _itemToNetworkId = new Dictionary<Item, int>();
         private int _nextItemNetworkId = 1;

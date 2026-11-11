@@ -61,6 +61,7 @@ namespace RakeMultiplayer
             _registry[trap.TrapId] = trap;
 
             trap.BroadcastState();
+            trap.BroadcastMapMarker();
             RakeMultiplayerPlugin.Log?.LogInfo($"[3.11] Trap {trap.TrapId} deployed at {position} (radius {trap.TriggerRadius})");
             return trap;
         }
@@ -130,6 +131,23 @@ namespace RakeMultiplayer
                 IsTriggered = IsTriggered
             };
             RakeNetworkManager.Instance?.ServerBroadcast(packet.Serialize());
+        }
+
+        /// <summary>Broadcast this trap as a minimap marker (MarkerType 1 = Trap).</summary>
+        public void BroadcastMapMarker()
+        {
+            if (!RakeMultiplayerPlugin.isServer) return;
+
+            var marker = new MapMarkerPacket
+            {
+                MarkerType = 1, // Trap
+                Position = transform.position,
+                MarkerId = TrapId,
+                IsActive = true
+            };
+
+            RakeNetworkManager.Instance?.RegisterLocalMapMarker(marker);
+            RakeNetworkManager.Instance?.ServerBroadcast(marker.Serialize());
         }
 
         /// <summary>Client: apply trap state from the server (used for map/UI).</summary>

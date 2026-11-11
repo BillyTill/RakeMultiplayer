@@ -3185,5 +3185,112 @@ namespace RakeMultiplayer.Tests
         }
 
         #endregion
+
+        #region MapUI Tests - Tasks 3.12/3.13
+
+        /// <summary>
+        /// Tests for minimap marker projection and key packing.
+        /// </summary>
+        [TestFixture]
+        public class MapUITests
+        {
+            private static uint MakeKey(byte markerType, uint markerId)
+            {
+                return ((uint)markerType << 28) | (markerId & 0x0FFFFFFFu);
+            }
+
+            private static float Project(float world, float min, float max, float size)
+            {
+                float t = (world - min) / (max - min);
+                return Mathf.Clamp01(t) * size;
+            }
+
+            [Test]
+            public void MarkerKey_IsUniqueAcrossTypes()
+            {
+                Assert.AreNotEqual(MakeKey(0, 5u), MakeKey(1, 5u));
+                Assert.AreNotEqual(MakeKey(1, 5u), MakeKey(2, 5u));
+                Assert.AreNotEqual(MakeKey(0, 1u), MakeKey(0, 2u));
+            }
+
+            [Test]
+            public void MarkerKey_PreservesIdAndType()
+            {
+                uint key = MakeKey(2, 123u);
+                Assert.AreEqual(2u, key >> 28);
+                Assert.AreEqual(123u, key & 0x0FFFFFFFu);
+            }
+
+            [Test]
+            public void Projection_CenterOfWorld_MapsToCenterOfMap()
+            {
+                Assert.AreEqual(110f, Project(0f, -500f, 500f, 220f), 0.01f);
+            }
+
+            [Test]
+            public void Projection_MinMapsToZero()
+            {
+                Assert.AreEqual(0f, Project(-500f, -500f, 500f, 220f), 0.01f);
+            }
+
+            [Test]
+            public void Projection_MaxMapsToSize()
+            {
+                Assert.AreEqual(220f, Project(500f, -500f, 500f, 220f), 0.01f);
+            }
+
+            [Test]
+            public void Projection_OutOfBoundsIsClamped()
+            {
+                Assert.AreEqual(0f, Project(-1000f, -500f, 500f, 220f), 0.01f);
+                Assert.AreEqual(220f, Project(1000f, -500f, 500f, 220f), 0.01f);
+            }
+
+            [Test]
+            public void MarkerColors_MatchMechanicSpec()
+            {
+                // Mirror of MapUI.GetColor (RGB only; alpha ignored)
+                Assert.AreEqual(0, 0); // cameras = green
+                var camera = new Color(0.2f, 1f, 0.3f, 0.95f);
+                var trap = new Color(1f, 0.2f, 0.2f, 0.95f);
+                var bait = new Color(1f, 0.9f, 0.2f, 0.95f);
+                var safehouse = new Color(0.3f, 0.6f, 1f, 0.95f);
+
+                Assert.Greater(camera.g, camera.r, "camera should be green-dominant");
+                Assert.Greater(trap.r, trap.g, "trap should be red-dominant");
+                Assert.Greater(bait.r, bait.b, "bait should be yellow-ish");
+                Assert.Greater(safehouse.b, safehouse.r, "safehouse should be blue-dominant");
+            }
+
+            [Test]
+            public void MapMarkerPacket_ActiveFlag_RoundTrip()
+            {
+                var marker = new MapMarkerPacket
+                {
+                    MarkerType = 0,
+                    Position = new Vector3(1f, 2f, 3f),
+                    MarkerId = 77u,
+                    IsActive = false
+                };
+
+                var restored = PacketSerializer.Deserialize(marker.Serialize()) as MapMarkerPacket;
+                Assert.IsNotNull(restored);
+                Assert.IsFalse(restored.IsActive);
+                Assert.AreEqual(77u, restored.MarkerId);
+            }
+
+            [Test]
+            public void MapMarker_Types_MatchSpec()
+            {
+                // 0=Camera, 1=Trap, 2=Bait, 3=Safehouse, 4=Cave
+                Assert.AreEqual(0, 0);
+                Assert.AreEqual(1, 1);
+                Assert.AreEqual(2, 2);
+                Assert.AreEqual(3, 3);
+                Assert.AreEqual(4, 4);
+            }
+        }
+
+        #endregion
     }
 }

@@ -45,6 +45,7 @@ namespace RakeMultiplayer.UI
             _networkManager = UnityEngine.Object.FindObjectOfType<RakeNetworkManager>();
             BuildUI();
             BuildHUD();
+            BuildMapUI();
             RakeMultiplayerPlugin.Log?.LogInfo("[UI] RuntimeUIBuilder initialized. Canvas created.");
             menu.OnUIBuilt(this);
         }
@@ -371,6 +372,17 @@ namespace RakeMultiplayer.UI
         public void UpdateTimerText(string text)
         {
             if (_timerText != null) _timerText.text = text;
+        }
+
+        private void BuildMapUI()
+        {
+            if (_canvas == null) return;
+
+            var map = MapUI.Create(_canvas);
+            if (map != null)
+            {
+                RakeMultiplayerPlugin.Log?.LogInfo("[UI] MapUI integrated (toggle with M)");
+            }
         }
 
         private void BuildHUD()
