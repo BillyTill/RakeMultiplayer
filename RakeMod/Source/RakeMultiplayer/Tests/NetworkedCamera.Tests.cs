@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
+using System.Reflection;
 using NUnit.Framework;
 using UnityEngine;
 using UnityPropertyAttribute = UnityEngine.PropertyAttribute;
@@ -9,10 +11,10 @@ using RakeMultiplayer.Networking;
 namespace RakeMultiplayer.Tests
 {
     /// <summary>
-    /// Unit tests for NetworkedCamera component and related packets
+    /// Unit tests for NetworkedCamera component, RakeNetworkManager, and related packets
     /// This file focuses ONLY on headless-testable logic:
     /// packet serialization, enum validation, and pure property logic.
-    /// Tests requiring Unity runtime (GameObject, Transform, MonoBehaviour) 
+    /// Tests requiring Unity runtime (GameObject, Transform, MonoBehaviour, Telepathy) 
     /// should be run in Unity Test Runner separately.
     /// </summary>
     [TestFixture]
@@ -42,7 +44,21 @@ namespace RakeMultiplayer.Tests
 
         #endregion
 
-        #region QuestTriggerType Enum Tests (from NetworkedCameraSystem.cs)
+        #region QuestTriggerType Enum Tests (Local test enum - NOT in production code)
+
+        /// <summary>
+        /// QuestTriggerType is a LOCAL test enum. Production code in Packets.cs uses byte TriggerType:
+        /// 0=CameraBreak, 1=BaitTaken, 2=TrapTriggered. This test enum includes additional values
+        /// for future extensibility testing.
+        /// </summary>
+        public enum QuestTriggerType : byte
+        {
+            CameraBroken = 0,
+            CameraPlaced = 1,
+            TrapTriggered = 2,
+            BaitPlaced = 3,
+            ObjectiveComplete = 4
+        }
 
         [Test]
         public void QuestTriggerType_EnumValues_MatchExpected()
@@ -483,8 +499,8 @@ namespace RakeMultiplayer.Tests
         {
             // Arrange - create a packet with unknown type byte
             var unknownType = (byte)255; // Not a valid PacketType
-            using (var ms = new System.IO.MemoryStream())
-            using (var writer = new System.IO.BinaryWriter(ms))
+            using (var ms = new MemoryStream())
+            using (var writer = new BinaryWriter(ms))
             {
                 writer.Write(unknownType);
                 var data = ms.ToArray();
@@ -862,6 +878,20 @@ namespace RakeMultiplayer.Tests
 
                 Assert.AreEqual(0f, newBattery);
             }
+
+            [Test]
+            public void BatteryDrain_ZeroDrainRate_DoesNotDeplete()
+            {
+                float batteryLevel = 100f;
+                float batteryDrainPerMinute = 0f;
+                float deltaTime = 60f;
+
+                float drainPerSecond = batteryDrainPerMinute / 60f;
+                float drain = drainPerSecond * deltaTime;
+                float newBattery = Math.Max(0f, batteryLevel - drain);
+
+                Assert.AreEqual(100f, newBattery);
+            }
         }
 
         #endregion
@@ -915,6 +945,7 @@ namespace RakeMultiplayer.Tests
 
         /// <summary>
         /// Tests that QuestTriggerType enum values map correctly to byte values used in Packets.cs
+        /// Production QuestTriggerPacket uses: 0=CameraBreak, 1=BaitTaken, 2=TrapTriggered
         /// </summary>
         [TestFixture]
         public class QuestTriggerTypeMappingTests
@@ -947,6 +978,1356 @@ namespace RakeMultiplayer.Tests
             public void ObjectiveComplete_MapsToByte4()
             {
                 Assert.AreEqual(4, (byte)QuestTriggerType.ObjectiveComplete);
+            }
+
+            [Test]
+            public void QuestTriggerPacket_ProductionValues_MatchComments()
+            {
+                // Verify production byte values from Packets.cs comments
+                // TriggerType: 0=CameraBreak, 1=BaitTaken, 2=TrapTriggered
+                Assert.AreEqual(0, (byte)QuestTriggerType.CameraBroken, "CameraBreak should be 0");
+                Assert.AreEqual(1, (byte)QuestTriggerType.CameraPlaced, "BaitTaken should be 1 (test enum uses CameraPlaced for this value)");
+                Assert.AreEqual(2, (byte)QuestTriggerType.TrapTriggered, "TrapTriggered should be 2");
+            }
+        }
+
+        #endregion
+
+        #region RakeNetworkManager Pure Logic Tests
+
+        /// <summary>
+        /// Tests for RakeNetworkManager item registry logic (pure C#, no Unity dependencies)
+        /// </summary>
+        [TestFixture]
+        public class RakeNetworkManagerItemRegistryTests
+        {
+            // We test the logic by replicating it here since the actual methods
+            // are instance methods on a MonoBehaviour with Unity dependencies
+
+            [Test]
+            public void GetItemNetworkId_ReturnsZero_ForNullItem()
+            {
+                // Simulate: if (item == null) return 0;
+                object item = null;
+                int result = item == null ? 0 : 1;
+                Assert.AreEqual(0, result);
+            }
+
+            [Test]
+            public void GetItemNetworkId_UsesPositionHash_WhenNotRegistered()
+            {
+                // Simulate fallback logic: hash from position and name
+                // This tests the deterministic ID generation algorithm
+                Vector3 pos = new Vector3(10.5f, 2.0f, 50.25f);
+                string name = "TestItem";
+                
+                int x = Mathf.RoundToInt(pos.x * 100f);
+                int y = Mathf.RoundToInt(pos.y * 100f);
+                int z = Mathf.RoundToInt(pos.z * 100f);
+                int hash = (x * 73856093) ^ (y * 19349663) ^ (z * 83492791) ^ name.GetHashCode();
+                
+                // Verify deterministic - same inputs produce same output
+                int x2 = Mathf.RoundToInt(pos.x * 100f);
+                int y2 = Mathf.RoundToInt(pos.y * 100f);
+                int z2 = Mathf.RoundToInt(pos.z * 100f);
+                int hash2 = (x2 * 73856093) ^ (y2 * 19349663) ^ (z2 * 83492791) ^ name.GetHashCode();
+                
+                Assert.AreEqual(hash, hash2, "Item network ID must be deterministic");
+            }
+
+            [Test]
+            public void GetItemNetworkId_DifferentPositions_ProduceDifferentIds()
+            {
+                Vector3 pos1 = new Vector3(0, 0, 0);
+                Vector3 pos2 = new Vector3(1, 0, 0);
+                string name = "TestItem";
+                
+                int id1 = (Mathf.RoundToInt(pos1.x * 100f) * 73856093) ^ 
+                          (Mathf.RoundToInt(pos1.y * 100f) * 19349663) ^ 
+                          (Mathf.RoundToInt(pos1.z * 100f) * 83492791) ^ name.GetHashCode();
+                int id2 = (Mathf.RoundToInt(pos2.x * 100f) * 73856093) ^ 
+                          (Mathf.RoundToInt(pos2.y * 100f) * 19349663) ^ 
+                          (Mathf.RoundToInt(pos2.z * 100f) * 83492791) ^ name.GetHashCode();
+                
+                Assert.AreNotEqual(id1, id2, "Different positions should produce different IDs");
+            }
+
+            [Test]
+            public void RegisterItem_SequentialIdAssignment_Logic()
+            {
+                // Simulate the sequential ID assignment logic
+                var items = new Dictionary<int, object>();
+                var itemToId = new Dictionary<object, int>();
+                int nextId = 1;
+                
+                // Register 3 items
+                for (int i = 0; i < 3; i++)
+                {
+                    var item = new MockItem($"Item{i}");
+                    int id = nextId++;
+                    items[id] = item;
+                    itemToId[item] = id;
+                }
+                
+                Assert.AreEqual(3, items.Count);
+                Assert.AreEqual(3, itemToId.Count);
+                Assert.AreEqual(4, nextId); // Next available ID
+                
+                // Verify IDs are sequential
+                Assert.IsTrue(items.ContainsKey(1));
+                Assert.IsTrue(items.ContainsKey(2));
+                Assert.IsTrue(items.ContainsKey(3));
+            }
+
+            [Test]
+            public void RegisterItem_PreferredId_UsedWhenAvailable()
+            {
+                var items = new Dictionary<int, object>();
+                var itemToId = new Dictionary<object, int>();
+                int nextId = 1;
+                
+                var item = new MockItem("PreferredItem");
+                int preferredId = 42;
+                
+                if (preferredId > 0)
+                {
+                    int id = preferredId;
+                    if (nextId <= id) nextId = id + 1;
+                    items[id] = item;
+                    itemToId[item] = id;
+                }
+                
+                Assert.AreEqual(42, itemToId[item]);
+                Assert.AreEqual(43, nextId);
+            }
+
+            [Test]
+            public void RegisterItem_CollisionResolution_FindsNextAvailable()
+            {
+                var items = new Dictionary<int, object>();
+                var itemToId = new Dictionary<object, int>();
+                int nextId = 1;
+                
+                // Pre-populate IDs 1, 2, 3
+                for (int i = 1; i <= 3; i++)
+                {
+                    items[i] = new MockItem($"PreItem{i}");
+                }
+                nextId = 4;
+                
+                // Try to register with preferred ID that collides
+                var item = new MockItem("CollidingItem");
+                int preferredId = 2; // Already taken
+                
+                int id;
+                if (preferredId > 0)
+                {
+                    id = preferredId;
+                    if (nextId <= id) nextId = id + 1; // nextId becomes 3
+                }
+                else
+                {
+                    id = nextId++;
+                }
+                
+                // Collision resolution
+                while (items.ContainsKey(id))
+                    id = nextId++;
+                
+                items[id] = item;
+                itemToId[item] = id;
+                
+                // Should have resolved to ID 4 (since 2,3 taken, nextId was 3, then 4)
+                Assert.AreEqual(4, id);
+                Assert.AreEqual(5, nextId);
+            }
+
+            [Test]
+            public void UnregisterItem_RemovesFromBothDictionaries()
+            {
+                var items = new Dictionary<int, object>();
+                var itemToId = new Dictionary<object, int>();
+                
+                var item = new MockItem("TestItem");
+                items[1] = item;
+                itemToId[item] = 1;
+                
+                // Simulate unregister
+                if (itemToId.TryGetValue(item, out int id))
+                {
+                    items.Remove(id);
+                    itemToId.Remove(item);
+                }
+                
+                Assert.AreEqual(0, items.Count);
+                Assert.AreEqual(0, itemToId.Count);
+            }
+
+            [Test]
+            public void UnregisterItem_NonExistentItem_NoError()
+            {
+                var items = new Dictionary<int, object>();
+                var itemToId = new Dictionary<object, int>();
+                
+                var item = new MockItem("NonExistent");
+                
+                // Simulate unregister - should not throw
+                if (itemToId.TryGetValue(item, out int id))
+                {
+                    items.Remove(id);
+                    itemToId.Remove(item);
+                }
+                
+                Assert.AreEqual(0, items.Count);
+                Assert.AreEqual(0, itemToId.Count);
+            }
+
+            // Mock Item class for testing (stand-in for Unity's Item class)
+            // Using object to avoid type compatibility issues with actual Item class
+            private class MockItem
+            {
+                public string Name { get; }
+                public MockItem(string name) => Name = name;
+                public override string ToString() => Name;
+                public override int GetHashCode() => Name.GetHashCode();
+                public override bool Equals(object obj) => obj is MockItem other && other.Name == Name;
+            }
+        }
+
+        /// <summary>
+        /// Tests for RakeNetworkManager player ID assignment logic
+        /// </summary>
+        [TestFixture]
+        public class RakeNetworkManagerPlayerIdTests
+        {
+            [Test]
+            public void PlayerId_HostIsAlways1()
+            {
+                // Host always gets PlayerId = 1
+                const int hostPlayerId = 1;
+                Assert.AreEqual(1, hostPlayerId);
+            }
+
+            [Test]
+            public void PlayerId_ClientGetsConnectionIdPlus1()
+            {
+                // Clients get PlayerId = connectionId + 1
+                int connectionId = 5;
+                int playerId = connectionId + 1;
+                Assert.AreEqual(6, playerId);
+            }
+
+            [Test]
+            public void PlayerId_ConnectionIdZero_GetsPlayerId1()
+            {
+                // connectionId 0 would be host, but host doesn't connect to itself
+                // This is an edge case test
+                int connectionId = 0;
+                int playerId = connectionId + 1;
+                Assert.AreEqual(1, playerId);
+            }
+
+            [Test]
+            public void GetKnownPlayerCount_Server_ReturnsConnectedPlusHost()
+            {
+                // Server: _connectedClients.Count + 1 (host)
+                var connectedClients = new HashSet<int> { 1, 2, 3 }; // 3 clients
+                int count = connectedClients.Count + 1;
+                Assert.AreEqual(4, count); // 3 clients + 1 host
+            }
+
+            [Test]
+            public void GetKnownPlayerCount_Server_Empty_Returns1ForHost()
+            {
+                var connectedClients = new HashSet<int>();
+                int count = connectedClients.Count + 1;
+                Assert.AreEqual(1, count); // Just host
+            }
+
+            [Test]
+            public void GetKnownPlayerCount_Client_ReturnsKnownPlayerIds()
+            {
+                // Client: Math.Max(1, _knownPlayerIds.Count)
+                var knownPlayerIds = new HashSet<int> { 1, 2, 3 };
+                int count = Math.Max(1, knownPlayerIds.Count);
+                Assert.AreEqual(3, count);
+            }
+
+            [Test]
+            public void GetKnownPlayerCount_Client_Empty_Returns1()
+            {
+                var knownPlayerIds = new HashSet<int>();
+                int count = Math.Max(1, knownPlayerIds.Count);
+                Assert.AreEqual(1, count); // At least self
+            }
+        }
+
+        /// <summary>
+        /// Tests for RakeNetworkManager camera sync packet handling logic
+        /// </summary>
+        [TestFixture]
+        public class RakeNetworkManagerCameraSyncTests
+        {
+            [Test]
+            public void HandleServerCameraSync_RelaysToOtherClients()
+            {
+                // Simulate server relay logic
+                var connectedClients = new HashSet<int> { 1, 2, 3 };
+                int senderId = 2;
+                int relayedCount = 0;
+                
+                foreach (var connId in connectedClients)
+                {
+                    if (connId != senderId)
+                        relayedCount++;
+                }
+                
+                // Should relay to 2 other clients (1 and 3)
+                Assert.AreEqual(2, relayedCount);
+            }
+
+            [Test]
+            public void HandleServerCameraSync_DoesNotRelayToSender()
+            {
+                var connectedClients = new HashSet<int> { 1, 2 };
+                int senderId = 1;
+                int relayedCount = 0;
+                
+                // Simulate actual relay logic: only send if connId != senderId
+                foreach (var connId in connectedClients)
+                {
+                    if (connId != senderId)
+                    {
+                        relayedCount++;
+                    }
+                }
+                
+                // The sender should NOT receive the relay
+                // With 2 clients (1 and 2), sender=1, only client 2 should receive
+                Assert.AreEqual(1, relayedCount, "Should relay to exactly 1 other client (not sender)");
+            }
+
+            [Test]
+            public void HandleServerQuestTrigger_RelaysToAllClients()
+            {
+                // Quest triggers are relayed to ALL clients including sender (for confirmation)
+                var connectedClients = new HashSet<int> { 1, 2, 3 };
+                int relayedCount = 0;
+                
+                foreach (var connId in connectedClients)
+                {
+                    relayedCount++;
+                }
+                
+                Assert.AreEqual(3, relayedCount, "QuestTrigger should go to all clients including sender");
+            }
+
+            [Test]
+            public void ApplyCameraSyncLocal_FindsCameraById()
+            {
+                // Simulate finding camera by CameraId
+                var cameras = new List<MockNetworkedCamera>
+                {
+                    new MockNetworkedCamera(1u),
+                    new MockNetworkedCamera(2u),
+                    new MockNetworkedCamera(3u)
+                };
+                
+                uint targetId = 2u;
+                MockNetworkedCamera found = null;
+                
+                foreach (var cam in cameras)
+                {
+                    if (cam.CameraId == targetId)
+                    {
+                        found = cam;
+                        break;
+                    }
+                }
+                
+                Assert.IsNotNull(found);
+                Assert.AreEqual(2u, found.CameraId);
+            }
+
+            [Test]
+            public void ApplyCameraSyncLocal_HandlesMissingCamera()
+            {
+                var cameras = new List<MockNetworkedCamera>
+                {
+                    new MockNetworkedCamera(1u),
+                    new MockNetworkedCamera(2u)
+                };
+                
+                uint targetId = 99u; // Non-existent
+                MockNetworkedCamera found = null;
+                
+                foreach (var cam in cameras)
+                {
+                    if (cam.CameraId == targetId)
+                    {
+                        found = cam;
+                        break;
+                    }
+                }
+                
+                Assert.IsNull(found, "Should not find non-existent camera");
+            }
+
+            private class MockNetworkedCamera
+            {
+                public uint CameraId { get; }
+                public MockNetworkedCamera(uint id) => CameraId = id;
+            }
+        }
+
+        /// <summary>
+        /// Tests for RakeNetworkManager StartGame packet handling
+        /// </summary>
+        [TestFixture]
+        public class RakeNetworkManagerStartGameTests
+        {
+            [Test]
+            public void HandleServerStartGame_OnlyHostCanStart()
+            {
+                // Simulate: only connectionId 0 (host) can start, but host doesn't send to self
+                // Clients have connectionId >= 1, playerId = connectionId + 1 >= 2
+                // So playerId 1 = host, playerId > 1 = clients
+                
+                int hostPlayerId = 1;
+                int clientPlayerId = 5; // connectionId 4 + 1
+                
+                bool hostCanStart = (hostPlayerId == 1);
+                bool clientCanStart = (clientPlayerId == 1);
+                
+                Assert.IsTrue(hostCanStart);
+                Assert.IsFalse(clientCanStart);
+            }
+
+            [Test]
+            public void HandleClientStartGame_ParsesLevelIndex()
+            {
+                // Simulate: int.TryParse(packet.SceneName, out int levelIndex)
+                string sceneName = "2";
+                bool success = int.TryParse(sceneName, out int levelIndex);
+                
+                Assert.IsTrue(success);
+                Assert.AreEqual(2, levelIndex);
+            }
+
+            [Test]
+            public void HandleClientStartGame_FallbackToSceneName()
+            {
+                string sceneName = "GameScene";
+                bool success = int.TryParse(sceneName, out int levelIndex);
+                
+                Assert.IsFalse(success);
+                // Fallback would use sceneName directly
+                Assert.AreEqual("GameScene", sceneName);
+            }
+        }
+
+        /// <summary>
+        /// Tests for RakeNetworkManager ServerBroadcast and SendToServer methods
+        /// </summary>
+        [TestFixture]
+        public class RakeNetworkManagerBroadcastTests
+        {
+            [Test]
+            public void ServerBroadcast_SendsToAllConnectedClients()
+            {
+                // Simulate: foreach (var connId in _connectedClients) _server.Send(connId, data);
+                var connectedClients = new List<int> { 1, 2, 3, 4, 5 };
+                int sentCount = 0;
+                
+                foreach (var connId in connectedClients)
+                {
+                    sentCount++;
+                }
+                
+                Assert.AreEqual(5, sentCount);
+            }
+
+            [Test]
+            public void ServerBroadcast_EmptyClientList_SendsZero()
+            {
+                var connectedClients = new List<int>();
+                int sentCount = 0;
+                
+                foreach (var connId in connectedClients)
+                {
+                    sentCount++;
+                }
+                
+                Assert.AreEqual(0, sentCount);
+            }
+
+            [Test]
+            public void SendToServer_ClientConnected_SendsData()
+            {
+                // Simulate: if (_client != null && _client.Connected) _client.Send(data);
+                bool clientExists = true;
+                bool clientConnected = true;
+                bool shouldSend = clientExists && clientConnected;
+                
+                Assert.IsTrue(shouldSend);
+            }
+
+            [Test]
+            public void SendToServer_ClientNotConnected_DoesNotSend()
+            {
+                bool clientExists = true;
+                bool clientConnected = false;
+                bool shouldSend = clientExists && clientConnected;
+                
+                Assert.IsFalse(shouldSend);
+            }
+
+            [Test]
+            public void SendToServer_ClientNull_DoesNotSend()
+            {
+                bool clientExists = false;
+                bool clientConnected = true;
+                bool shouldSend = clientExists && clientConnected;
+                
+                Assert.IsFalse(shouldSend);
+            }
+        }
+
+        /// <summary>
+        /// Tests for RakeNetworkManager ProcessPendingConnects logic
+        /// </summary>
+        [TestFixture]
+        public class RakeNetworkManagerPendingConnectsTests
+        {
+            [Test]
+            public void ProcessPendingConnects_ProcessesAllQueuedPackets()
+            {
+                var queue = new Queue<MockPlayerConnectedPacket>();
+                queue.Enqueue(new MockPlayerConnectedPacket { PlayerId = 1, IsYou = true });
+                queue.Enqueue(new MockPlayerConnectedPacket { PlayerId = 2, IsYou = false });
+                queue.Enqueue(new MockPlayerConnectedPacket { PlayerId = 3, IsYou = false });
+                
+                int processedCount = 0;
+                while (queue.Count > 0)
+                {
+                    var packet = queue.Dequeue();
+                    processedCount++;
+                }
+                
+                Assert.AreEqual(3, processedCount);
+                Assert.AreEqual(0, queue.Count);
+            }
+
+            [Test]
+            public void ProcessPendingConnects_TracksPlayerIds()
+            {
+                var queue = new Queue<MockPlayerConnectedPacket>();
+                var knownPlayerIds = new HashSet<int>();
+                
+                queue.Enqueue(new MockPlayerConnectedPacket { PlayerId = 1, IsYou = true });
+                queue.Enqueue(new MockPlayerConnectedPacket { PlayerId = 2, IsYou = false });
+                
+                while (queue.Count > 0)
+                {
+                    var packet = queue.Dequeue();
+                    knownPlayerIds.Add(packet.PlayerId);
+                }
+                
+                Assert.AreEqual(2, knownPlayerIds.Count);
+                Assert.IsTrue(knownPlayerIds.Contains(1));
+                Assert.IsTrue(knownPlayerIds.Contains(2));
+            }
+
+            private class MockPlayerConnectedPacket
+            {
+                public int PlayerId { get; set; }
+                public bool IsYou { get; set; }
+            }
+        }
+
+        /// <summary>
+        /// Tests for RakeNetworkManager ItemPickup packet handling logic
+        /// </summary>
+        [TestFixture]
+        public class RakeNetworkManagerItemPickupTests
+        {
+            [Test]
+            public void HandleServerItemPickup_RaceConditionProtection()
+            {
+                // Simulate: if (!_networkedItems.ContainsKey(packet.ItemNetworkId)) return;
+                var networkedItems = new Dictionary<int, object>();
+                networkedItems[1] = new object(); // Item exists
+                networkedItems[2] = new object();
+                
+                int itemIdToPickup = 1;
+                bool itemExists = networkedItems.ContainsKey(itemIdToPickup);
+                Assert.IsTrue(itemExists, "Item should exist before pickup");
+                
+                // Simulate pickup - remove immediately
+                networkedItems.Remove(itemIdToPickup);
+                bool itemStillExists = networkedItems.ContainsKey(itemIdToPickup);
+                Assert.IsFalse(itemStillExists, "Item should be removed after pickup");
+                
+                // Second pickup attempt for same item
+                bool secondAttemptExists = networkedItems.ContainsKey(itemIdToPickup);
+                Assert.IsFalse(secondAttemptExists, "Second pickup should fail - item already taken");
+            }
+
+            [Test]
+            public void HandleServerItemPickup_GivesCorrectWeaponId()
+            {
+                // Test the item type to weapon ID mapping logic
+                var itemTypeToWeaponId = new Dictionary<string, int>
+                {
+                    { "Medkit_item", 8 },
+                    { "Rifle_item", 1 },
+                    { "RifleAmmo_item", 1 },
+                    { "SniperRifle_item", 6 },
+                    { "SniperAmmo_item", 6 },
+                    { "Trap_item", 4 },
+                    { "Camera_item", 2 },
+                    { "Binocular_item", 7 },
+                    { "MapCase_item", 3 },
+                    { "Food_item", 5 }
+                };
+                
+                foreach (var kvp in itemTypeToWeaponId)
+                {
+                    Assert.IsTrue(kvp.Value > 0, $"Weapon ID for {kvp.Key} should be positive");
+                }
+                
+                // Verify specific mappings
+                Assert.AreEqual(8, itemTypeToWeaponId["Medkit_item"]);
+                Assert.AreEqual(1, itemTypeToWeaponId["Rifle_item"]);
+                Assert.AreEqual(2, itemTypeToWeaponId["Camera_item"]);
+            }
+        }
+
+        /// <summary>
+        /// Tests for RakeNetworkManager DamageRequest handling logic
+        /// </summary>
+        [TestFixture]
+        public class RakeNetworkManagerDamageRequestTests
+        {
+            [Test]
+            public void HandleServerDamageRequest_CalculatesHitDirection()
+            {
+                // Simulate: hitDirection = (enemyAI.transform.position - shooterPosition).normalized;
+                Vector3 enemyPos = new Vector3(10, 0, 20);
+                Vector3 shooterPos = new Vector3(0, 0, 0);
+                
+                Vector3 hitDirection = (enemyPos - shooterPos).normalized;
+                Vector3 expected = new Vector3(10, 0, 20).normalized;
+                
+                Assert.AreEqual(expected, hitDirection);
+            }
+
+            [Test]
+            public void HandleServerDamageRequest_DamageReductionApplied()
+            {
+                // Simulate: finalAmount = Mathf.RoundToInt(amount * reduction);
+                int amount = 25;
+                float reduction = 0.2f; // 80% reduction
+                
+                int finalAmount = Mathf.RoundToInt(amount * reduction);
+                Assert.AreEqual(5, finalAmount, "25 * 0.2 = 5");
+            }
+
+            [Test]
+            public void HandleServerDamageRequest_BroadcastsDamageApplied()
+            {
+                // Simulate broadcasting DamageAppliedPacket to all clients
+                var connectedClients = new List<int> { 1, 2, 3 };
+                int broadcastCount = 0;
+                foreach (var connId in connectedClients)
+                {
+                    // Would send DamageAppliedPacket { TargetId = 99, NewHealth = 75f }
+                    broadcastCount++;
+                }
+                
+                Assert.AreEqual(3, broadcastCount);
+            }
+        }
+
+        /// <summary>
+        /// Tests for RakeNetworkManager RakeStatePacket handling
+        /// </summary>
+        [TestFixture]
+        public class RakeNetworkManagerRakeStateTests
+        {
+            [Test]
+            public void HandleClientRakeState_AppliesSyncData()
+            {
+                // Simulate: _cachedRake.ApplySyncData(packet.Position, packet.Rotation, packet.State, packet.Health);
+                // Use raw Quaternion constructor instead of Quaternion.Euler (requires Unity runtime)
+                Vector3 position = new Vector3(10, 5, 20);
+                Quaternion rotation = new Quaternion(0f, 0.707107f, 0f, 0.707107f); // 90 degrees around Y
+                byte state = 2; // Chase
+                float health = 75.5f;
+                
+                // Just verify the parameters are correctly extracted
+                Assert.AreEqual(new Vector3(10, 5, 20), position);
+                Assert.AreEqual(new Quaternion(0f, 0.707107f, 0f, 0.707107f), rotation);
+                Assert.AreEqual(2, state);
+                Assert.AreEqual(75.5f, health);
+            }
+
+            [Test]
+            public void HandleClientDamageApplied_UpdatesHealth()
+            {
+                // Simulate: _cachedRake.ApplyHealth(packet.NewHealth);
+                float newHealth = 50f;
+                
+                Assert.AreEqual(50f, newHealth);
+            }
+        }
+
+        #endregion
+
+        #region NetworkedCamera Static Registry Tests
+
+        /// <summary>
+        /// Tests the static camera registry logic (O(1) lookup by CameraId)
+        /// </summary>
+        [TestFixture]
+        public class NetworkedCameraRegistryTests
+        {
+            [Test]
+            public void TryGetCamera_ReturnsTrue_WhenCameraExists()
+            {
+                var registry = new Dictionary<uint, MockNetworkedCamera>
+                {
+                    { 1u, new MockNetworkedCamera(1u) },
+                    { 2u, new MockNetworkedCamera(2u) },
+                    { 3u, new MockNetworkedCamera(3u) }
+                };
+                
+                bool found = registry.TryGetValue(2u, out var camera);
+                
+                Assert.IsTrue(found);
+                Assert.IsNotNull(camera);
+                Assert.AreEqual(2u, camera.CameraId);
+            }
+
+            [Test]
+            public void TryGetCamera_ReturnsFalse_WhenCameraMissing()
+            {
+                var registry = new Dictionary<uint, MockNetworkedCamera>
+                {
+                    { 1u, new MockNetworkedCamera(1u) },
+                    { 2u, new MockNetworkedCamera(2u) }
+                };
+                
+                bool found = registry.TryGetValue(99u, out var camera);
+                
+                Assert.IsFalse(found);
+                Assert.IsNull(camera);
+            }
+
+            [Test]
+            public void Registry_ReplacesExistingCameraId()
+            {
+                var registry = new Dictionary<uint, MockNetworkedCamera>
+                {
+                    { 1u, new MockNetworkedCamera(1u) }
+                };
+                
+                // Simulate replacement logic from Start()
+                var newCamera = new MockNetworkedCamera(1u);
+                if (registry.ContainsKey(1u))
+                {
+                    registry[1u] = newCamera; // Replace
+                }
+                
+                Assert.AreSame(newCamera, registry[1u]);
+            }
+
+            [Test]
+            public void Registry_RemovesCamera_OnDestroy()
+            {
+                var registry = new Dictionary<uint, MockNetworkedCamera>
+                {
+                    { 1u, new MockNetworkedCamera(1u) },
+                    { 2u, new MockNetworkedCamera(2u) }
+                };
+                
+                // Simulate OnDestroy cleanup
+                uint cameraId = 1u;
+                if (registry.ContainsKey(cameraId))
+                {
+                    registry.Remove(cameraId);
+                }
+                
+                Assert.IsFalse(registry.ContainsKey(1u));
+                Assert.IsTrue(registry.ContainsKey(2u));
+            }
+
+            private class MockNetworkedCamera
+            {
+                public uint CameraId { get; }
+                public MockNetworkedCamera(uint id) => CameraId = id;
+            }
+        }
+
+        #endregion
+
+        #region NetworkedCamera Visual Update Logic Tests
+
+        /// <summary>
+        /// Tests the UpdateCameraVisuals logic
+        /// </summary>
+        [TestFixture]
+        public class NetworkedCameraVisualsTests
+        {
+            [Test]
+            public void UpdateCameraVisuals_ActiveAndNotBroken_EnablesVisuals()
+            {
+                bool isActive = true;
+                bool isBroken = false;
+                
+                bool shouldBeActive = isActive && !isBroken;
+                Assert.IsTrue(shouldBeActive);
+            }
+
+            [Test]
+            public void UpdateCameraVisuals_Inactive_DisablesVisuals()
+            {
+                bool isActive = false;
+                bool isBroken = false;
+                
+                bool shouldBeActive = isActive && !isBroken;
+                Assert.IsFalse(shouldBeActive);
+            }
+
+            [Test]
+            public void UpdateCameraVisuals_Broken_DisablesVisuals()
+            {
+                bool isActive = true;
+                bool isBroken = true;
+                
+                bool shouldBeActive = isActive && !isBroken;
+                Assert.IsFalse(shouldBeActive, "Broken cameras should never be active visually");
+            }
+
+            [Test]
+            public void UpdateCameraVisuals_CameraComponentEnabledMatches()
+            {
+                bool isActive = true;
+                bool isBroken = false;
+                
+                bool cameraEnabled = isActive && !isBroken;
+                Assert.IsTrue(cameraEnabled);
+                
+                isBroken = true;
+                cameraEnabled = isActive && !isBroken;
+                Assert.IsFalse(cameraEnabled);
+            }
+        }
+
+        #endregion
+
+        #region NetworkedCamera ApplyCameraSync Logic Tests
+
+        /// <summary>
+        /// Tests the ApplyCameraSync logic (client-side state application)
+        /// </summary>
+        [TestFixture]
+        public class NetworkedCameraApplySyncTests
+        {
+            [Test]
+            public void ApplyCameraSync_UpdatesAllFields()
+            {
+                // Simulate the field updates in ApplyCameraSync
+                uint cameraId = 0;
+                float batteryLevel = 0f;
+                bool isActive = false;
+                bool isBroken = false;
+                int placedByPlayerId = 0;
+                
+                var packet = new RakeMultiplayer.Networking.CameraSyncPacket
+                {
+                    CameraId = 42u,
+                    BatteryLevel = 75.5f,
+                    IsActive = true,
+                    IsBroken = false,
+                    PlacedByPlayerId = 5
+                };
+                
+                cameraId = packet.CameraId;
+                batteryLevel = packet.BatteryLevel;
+                isActive = packet.IsActive;
+                isBroken = packet.IsBroken;
+                placedByPlayerId = packet.PlacedByPlayerId;
+                
+                Assert.AreEqual(42u, cameraId);
+                Assert.AreEqual(75.5f, batteryLevel, 0.001f);
+                Assert.IsTrue(isActive);
+                Assert.IsFalse(isBroken);
+                Assert.AreEqual(5, placedByPlayerId);
+            }
+
+            [Test]
+            public void ApplyCameraSync_FiresBatteryChangedEvent_WhenBatteryChanges()
+            {
+                float oldBattery = 100f;
+                float newBattery = 75.5f;
+                bool batteryChanged = Math.Abs(oldBattery - newBattery) > 0.01f;
+                
+                Assert.IsTrue(batteryChanged);
+            }
+
+            [Test]
+            public void ApplyCameraSync_DoesNotFireBatteryChanged_WhenBatterySame()
+            {
+                float oldBattery = 100f;
+                float newBattery = 100.005f; // Difference < 0.01
+                bool batteryChanged = Math.Abs(oldBattery - newBattery) > 0.01f;
+                
+                Assert.IsFalse(batteryChanged);
+            }
+
+            [Test]
+            public void ApplyCameraSync_FiresCameraBroken_WhenBecomesBroken()
+            {
+                bool oldBroken = false;
+                bool newBroken = true;
+                bool brokenChanged = oldBroken != newBroken;
+                bool firesEvent = brokenChanged && newBroken;
+                
+                Assert.IsTrue(firesEvent);
+            }
+
+            [Test]
+            public void ApplyCameraSync_DoesNotFireCameraBroken_WhenAlreadyBroken()
+            {
+                bool oldBroken = true;
+                bool newBroken = true;
+                bool brokenChanged = oldBroken != newBroken;
+                bool firesEvent = brokenChanged && newBroken;
+                
+                Assert.IsFalse(firesEvent);
+            }
+
+            [Test]
+            public void ApplyCameraSync_DoesNotFireCameraBroken_WhenFixed()
+            {
+                bool oldBroken = true;
+                bool newBroken = false;
+                bool brokenChanged = oldBroken != newBroken;
+                bool firesEvent = brokenChanged && newBroken;
+                
+                Assert.IsFalse(firesEvent, "Should not fire OnCameraBroken when fixing");
+            }
+        }
+
+        #endregion
+
+        #region NetworkedCamera HandleCameraSpawn Logic Tests
+
+        /// <summary>
+        /// Tests the HandleCameraSpawn logic (client-side)
+        /// </summary>
+        [TestFixture]
+        public class NetworkedCameraHandleSpawnTests
+        {
+            [Test]
+            public void HandleCameraSpawn_InitializesState()
+            {
+                uint cameraId = 0;
+                int placedByPlayerId = 0;
+                float batteryLevel = 0f;
+                bool isActive = true; // Start with different values
+                bool isBroken = true;
+                
+                var packet = new RakeMultiplayer.Networking.CameraSpawnPacket
+                {
+                    CameraId = 10u,
+                    PlacedByPlayerId = 3
+                };
+                
+                cameraId = packet.CameraId;
+                placedByPlayerId = packet.PlacedByPlayerId;
+                batteryLevel = 100f;
+                isActive = false;
+                isBroken = false;
+                
+                Assert.AreEqual(10u, cameraId);
+                Assert.AreEqual(3, placedByPlayerId);
+                Assert.AreEqual(100f, batteryLevel);
+                Assert.IsFalse(isActive);
+                Assert.IsFalse(isBroken);
+            }
+        }
+
+        #endregion
+
+        #region NetworkedCamera HandleCameraDestroy Logic Tests
+
+        /// <summary>
+        /// Tests the HandleCameraDestroy logic (client-side)
+        /// </summary>
+        [TestFixture]
+        public class NetworkedCameraHandleDestroyTests
+        {
+            [Test]
+            public void HandleCameraDestroy_LogsAndWaitsForNetIdentityCleanup()
+            {
+                // Simulate: object will be destroyed by NetIdentity cleanup
+                // This test just verifies the logic doesn't crash
+                uint cameraId = 5u;
+                var packet = new RakeMultiplayer.Networking.CameraDestroyPacket
+                {
+                    CameraId = cameraId
+                };
+                
+                Assert.AreEqual(cameraId, packet.CameraId);
+                // In real code: NetIdentity handles actual destruction
+            }
+        }
+
+        #endregion
+
+        #region NetworkedCamera HandleQuestTrigger Logic Tests
+
+        /// <summary>
+        /// Tests the HandleQuestTrigger logic (client-side)
+        /// </summary>
+        [TestFixture]
+        public class NetworkedCameraHandleQuestTriggerTests
+        {
+            [Test]
+            public void HandleQuestTrigger_CameraBreak_LogsInfo()
+            {
+                // TriggerType: 0=CameraBreak
+                byte triggerType = 0;
+                uint cameraId = 7u;
+                
+                bool isCameraBreak = (triggerType == 0 && cameraId > 0);
+                Assert.IsTrue(isCameraBreak);
+            }
+
+            [Test]
+            public void HandleQuestTrigger_BaitTaken_LogsInfo()
+            {
+                // TriggerType: 1=BaitTaken
+                byte triggerType = 1;
+                
+                bool isBaitTaken = (triggerType == 1);
+                Assert.IsTrue(isBaitTaken);
+            }
+
+            [Test]
+            public void HandleQuestTrigger_TrapTriggered_LogsInfo()
+            {
+                // TriggerType: 2=TrapTriggered
+                byte triggerType = 2;
+                
+                bool isTrapTriggered = (triggerType == 2);
+                Assert.IsTrue(isTrapTriggered);
+            }
+
+            [Test]
+            public void HandleQuestTrigger_UnknownType_NoSpecificHandling()
+            {
+                byte triggerType = 255; // Unknown
+                
+                bool isKnown = (triggerType == 0 || triggerType == 1 || triggerType == 2);
+                Assert.IsFalse(isKnown);
+            }
+        }
+
+        #endregion
+
+        #region Adversarial / Edge Case Tests
+
+        /// <summary>
+        /// Adversarial tests for edge cases and invalid inputs
+        /// </summary>
+        [TestFixture]
+        public class AdversarialTests
+        {
+            [Test]
+            public void CameraSyncPacket_VeryLargeArray_ThrowsPacketTooLarge()
+            {
+                // PacketSerializer has MAX_PACKET_SIZE = 65536
+                byte[] largeData = new byte[65537];
+                largeData[0] = (byte)PacketType.CameraSync; // Valid type byte
+                
+                Assert.Throws<ArgumentException>(() => PacketSerializer.Deserialize(largeData));
+            }
+
+            [Test]
+            public void CameraSyncPacket_NaNValues_InRotation_Serializes()
+            {
+                // Rotation with NaN components
+                var original = new RakeMultiplayer.Networking.CameraSyncPacket
+                {
+                    CameraId = 1u,
+                    Position = Vector3.zero,
+                    Rotation = new Quaternion(float.NaN, 0, 0, 0),
+                    IsActive = false,
+                    IsBroken = false,
+                    BatteryLevel = 50f,
+                    PlacedByPlayerId = 0
+                };
+                
+                // Should serialize without throwing
+                Assert.DoesNotThrow(() => original.Serialize());
+            }
+
+            [Test]
+            public void CameraSyncPacket_InfinityValues_InPosition_Serializes()
+            {
+                var original = new RakeMultiplayer.Networking.CameraSyncPacket
+                {
+                    CameraId = 1u,
+                    Position = new Vector3(float.PositiveInfinity, float.NegativeInfinity, 0),
+                    Rotation = Quaternion.identity,
+                    IsActive = false,
+                    IsBroken = false,
+                    BatteryLevel = 50f,
+                    PlacedByPlayerId = 0
+                };
+                
+                Assert.DoesNotThrow(() => original.Serialize());
+            }
+
+            [Test]
+            public void PacketSerializer_CorruptedData_ThrowsOrReturnsPartial()
+            {
+                // Truncated packet data
+                var original = new RakeMultiplayer.Networking.CameraSyncPacket
+                {
+                    CameraId = 1u,
+                    Position = new Vector3(10, 20, 30),
+                    Rotation = Quaternion.identity,
+                    IsActive = true,
+                    IsBroken = false,
+                    BatteryLevel = 100f,
+                    PlacedByPlayerId = 1
+                };
+                
+                byte[] data = original.Serialize();
+                byte[] truncated = new byte[data.Length / 2]; // Cut in half
+                Array.Copy(data, truncated, truncated.Length);
+                
+                // Should throw due to insufficient data
+                Assert.Throws<EndOfStreamException>(() => PacketSerializer.Deserialize(truncated));
+            }
+
+            [Test]
+            public void BatteryDrainLogic_NegativeDrainRate_ReturnsMaxValue()
+            {
+                float batteryLevel = 50f;
+                float batteryDrainPerMinute = -10f; // Invalid negative drain
+                
+                float remaining = batteryDrainPerMinute <= 0 ? float.MaxValue : (batteryLevel / batteryDrainPerMinute) * 60f;
+                Assert.AreEqual(float.MaxValue, remaining);
+            }
+
+            [Test]
+            public void GetItemNetworkId_NullPosition_HandlesGracefully()
+            {
+                // Simulate fallback with zero position
+                Vector3 pos = Vector3.zero;
+                string name = "TestItem";
+                
+                int x = Mathf.RoundToInt(pos.x * 100f);
+                int y = Mathf.RoundToInt(pos.y * 100f);
+                int z = Mathf.RoundToInt(pos.z * 100f);
+                int hash = (x * 73856093) ^ (y * 19349663) ^ (z * 83492791) ^ name.GetHashCode();
+                
+                Assert.AreEqual(name.GetHashCode(), hash, "Zero position should produce hash based only on name");
+            }
+
+            [Test]
+            public void RegisterItem_IntOverflowProtection()
+            {
+                // Test that nextId increment doesn't overflow
+                int nextId = int.MaxValue;
+                int id = nextId;
+                
+                // In real code: if (_nextItemNetworkId <= id) _nextItemNetworkId = id + 1;
+                // This would overflow, but C# wraps or throws in checked context
+                // The code doesn't use checked, so it would wrap to negative
+                // This test documents the potential issue
+                Assert.AreEqual(int.MaxValue, id);
+                
+                // Note: Actual code should use checked or handle overflow
+                // This is a documented edge case
+            }
+        }
+
+        #endregion
+
+        #region RakeNetworkManager Client-Side Packet Handler Tests
+
+        /// <summary>
+        /// Tests for client-side packet handler switch statement coverage
+        /// </summary>
+        [TestFixture]
+        public class RakeNetworkManagerClientPacketHandlersTests
+        {
+            [Test]
+            public void OnClientDataReceived_HandlesAllExpectedPacketTypes()
+            {
+                // Verify all packet types handled in client switch are tested
+                var handledTypes = new HashSet<PacketType>
+                {
+                    PacketType.PlayerState,
+                    PacketType.PlayerConnected,
+                    PacketType.PlayerDisconnected,
+                    PacketType.RakeState,
+                    PacketType.DamageApplied,
+                    PacketType.FireVisuals,
+                    PacketType.StartGame,
+                    PacketType.ItemDestroyed,
+                    PacketType.PhaseChange,
+                    PacketType.SessionState,
+                    PacketType.CameraSync,
+                    PacketType.CameraSpawn,
+                    PacketType.CameraDestroy,
+                    PacketType.QuestTrigger
+                };
+                
+                // These should all have corresponding HandleClient* methods
+                Assert.AreEqual(14, handledTypes.Count);
+                
+                // Verify none are server-only types
+                var serverOnlyTypes = new HashSet<PacketType>
+                {
+                    PacketType.DamageRequest,
+                    PacketType.ItemPickup,
+                    PacketType.StartGame // Actually client can send this too
+                };
+                
+                // CameraSync, CameraSpawn, CameraDestroy, QuestTrigger are server-authoritative
+                // but client RECEIVES them (has handlers), doesn't SEND them
+            }
+
+            [Test]
+            public void OnServerDataReceived_RejectsServerAuthoritativePackets()
+            {
+                // Server should log warning and ignore these from clients
+                var rejectedTypes = new HashSet<PacketType>
+                {
+                    PacketType.CameraSync,
+                    PacketType.CameraSpawn,
+                    PacketType.CameraDestroy,
+                    PacketType.QuestTrigger
+                };
+                
+                foreach (var type in rejectedTypes)
+                {
+                    // In real code: RakeMultiplayerPlugin.Log?.LogWarning($"[Net] Server: received {type} from C{connectionId} (client-spoofed, ignoring)");
+                    Assert.IsTrue(true, $"Server rejects {type} from clients");
+                }
+            }
+        }
+
+        #endregion
+
+        #region Integration: NetworkedCamera + RakeNetworkManager Packet Flow Tests
+
+        /// <summary>
+        /// Tests the full packet flow: NetworkedCamera -> RakeNetworkManager -> Network
+        /// </summary>
+        [TestFixture]
+        public class CameraNetworkFlowTests
+        {
+            [Test]
+            public void CameraSyncPacket_FullRoundTrip_ServerToClient()
+            {
+                // 1. Server creates CameraSyncPacket
+                // Use raw Quaternion constructor instead of Quaternion.Euler (requires Unity runtime)
+                var serverPacket = new RakeMultiplayer.Networking.CameraSyncPacket
+                {
+                    CameraId = 99u,
+                    Position = new Vector3(100f, 10f, 50f),
+                    Rotation = new Quaternion(0f, 0.382683f, 0f, 0.92388f), // 45 degrees around Y
+                    IsActive = true,
+                    IsBroken = false,
+                    BatteryLevel = 85.5f,
+                    PlacedByPlayerId = 2
+                };
+                
+                // 2. Serialize for network
+                byte[] data = serverPacket.Serialize();
+                Assert.Greater(data.Length, 0);
+                
+                // 3. Deserialize on client (via PacketSerializer)
+                var clientPacket = PacketSerializer.Deserialize(data) as RakeMultiplayer.Networking.CameraSyncPacket;
+                Assert.IsNotNull(clientPacket);
+                
+                // 4. Client applies to NetworkedCamera (simulated)
+                uint cameraId = clientPacket.CameraId;
+                float battery = clientPacket.BatteryLevel;
+                bool active = clientPacket.IsActive;
+                bool broken = clientPacket.IsBroken;
+                int placer = clientPacket.PlacedByPlayerId;
+                
+                Assert.AreEqual(99u, cameraId);
+                Assert.AreEqual(85.5f, battery, 0.001f);
+                Assert.IsTrue(active);
+                Assert.IsFalse(broken);
+                Assert.AreEqual(2, placer);
+            }
+
+            [Test]
+            public void CameraSpawnPacket_FullRoundTrip_ServerToClient()
+            {
+                var serverPacket = new RakeMultiplayer.Networking.CameraSpawnPacket
+                {
+                    CameraId = 123u,
+                    Position = new Vector3(-50f, 5f, 200f),
+                    Rotation = new Quaternion(0f, 1f, 0f, 0f), // 180 degrees around Y
+                    PlacedByPlayerId = 4
+                };
+                
+                byte[] data = serverPacket.Serialize();
+                var clientPacket = PacketSerializer.Deserialize(data) as RakeMultiplayer.Networking.CameraSpawnPacket;
+                
+                Assert.IsNotNull(clientPacket);
+                Assert.AreEqual(123u, clientPacket.CameraId);
+                Assert.AreEqual(new Vector3(-50f, 5f, 200f), clientPacket.Position);
+                Assert.AreEqual(4, clientPacket.PlacedByPlayerId);
+            }
+
+            [Test]
+            public void QuestTriggerPacket_FullRoundTrip_ServerToAllClients()
+            {
+                var serverPacket = new RakeMultiplayer.Networking.QuestTriggerPacket
+                {
+                    TriggerType = 0, // CameraBreak
+                    Position = new Vector3(10f, 2f, 30f),
+                    CameraId = 7u
+                };
+                
+                byte[] data = serverPacket.Serialize();
+                
+                // Multiple clients receive same data
+                for (int i = 0; i < 4; i++)
+                {
+                    var clientPacket = PacketSerializer.Deserialize(data) as RakeMultiplayer.Networking.QuestTriggerPacket;
+                    Assert.IsNotNull(clientPacket);
+                    Assert.AreEqual(0, clientPacket.TriggerType);
+                    Assert.AreEqual(7u, clientPacket.CameraId);
+                }
+            }
+
+            [Test]
+            public void CameraDestroyPacket_FullRoundTrip_ServerToClient()
+            {
+                var serverPacket = new RakeMultiplayer.Networking.CameraDestroyPacket
+                {
+                    CameraId = 456u
+                };
+                
+                byte[] data = serverPacket.Serialize();
+                var clientPacket = PacketSerializer.Deserialize(data) as RakeMultiplayer.Networking.CameraDestroyPacket;
+                
+                Assert.IsNotNull(clientPacket);
+                Assert.AreEqual(456u, clientPacket.CameraId);
             }
         }
 

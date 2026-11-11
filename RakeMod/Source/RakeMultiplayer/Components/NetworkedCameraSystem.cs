@@ -108,11 +108,9 @@ namespace RakeMultiplayer
                     {
                         IsActive = false; // Broken cameras cannot be active
                         OnCameraBroken?.Invoke();
-                        // Trigger QuestTriggerPacket on server
-                        if (RakeMultiplayerPlugin.isServer)
-                        {
-                            SendQuestTrigger(0); // CameraBreak = 0
-                        }
+                        // NOTE: QuestTrigger for CameraBreak IS sent in BreakCamera() to alert Rake AI.
+                        // Client HandleQuestTrigger does NOT fire OnCameraBroken (avoids race with CameraSync).
+                        // CameraSync packet is the authoritative source for IsBroken state on clients.
                     }
                 }
             }
@@ -139,6 +137,19 @@ namespace RakeMultiplayer
 
         #endregion
 
+        /// <summary>
+        /// Static registry for O(1) camera lookup by CameraId
+        /// </summary>
+        private static readonly Dictionary<uint, NetworkedCamera> _cameraRegistry = new Dictionary<uint, NetworkedCamera>();
+
+        /// <summary>
+        /// Try to find a NetworkedCamera by CameraId
+        /// </summary>
+        public static bool TryGetCamera(uint cameraId, out NetworkedCamera camera)
+        {
+            return _cameraRegistry.TryGetValue(cameraId, out camera);
+        }
+
         #region Unity Lifecycle
 
         private void Awake()
@@ -156,11 +167,8 @@ namespace RakeMultiplayer
                 _cameraVisuals = _cameraComponent.gameObject;
             }
 
-            // Assign CameraId from NetIdentity if not set
-            if (_cameraId == 0 && _netIdentity.NetId != 0)
-            {
-                _cameraId = _netIdentity.NetId;
-            }
+            // NOTE: CameraId assignment moved to Start() to avoid race with NetIdentity registration
+            // Server's InitializePlacement() is the sole authority for CameraId
         }
 
         private void Start()
@@ -171,14 +179,43 @@ namespace RakeMultiplayer
                 _netIdentity.Register();
             }
 
-            // Server assigns CameraId if not set
+            // Server assigns CameraId if not set (sole authority)
             if (RakeMultiplayerPlugin.isServer && _cameraId == 0)
             {
                 _cameraId = _netIdentity.NetId;
             }
 
+            // Register in static registry if CameraId is set
+            if (_cameraId != 0)
+            {
+                if (!_cameraRegistry.ContainsKey(_cameraId))
+                {
+                    _cameraRegistry[_cameraId] = this;
+                }
+                else
+                {
+                    RakeMultiplayerPlugin.Log?.LogWarning($"[NetworkedCamera] CameraId {_cameraId} already in registry, replacing");
+                    _cameraRegistry[_cameraId] = this;
+                }
+            }
+
             // Disable camera visuals initially
             UpdateCameraVisuals();
+        }
+
+        private void OnDestroy()
+        {
+            // Server: send CameraDestroy notification before cleanup
+            if (RakeMultiplayerPlugin.isServer && _netIdentity != null && NetIdentity.Registry.ContainsKey(_netIdentity.NetId))
+            {
+                SendCameraDestroy();
+            }
+
+            // Unregister from static registry
+            if (_cameraId != 0 && _cameraRegistry.ContainsKey(_cameraId))
+            {
+                _cameraRegistry.Remove(_cameraId);
+            }
         }
 
         private void Update()
@@ -186,13 +223,13 @@ namespace RakeMultiplayer
             if (!RakeMultiplayerPlugin.Enabled.Value) return;
             if (!RakeMultiplayerPlugin.isConnected) return;
 
-            // Only server updates battery and state
+            // Server-authoritative battery drain and state updates
             if (RakeMultiplayerPlugin.isServer)
             {
                 UpdateServer();
             }
 
-            // Both server and clients send/receive sync
+            // Periodic sync (both server and clients)
             _syncTimer += Time.deltaTime;
             if (_syncTimer >= SyncInterval)
             {
@@ -201,14 +238,6 @@ namespace RakeMultiplayer
                     SendCameraUpdate();
                 }
                 _syncTimer = 0f;
-            }
-        }
-
-        private void OnDestroy()
-        {
-            if (RakeMultiplayerPlugin.isServer && _netIdentity != null && NetIdentity.Registry.ContainsKey(_netIdentity.NetId))
-            {
-                SendCameraDestroy();
             }
         }
 
@@ -299,6 +328,8 @@ namespace RakeMultiplayer
             IsBroken = true;
             RakeMultiplayerPlugin.Log?.LogInfo($"[NetworkedCamera] Camera {CameraId} broken by player {brokenByPlayerId}");
             SendCameraBreak();
+            // Send QuestTriggerPacket to alert Rake AI (CameraBreak = 0)
+            SendQuestTrigger(0);
         }
 
         /// <summary>
@@ -320,6 +351,17 @@ namespace RakeMultiplayer
         {
             if (!RakeMultiplayerPlugin.isServer) return;
 
+            // Ensure CameraId is assigned (sole authority)
+            if (_cameraId == 0 && _netIdentity != null && _netIdentity.NetId != 0)
+            {
+                _cameraId = _netIdentity.NetId;
+                // Register in static registry
+                if (!_cameraRegistry.ContainsKey(_cameraId))
+                {
+                    _cameraRegistry[_cameraId] = this;
+                }
+            }
+
             _placedByPlayerId = placedByPlayerId;
             _batteryLevel = 100f;
             _isActive = false;
@@ -340,6 +382,10 @@ namespace RakeMultiplayer
         {
             if (RakeMultiplayerPlugin.isServer) return; // Don't apply on server
 
+            bool batteryChanged = Mathf.Abs(_batteryLevel - packet.BatteryLevel) > 0.01f;
+            bool activeChanged = _isActive != packet.IsActive;
+            bool brokenChanged = _isBroken != packet.IsBroken;
+
             _cameraId = packet.CameraId;
             _batteryLevel = packet.BatteryLevel;
             _isActive = packet.IsActive;
@@ -347,6 +393,16 @@ namespace RakeMultiplayer
             _placedByPlayerId = packet.PlacedByPlayerId;
 
             UpdateCameraVisuals();
+
+            // Fire events for changes
+            if (batteryChanged)
+            {
+                OnBatteryChanged?.Invoke(_batteryLevel);
+            }
+            if (brokenChanged && _isBroken)
+            {
+                OnCameraBroken?.Invoke();
+            }
 
             RakeMultiplayerPlugin.Log?.LogInfo($"[NetworkedCamera] Client received camera sync: {CameraId}, active={_isActive}, broken={_isBroken}, battery={_batteryLevel:F1}");
         }
@@ -387,10 +443,20 @@ namespace RakeMultiplayer
             if (RakeMultiplayerPlugin.isServer) return;
 
             // TriggerType: 0=CameraBreak, 1=BaitTaken, 2=TrapTriggered
+            // NOTE: OnCameraBroken is fired ONLY by ApplyCameraSync (CameraSync packet)
+            // to avoid race conditions where QuestTrigger arrives before CameraSync
             if (packet.TriggerType == 0 && packet.CameraId == _cameraId)
             {
-                RakeMultiplayerPlugin.Log?.LogInfo($"[NetworkedCamera] Client received camera break trigger for camera {_cameraId}");
-                OnCameraBroken?.Invoke();
+                RakeMultiplayerPlugin.Log?.LogInfo($"[NetworkedCamera] Client received camera break trigger for camera {_cameraId} (UI/sound only, state from CameraSync)");
+                // Could play break sound effect here if needed
+            }
+            else if (packet.TriggerType == 1) // BaitTaken
+            {
+                RakeMultiplayerPlugin.Log?.LogInfo($"[NetworkedCamera] Client received bait taken trigger at camera {_cameraId}");
+            }
+            else if (packet.TriggerType == 2) // TrapTriggered
+            {
+                RakeMultiplayerPlugin.Log?.LogInfo($"[NetworkedCamera] Client received trap triggered trigger at camera {_cameraId}");
             }
         }
 

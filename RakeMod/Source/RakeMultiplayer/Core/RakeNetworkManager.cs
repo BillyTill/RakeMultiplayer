@@ -369,6 +369,22 @@ namespace RakeMultiplayer
                     case PacketType.StartGame:
                         HandleServerStartGame(connectionId, (StartGamePacket)packet, data);
                         break;
+                    case PacketType.CameraSync:
+                        // CameraSync is SERVER-AUTHORITATIVE only — clients must not send it
+                        RakeMultiplayerPlugin.Log?.LogWarning($"[Net] Server: received CameraSync from C{connectionId} (client-spoofed, ignoring)");
+                        break;
+                    case PacketType.CameraSpawn:
+                        // CameraSpawn is SERVER-AUTHORITATIVE only — clients must not send it
+                        RakeMultiplayerPlugin.Log?.LogWarning($"[Net] Server: received CameraSpawn from C{connectionId} (client-spoofed, ignoring)");
+                        break;
+                    case PacketType.CameraDestroy:
+                        // CameraDestroy is SERVER-AUTHORITATIVE only — clients must not send it
+                        RakeMultiplayerPlugin.Log?.LogWarning($"[Net] Server: received CameraDestroy from C{connectionId} (client-spoofed, ignoring)");
+                        break;
+                    case PacketType.QuestTrigger:
+                        // QuestTrigger is SERVER-AUTHORITATIVE only — clients must not send it
+                        RakeMultiplayerPlugin.Log?.LogWarning($"[Net] Server: received QuestTrigger from C{connectionId} (client-spoofed, ignoring)");
+                        break;
                     default:
                         RakeMultiplayerPlugin.Log?.LogWarning($"[Net] Server: unexpected {packet.Type} from C{connectionId}");
                         break;
@@ -736,6 +752,18 @@ namespace RakeMultiplayer
                     case PacketType.SessionState:
                         HandleClientSessionState((SessionStatePacket)packet);
                         break;
+                    case PacketType.CameraSync:
+                        HandleClientCameraSync((CameraSyncPacket)packet);
+                        break;
+                    case PacketType.CameraSpawn:
+                        HandleClientCameraSpawn((CameraSpawnPacket)packet);
+                        break;
+                    case PacketType.CameraDestroy:
+                        HandleClientCameraDestroy((CameraDestroyPacket)packet);
+                        break;
+                    case PacketType.QuestTrigger:
+                        HandleClientQuestTrigger((QuestTriggerPacket)packet);
+                        break;
                     default:
                         RakeMultiplayerPlugin.Log?.LogWarning($"[Net] Client: unexpected {packet.Type}");
                         break;
@@ -909,6 +937,81 @@ namespace RakeMultiplayer
             {
                 RakeMultiplayerPlugin.Log?.LogWarning("[Session] SessionManager not initialized yet, session state will be applied on init");
             }
+        }
+
+        private void HandleClientCameraSync(CameraSyncPacket packet)
+        {
+            RakeMultiplayerPlugin.Log?.LogInfo($"[CameraSync] Client received CameraSync: cameraId={packet.CameraId}, active={packet.IsActive}, broken={packet.IsBroken}, battery={packet.BatteryLevel:F1}%");
+            
+            // Use static registry for O(1) lookup
+            if (NetworkedCamera.TryGetCamera(packet.CameraId, out var cam))
+            {
+                cam.ApplyCameraSync(packet);
+                RakeMultiplayerPlugin.Log?.LogInfo($"[CameraSync] Applied CameraSync to camera {packet.CameraId}");
+            }
+            else
+            {
+                RakeMultiplayerPlugin.Log?.LogWarning($"[CameraSync] Camera {packet.CameraId} not found in registry");
+            }
+        }
+
+        private void HandleClientCameraSpawn(CameraSpawnPacket packet)
+        {
+            RakeMultiplayerPlugin.Log?.LogInfo($"[CameraSync] Client received CameraSpawn: cameraId={packet.CameraId}, position={packet.Position}");
+            
+            // Use static registry for O(1) lookup
+            if (NetworkedCamera.TryGetCamera(packet.CameraId, out var cam))
+            {
+                cam.HandleCameraSpawn(packet);
+                RakeMultiplayerPlugin.Log?.LogInfo($"[CameraSync] Handled CameraSpawn for camera {packet.CameraId}");
+            }
+            else
+            {
+                RakeMultiplayerPlugin.Log?.LogWarning($"[CameraSync] Camera {packet.CameraId} not found in registry for CameraSpawn");
+            }
+        }
+
+        private void HandleClientCameraDestroy(CameraDestroyPacket packet)
+        {
+            RakeMultiplayerPlugin.Log?.LogInfo($"[CameraSync] Client received CameraDestroy: cameraId={packet.CameraId}");
+            
+            // Use static registry for O(1) lookup
+            if (NetworkedCamera.TryGetCamera(packet.CameraId, out var cam))
+            {
+                cam.HandleCameraDestroy(packet);
+                RakeMultiplayerPlugin.Log?.LogInfo($"[CameraSync] Handled CameraDestroy for camera {packet.CameraId}");
+            }
+            else
+            {
+                RakeMultiplayerPlugin.Log?.LogWarning($"[CameraSync] Camera {packet.CameraId} not found in registry for CameraDestroy");
+            }
+        }
+
+        private void HandleClientQuestTrigger(QuestTriggerPacket packet)
+        {
+            RakeMultiplayerPlugin.Log?.LogInfo($"[QuestTrigger] Client received QuestTrigger: type={packet.TriggerType}, cameraId={packet.CameraId}, position={packet.Position}");
+            
+            // Use static registry for O(1) lookup
+            if (NetworkedCamera.TryGetCamera(packet.CameraId, out var cam))
+            {
+                cam.HandleQuestTrigger(packet);
+                RakeMultiplayerPlugin.Log?.LogInfo($"[QuestTrigger] Handled QuestTrigger for camera {packet.CameraId}");
+            }
+            else
+            {
+                RakeMultiplayerPlugin.Log?.LogWarning($"[QuestTrigger] Camera {packet.CameraId} not found in registry");
+            }
+            
+            // Handle quest trigger events locally (for non-camera triggers)
+            if (packet.TriggerType == 1) // BaitTaken
+            {
+                RakeMultiplayerPlugin.Log?.LogInfo($"[QuestTrigger] Bait taken at {packet.Position}");
+            }
+            else if (packet.TriggerType == 2) // TrapTriggered
+            {
+                RakeMultiplayerPlugin.Log?.LogInfo($"[QuestTrigger] Trap triggered at {packet.Position}");
+            }
+            // CameraBreak (0) is handled by NetworkedCamera.HandleQuestTrigger
         }
 
         private void HandleClientFireVisuals(FireVisualsPacket packet)
