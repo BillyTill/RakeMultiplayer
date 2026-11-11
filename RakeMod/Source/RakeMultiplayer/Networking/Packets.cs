@@ -263,17 +263,20 @@ namespace RakeMultiplayer.Networking
 
         public int ItemNetworkId;
         public int PickerId; // Who picked it up (for effects)
+        public string ItemType; // Type name, so the picker can apply the effect without the object
 
         public override void Write(BinaryWriter writer)
         {
             writer.Write(ItemNetworkId);
             writer.Write(PickerId);
+            writer.Write(ItemType ?? string.Empty);
         }
 
         public override void Read(BinaryReader reader)
         {
             ItemNetworkId = reader.ReadInt32();
             PickerId = reader.ReadInt32();
+            ItemType = reader.ReadString();
         }
     }
 

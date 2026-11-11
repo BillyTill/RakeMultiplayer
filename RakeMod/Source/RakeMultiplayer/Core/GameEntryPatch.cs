@@ -57,6 +57,8 @@ namespace RakeMultiplayer
                 }
             }
 
+            DayNightManager.Instance?.RefreshSceneLighting();
+
             if (manager != null)
             {
                 // Scene objects were recreated - rebuild their deterministic registries

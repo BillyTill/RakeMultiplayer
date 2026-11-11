@@ -74,6 +74,15 @@ namespace RakeMultiplayer
         // Local player id decoded from the IsYou packet (may arrive before PlayerSpawner)
         private int _pendingLocalPlayerId = 0;
 
+        // Item objects this client asked to pick up (used if the registry id desyncs)
+        private readonly Dictionary<int, Item> _pendingPickups = new Dictionary<int, Item>();
+
+        /// <summary>Remember the local object for an in-flight pickup request.</summary>
+        public void RememberPendingPickup(int itemNetworkId, Item item)
+        {
+            if (itemNetworkId > 0 && item != null) _pendingPickups[itemNetworkId] = item;
+        }
+
         // Map markers (bait/trap/camera...) received from the server, for MapUI
         private readonly Dictionary<uint, MapMarkerPacket> _mapMarkers = new Dictionary<uint, MapMarkerPacket>();
         private readonly Dictionary<uint, TrapStatePacket> _trapStates = new Dictionary<uint, TrapStatePacket>();
@@ -252,6 +261,7 @@ namespace RakeMultiplayer
             _mapMarkers.Clear();
             _trapStates.Clear();
             _activeBaitTransforms.Clear();
+            _pendingPickups.Clear();
             _hostSpawnPositionSet = false;
 
             RakeMultiplayerPlugin.isConnected = false;
@@ -282,6 +292,7 @@ namespace RakeMultiplayer
             _mapMarkers.Clear();
             _trapStates.Clear();
             _activeBaitTransforms.Clear();
+            _pendingPickups.Clear();
             _hostSpawnPositionSet = false;
             _clientSceneLoading = false;
 
@@ -656,6 +667,13 @@ namespace RakeMultiplayer
             {
                 RakeMultiplayerPlugin.Log?.LogWarning(
                     $"[3.5] Server: item {packet.ItemNetworkId} already picked up or unknown");
+                _server.Send(connectionId, new ItemPickupConfirmPacket
+                {
+                    PlayerId = playerId,
+                    ItemNetworkId = packet.ItemNetworkId,
+                    Success = false,
+                    Reason = "NotFound"
+                }.Serialize());
                 return;
             }
 
@@ -684,10 +702,17 @@ namespace RakeMultiplayer
                 }
             }
 
-            if (picker != null && Vector3.Distance(picker.position, item.transform.position) > 15f)
+            if (picker != null && Vector3.Distance(picker.position, item.transform.position) > 100f)
             {
                 RakeMultiplayerPlugin.Log?.LogWarning(
                     $"[3.5] Server rejected pickup: P{playerId} is {Vector3.Distance(picker.position, item.transform.position):F1}m away from item {packet.ItemNetworkId}");
+                _server.Send(connectionId, new ItemPickupConfirmPacket
+                {
+                    PlayerId = playerId,
+                    ItemNetworkId = packet.ItemNetworkId,
+                    Success = false,
+                    Reason = "TooFar"
+                }.Serialize());
                 return;
             }
 
@@ -719,7 +744,7 @@ namespace RakeMultiplayer
             catch { /* already destroyed */ }
             finally { RakeMultiplayerPlugin.IsApplyingNetworkDestroy = false; }
 
-            ServerAuthorizeItemPickup(packet.ItemNetworkId, playerId);
+            ServerAuthorizeItemPickup(packet.ItemNetworkId, playerId, itemType);
             RakeMultiplayerPlugin.Log?.LogInfo(
                 $"[3.5] Server authorized pickup of item {packet.ItemNetworkId} ({itemType}) by P{playerId}");
         }
@@ -972,7 +997,7 @@ namespace RakeMultiplayer
         /// <summary>
         /// Server: authorize an item pickup, remove it from the registry and broadcast it.
         /// </summary>
-        public void ServerAuthorizeItemPickup(int itemNetworkId, int pickerId)
+        public void ServerAuthorizeItemPickup(int itemNetworkId, int pickerId, string itemType = "")
         {
             if (!RakeMultiplayerPlugin.isServer) return;
 
@@ -988,7 +1013,8 @@ namespace RakeMultiplayer
             var packet = new ItemDestroyedPacket
             {
                 ItemNetworkId = itemNetworkId,
-                PickerId = pickerId
+                PickerId = pickerId,
+                ItemType = itemType ?? string.Empty
             };
             ServerBroadcast(packet.Serialize());
         }
@@ -1006,6 +1032,7 @@ namespace RakeMultiplayer
             _activeBaitTransforms.Clear();
             _nextItemNetworkId = 1;
             _nextMarkerId = 1;
+            _pendingPickups.Clear();
 
             RakeMultiplayer.Patches.ItemPickupSync.ClearConsumed();
             NetworkedCamera.ClearRegistry();
@@ -1493,19 +1520,32 @@ namespace RakeMultiplayer
         // === Stage 3.5: Client Item Destroyed Handler ===
         private void HandleClientItemDestroyed(ItemDestroyedPacket packet)
         {
-            RakeMultiplayerPlugin.Log?.LogInfo($"[3.5] Client received ItemDestroyed: itemId={packet.ItemNetworkId}, pickerId={packet.PickerId}");
+            RakeMultiplayerPlugin.Log?.LogInfo(
+                $"[3.5] Client received ItemDestroyed: itemId={packet.ItemNetworkId}, pickerId={packet.PickerId}, type={packet.ItemType}");
 
-            if (!_networkedItems.TryGetValue(packet.ItemNetworkId, out var item) || item == null)
+            Item item = null;
+            if (!_networkedItems.TryGetValue(packet.ItemNetworkId, out item) || item == null)
             {
-                RakeMultiplayerPlugin.Log?.LogError($"[3.5] Client FAILED to find item {packet.ItemNetworkId} in registry! Registered items: {_networkedItems.Count}");
-                return;
+                // Fall back to the object remembered when this client sent the request
+                _pendingPickups.TryGetValue(packet.ItemNetworkId, out item);
+                if (item == null)
+                {
+                    RakeMultiplayerPlugin.Log?.LogWarning(
+                        $"[3.5] Client has no local object for item {packet.ItemNetworkId}; applying '{packet.ItemType}' by type");
+                }
             }
+            _pendingPickups.Remove(packet.ItemNetworkId);
 
-            string itemType = item.GetType().Name;
+            string itemType = !string.IsNullOrEmpty(packet.ItemType)
+                ? packet.ItemType
+                : (item != null ? item.GetType().Name : string.Empty);
 
             // Remove registries first (the vanilla pickup may destroy the object)
-            _networkedItems.Remove(packet.ItemNetworkId);
-            _itemToNetworkId.Remove(item);
+            if (item != null)
+            {
+                _networkedItems.Remove(packet.ItemNetworkId);
+                _itemToNetworkId.Remove(item);
+            }
 
             int localPlayerId = PlayerSpawner.Instance?.LocalPlayer?.PlayerId ?? 1;
             bool isPicker = packet.PickerId == localPlayerId;
@@ -1531,7 +1571,15 @@ namespace RakeMultiplayer
                 RakeMultiplayerPlugin.IsApplyingNetworkDestroy = true;
                 try
                 {
-                    item.PickupItem();
+                    if (item != null)
+                    {
+                        item.PickupItem();
+                    }
+                    else
+                    {
+                        // No world object available (id/scene desync) - grant by type
+                        GrantItemEffectByType(itemType);
+                    }
 
                     bool hasCamera = false;
                     try { hasCamera = localWm != null && localWm.CheckWeapon(2); } catch { }
@@ -1563,8 +1611,8 @@ namespace RakeMultiplayer
                 }
                 catch (Exception ex)
                 {
-                    RakeMultiplayerPlugin.Log?.LogError($"[3.5] Client pickup replay failed: {ex.Message}");
-                    GrantItemEffectLocally(item);
+                    RakeMultiplayerPlugin.Log?.LogError($"[3.5] Client pickup replay failed ({itemType}): {ex.Message}");
+                    GrantItemEffectByType(itemType);
                 }
                 finally
                 {
@@ -1590,6 +1638,8 @@ namespace RakeMultiplayer
                 return;
             }
 
+            _pendingPickups.Remove(packet.ItemNetworkId);
+
             RakeMultiplayerPlugin.Log?.LogWarning(
                 $"[3.3] Client: pickup {packet.ItemNetworkId} REJECTED for player {packet.PlayerId}: {packet.Reason}");
 
@@ -1614,12 +1664,16 @@ namespace RakeMultiplayer
         /// </summary>
         private void GrantItemEffectLocally(Item item)
         {
-            if (item == null) return;
+            if (item != null) GrantItemEffectByType(item.GetType().Name);
+        }
+
+        private void GrantItemEffectByType(string itemType)
+        {
+            if (string.IsNullOrEmpty(itemType)) return;
 
             var weaponManager = PlayerSpawner.Instance?.LocalPlayer?.GetComponentInChildren<WeaponManager>();
             if (weaponManager == null) return;
 
-            string itemType = item.GetType().Name;
             int weaponId = 0;
             int ammoCount = 1;
             bool isNewWeapon = false;

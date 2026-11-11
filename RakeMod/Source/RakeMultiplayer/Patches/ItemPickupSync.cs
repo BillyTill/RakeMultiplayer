@@ -89,6 +89,7 @@ namespace RakeMultiplayer.Patches
                 ItemNetworkId = itemId,
                 ItemType = item.GetType().Name
             };
+            manager.RememberPendingPickup(itemId, item);
             manager.ClientSend(packet.Serialize());
             RakeMultiplayerPlugin.Log?.LogInfo($"[Pickup] Client requested {item.GetType().Name} (id={itemId})");
             return false;
@@ -107,7 +108,8 @@ namespace RakeMultiplayer.Patches
             if (!ConsumeMark(itemId)) return;
 
             int pickerId = PlayerSpawner.Instance?.LocalPlayer?.PlayerId ?? 1;
-            RakeNetworkManager.Instance?.ServerAuthorizeItemPickup(itemId, pickerId);
+            string itemType = item != null ? item.GetType().Name : string.Empty;
+            RakeNetworkManager.Instance?.ServerAuthorizeItemPickup(itemId, pickerId, itemType);
         }
 
         // Shared prefix/postfix bodies used by the per-type patch classes below.

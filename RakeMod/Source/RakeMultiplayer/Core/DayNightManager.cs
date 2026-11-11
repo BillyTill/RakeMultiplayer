@@ -31,6 +31,12 @@ namespace RakeMultiplayer
         [Tooltip("Night light color")]
         public Color NightColor = new Color(0.3f, 0.3f, 0.5f);
 
+        [Header("Ambient (multiplayer consistency)")]
+        [Tooltip("Ambient light color during the day")]
+        public Color DayAmbient = new Color(0.45f, 0.45f, 0.45f, 1f);
+        [Tooltip("Ambient light color during the night")]
+        public Color NightAmbient = new Color(0.04f, 0.05f, 0.08f, 1f);
+
         [Header("Fog")]
         [Tooltip("Enable fog animation")]
         public bool AnimateFog = true;
@@ -325,7 +331,14 @@ namespace RakeMultiplayer
                 }
             }
 
+            // Ambient follows the phase even if the scene has no active directional light
+            Color targetAmbient = (targetPhase == Phase.Day) ? DayAmbient : NightAmbient;
+            Color startAmbient = (targetPhase == Phase.Day) ? NightAmbient : DayAmbient;
+            RenderSettings.ambientLight = Color.Lerp(startAmbient, targetAmbient, transitionProgress);
+
             if (DirectionalLight == null) return;
+
+            if (!DirectionalLight.enabled) DirectionalLight.enabled = true;
 
             // Interpolate intensity
             float targetIntensity = (targetPhase == Phase.Day) ? DayIntensity : NightIntensity;
@@ -344,6 +357,30 @@ namespace RakeMultiplayer
                 float startFog = (targetPhase == Phase.Day) ? NightFogDensity : DayFogDensity;
                 RenderSettings.fogDensity = Mathf.Lerp(startFog, targetFog, transitionProgress);
             }
+        }
+
+        /// <summary>
+        /// Re-acquire the scene light and force the current phase lighting/ambient.
+        /// Called on every gameplay scene load (the old light was destroyed).
+        /// </summary>
+        public void RefreshSceneLighting()
+        {
+            DirectionalLight = null;
+            var lights = FindObjectsOfType<Light>();
+            foreach (var l in lights)
+            {
+                if (l != null && l.type == LightType.Directional)
+                {
+                    DirectionalLight = l;
+                    break;
+                }
+            }
+
+            ApplyLighting(_currentPhase, 1f);
+            _lightTransitionTimer = LightTransitionDuration; // no interpolation on load
+
+            RakeMultiplayerPlugin.Log?.LogInfo(
+                $"[DayNight] Scene lighting refreshed: phase={_currentPhase}, light={(DirectionalLight != null ? DirectionalLight.name : "null")}, ambient={RenderSettings.ambientLight}");
         }
 
         // Public getters

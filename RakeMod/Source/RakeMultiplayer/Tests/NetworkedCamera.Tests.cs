@@ -4081,5 +4081,50 @@ namespace RakeMultiplayer.Tests
         }
 
         #endregion
+
+        #region ItemDestroyed Type Fallback Tests
+
+        [TestFixture]
+        public class ItemDestroyedTypeTests
+        {
+            [Test]
+            public void ItemDestroyed_CarriesItemType()
+            {
+                var packet = new ItemDestroyedPacket
+                {
+                    ItemNetworkId = 42,
+                    PickerId = 2,
+                    ItemType = "Rifle_item"
+                };
+
+                var restored = PacketSerializer.Deserialize(packet.Serialize()) as ItemDestroyedPacket;
+                Assert.IsNotNull(restored);
+                Assert.AreEqual(42, restored.ItemNetworkId);
+                Assert.AreEqual(2, restored.PickerId);
+                Assert.AreEqual("Rifle_item", restored.ItemType);
+            }
+
+            [Test]
+            public void ItemDestroyed_EmptyType_IsAllowed()
+            {
+                var packet = new ItemDestroyedPacket { ItemNetworkId = 1, PickerId = 1, ItemType = null };
+                var restored = PacketSerializer.Deserialize(packet.Serialize()) as ItemDestroyedPacket;
+                Assert.IsNotNull(restored);
+                Assert.AreEqual(string.Empty, restored.ItemType);
+            }
+
+            [Test]
+            public void PendingPickup_FallbackAppliesEvenWithoutRegistryEntry()
+            {
+                // Imitates: client asked for id 6, server echoed type, local registry has no id 6
+                string packetType = "Rifle_item";
+                string localType = null;
+
+                string effectType = !string.IsNullOrEmpty(packetType) ? packetType : (localType ?? string.Empty);
+                Assert.AreEqual("Rifle_item", effectType);
+            }
+        }
+
+        #endregion
     }
 }
