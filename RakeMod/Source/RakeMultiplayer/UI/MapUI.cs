@@ -27,7 +27,8 @@ namespace RakeMultiplayer.UI
         private RectTransform _markerRoot;
         private readonly Dictionary<uint, Image> _markerImages = new Dictionary<uint, Image>();
         private readonly Dictionary<uint, byte> _markerTypes = new Dictionary<uint, byte>();
-        private bool _visible = true;
+        private bool _visible = false;
+        private bool _wasGameplay = false;
         private float _refreshTimer;
         private const float RefreshInterval = 0.1f; // 10Hz is enough for a minimap
 
@@ -46,6 +47,15 @@ namespace RakeMultiplayer.UI
 
             var go = new GameObject("MapUI");
             go.transform.SetParent(canvas != null ? canvas.transform : null, false);
+
+            // Root must be a full-screen RectTransform so child anchors resolve correctly
+            var rootRect = go.AddComponent<RectTransform>();
+            rootRect.anchorMin = Vector2.zero;
+            rootRect.anchorMax = Vector2.one;
+            rootRect.offsetMin = Vector2.zero;
+            rootRect.offsetMax = Vector2.zero;
+            rootRect.pivot = new Vector2(0.5f, 0.5f);
+
             var map = go.AddComponent<MapUI>();
             map.Build(canvas);
             Instance = map;
@@ -76,15 +86,31 @@ namespace RakeMultiplayer.UI
             _markerRoot.offsetMin = Vector2.zero;
             _markerRoot.offsetMax = Vector2.zero;
 
-            RakeMultiplayerPlugin.Log?.LogInfo("[MapUI] Minimap created");
-            SetVisible(true);
+            RakeMultiplayerPlugin.Log?.LogInfo("[MapUI] Minimap created (hidden until gameplay)");
+            SetVisible(false);
+        }
+
+        /// <summary>True when a connected session is running in a gameplay level (level0..level5).</summary>
+        private static bool IsGameplayScene()
+        {
+            if (!RakeMultiplayerPlugin.isConnected) return false;
+            string scene = UnityEngine.Application.loadedLevelName;
+            return !string.IsNullOrEmpty(scene) && scene.StartsWith("level");
         }
 
         private void Update()
         {
             if (!RakeMultiplayerPlugin.Enabled.Value) return;
 
-            if (Input.GetKeyDown(toggleKey))
+            // Show only while playing; hide in menus/lobby
+            bool gameplay = IsGameplayScene();
+            if (gameplay != _wasGameplay)
+            {
+                _wasGameplay = gameplay;
+                SetVisible(gameplay);
+            }
+
+            if (gameplay && Input.GetKeyDown(toggleKey))
             {
                 SetVisible(!_visible);
             }

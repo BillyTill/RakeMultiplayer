@@ -32,7 +32,7 @@ Cooperative multiplayer mod for **Rake (2015)** by Konsordo. Adds 2–4 player c
 - **Pig-camera**: mount a camera on a trapped pig; it shares the 5-camera quota
 - **Bait**: lures the nearest animal (server-side animal AI)
 - **Traps**: server-authoritative trap zones; a triggered trap **stuns the Rake for 3 seconds**
-- **Minimap** (toggle **F3**): cameras = green, traps = red, bait = yellow, safehouse = blue, cave = red
+- **Minimap** (shown in game scenes, toggle **F3**): cameras = green, traps = red, bait = yellow, safehouse = blue, cave = red
 - **Remote players**: coloured third-person proxies (first-person hands, weapons and cameras are disabled on remote clones)
 
 ### Persistence (Phase 4)
