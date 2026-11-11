@@ -51,6 +51,7 @@ namespace RakeMultiplayer.Networking
                     PacketType.CameraDestroy => new CameraDestroyPacket(),
                     PacketType.CameraSetupRequest => new CameraSetupRequestPacket(),
                     PacketType.PlayerTeleport => new PlayerTeleportPacket(),
+                    PacketType.LevelChange => new LevelChangePacket(),
                     _ => throw new InvalidOperationException($"Unknown packet type: {type} (byte value: {(byte)type})")
                 };
                 packet.Read(reader);

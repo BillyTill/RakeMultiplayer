@@ -378,6 +378,27 @@ namespace RakeMultiplayer.Networking
     }
 
     /// <summary>
+    /// Level change request/notification (Skip day, night transition)
+    /// Client -> Server (request), Server -> All (notification)
+    /// </summary>
+    public class LevelChangePacket : NetworkPacket
+    {
+        public override PacketType Type => PacketType.LevelChange;
+
+        public int LevelIndex;
+
+        public override void Write(BinaryWriter writer)
+        {
+            writer.Write(LevelIndex);
+        }
+
+        public override void Read(BinaryReader reader)
+        {
+            LevelIndex = reader.ReadInt32();
+        }
+    }
+
+    /// <summary>
     /// Day/Night phase change notification
     /// Server -> All (broadcast on phase transition)
     /// </summary>

@@ -792,4 +792,33 @@ namespace RakeMultiplayer.Patches
 
             return true;
         }
+    }
+    /// <summary>
+    /// The vanilla GameTimer counts down independently on every peer and loads levels
+    /// on its own. In multiplayer the server's DayNightManager is authoritative, so we
+    /// keep the timer text in sync with it and never allow a local timeout load.
+    /// </summary>
+    [HarmonyPatch(typeof(GameTimer))]
+    [HarmonyPatch("Update")]
+    public class GameTimerMultiplayerPatch
+    {
+        [HarmonyPrefix]
+        static bool Prefix(GameTimer __instance)
+        {
+            if (!RakeMultiplayerPlugin.Enabled.Value) return true;
+            if (!RakeMultiplayerPlugin.isConnected) return true; // single-player
+
+            var dayNight = DayNightManager.Instance;
+            if (dayNight != null)
+            {
+                float remaining = dayNight.GetRemainingTime();
+                int minutes = Mathf.Max(0, Mathf.FloorToInt(remaining / 60f));
+
+                if (__instance.text != null) __instance.text.text = minutes.ToString();
+                __instance.minute = minutes;
+                __instance.second = remaining - minutes * 60f;
+            }
+
+            return false; // never run the independent countdown / level load
+        }
     }}

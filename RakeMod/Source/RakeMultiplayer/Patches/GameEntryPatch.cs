@@ -26,6 +26,16 @@ namespace RakeMultiplayer.Patches
                 _isSceneLoading = true;
                 OnSceneChangeStart(name);
             }
+
+            static void Postfix(string name)
+            {
+                // If this was a local (non-network) load, tell the other players
+                int index;
+                if (int.TryParse(name, out index))
+                {
+                    RakeNetworkManager.Instance?.NotifyLocalLevelLoad(index);
+                }
+            }
         }
 
         /// <summary>
@@ -55,6 +65,11 @@ namespace RakeMultiplayer.Patches
                 RakeMultiplayerPlugin.Log?.LogInfo($"[GameEntryPatch] Scene load requested (index): {index}");
                 _isSceneLoading = true;
                 OnSceneChangeStart(index.ToString());
+            }
+
+            static void Postfix(int index)
+            {
+                RakeNetworkManager.Instance?.NotifyLocalLevelLoad(index);
             }
         }
 

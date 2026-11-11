@@ -30,6 +30,9 @@ namespace RakeMultiplayer
         /// </summary>
         public static event Action<MapMarkerPacket> OnMapMarkerReceived;
 
+        /// <summary>Set while a network-driven Application.LoadLevel runs (prevents request loops).</summary>
+        internal static bool IsApplyingNetworkLevelChange = false;
+
         [Header("Player Prefabs")]
         public GameObject playerPrefab;
 
@@ -474,6 +477,9 @@ namespace RakeMultiplayer
                         break;
                     case PacketType.MapMarker:
                         HandleServerMapMarker(connectionId, (MapMarkerPacket)packet, data);
+                        break;
+                    case PacketType.LevelChange:
+                        HandleServerLevelChange(connectionId, (LevelChangePacket)packet, data);
                         break;
                     default:
                         RakeMultiplayerPlugin.Log?.LogWarning($"[Net] Server: unexpected {packet.Type} from C{connectionId}");
@@ -1100,6 +1106,67 @@ namespace RakeMultiplayer
             }
         }
 
+        /// <summary>
+        /// Called before any local Application.LoadLevel. In a connected session the
+        /// level change must be applied on every peer, otherwise players end up in
+        /// different levels (different timers/no proxies).
+        /// </summary>
+        public void NotifyLocalLevelLoad(int levelIndex)
+        {
+            if (!RakeMultiplayerPlugin.isConnected) return;
+            if (IsApplyingNetworkLevelChange) return;
+            if (levelIndex <= 0) return; // main menu
+
+            var packet = new LevelChangePacket { LevelIndex = levelIndex };
+            if (RakeMultiplayerPlugin.isServer)
+            {
+                ServerBroadcast(packet.Serialize());
+            }
+            else
+            {
+                ClientSend(packet.Serialize());
+            }
+        }
+
+        private void HandleServerLevelChange(int connectionId, LevelChangePacket packet, byte[] rawData)
+        {
+            if (packet.LevelIndex <= 0) return;
+
+            RakeMultiplayerPlugin.Log?.LogInfo($"[Scene] Client C{connectionId} requested level {packet.LevelIndex}");
+
+            // Tell every OTHER client (the requester already loaded locally)
+            if (_server != null)
+            {
+                var data = packet.Serialize();
+                foreach (var connId in _connectedClients)
+                {
+                    if (connId != connectionId) _server.Send(connId, data);
+                }
+            }
+
+            // Apply on the host too
+            ApplyNetworkLevelChange(packet.LevelIndex);
+        }
+
+        private void HandleClientLevelChange(LevelChangePacket packet)
+        {
+            if (packet.LevelIndex <= 0) return;
+            ApplyNetworkLevelChange(packet.LevelIndex);
+        }
+
+        private void ApplyNetworkLevelChange(int levelIndex)
+        {
+            IsApplyingNetworkLevelChange = true;
+            try
+            {
+                UnityEngine.Application.LoadLevel(levelIndex);
+            }
+            finally
+            {
+                IsApplyingNetworkLevelChange = false;
+            }
+        }
+
         private void HandleServerStartGame(int connectionId, StartGamePacket packet, byte[] rawData)
         {
             RakeMultiplayerPlugin.Log?.LogInfo($"[Net] Server received StartGame from C{connectionId}: scene={packet.SceneName}");
@@ -1192,6 +1259,9 @@ namespace RakeMultiplayer
                     case PacketType.PlayerTeleport:
                         HandleClientPlayerTeleport((PlayerTeleportPacket)packet);
                         break;
+                    case PacketType.LevelChange:
+                        HandleClientLevelChange((LevelChangePacket)packet);
+                        break;
                     case PacketType.QuestTrigger:
                         HandleClientQuestTrigger((QuestTriggerPacket)packet);
                         break;
@@ -1213,6 +1283,7 @@ namespace RakeMultiplayer
 
             RakeMultiplayerPlugin.Log?.LogInfo($"[Net] Received StartGame packet! Loading level index: {packet.SceneName}");
 
+            IsApplyingNetworkLevelChange = true;
             try
             {
                 // Parse as level index (game uses LoadLevel(int))
@@ -1228,6 +1299,7 @@ namespace RakeMultiplayer
             }
             finally
             {
+                IsApplyingNetworkLevelChange = false;
                 // Allow the next match to be started (and do not latch on load failure)
                 _clientSceneLoading = false;
             }

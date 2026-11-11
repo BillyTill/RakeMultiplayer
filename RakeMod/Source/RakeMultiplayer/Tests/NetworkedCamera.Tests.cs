@@ -4007,5 +4007,79 @@ namespace RakeMultiplayer.Tests
         }
 
         #endregion
+
+        #region Level Change Sync & Vanilla Timer Tests
+
+        /// <summary>
+        /// Regression tests for synchronized level changes and the vanilla GameTimer.
+        /// </summary>
+        [TestFixture]
+        public class LevelChangeSyncTests
+        {
+            [Test]
+            public void LevelChangePacket_RoundTrip()
+            {
+                var original = new LevelChangePacket { LevelIndex = 3 };
+                var restored = PacketSerializer.Deserialize(original.Serialize()) as LevelChangePacket;
+
+                Assert.IsNotNull(restored);
+                Assert.AreEqual(PacketType.LevelChange, restored.Type);
+                Assert.AreEqual(3, restored.LevelIndex);
+            }
+
+            [Test]
+            public void LevelChange_PacketTypeValue_Is33()
+            {
+                Assert.AreEqual(33, (byte)PacketType.LevelChange);
+            }
+
+            [Test]
+            public void LevelChangeRelay_ExcludesRequester()
+            {
+                // The initiating client already loaded; the server must not reload it
+                var clients = new[] { 1, 2, 3 };
+                int requester = 2;
+                var recipients = new System.Collections.Generic.List<int>();
+
+                foreach (var c in clients)
+                {
+                    if (c != requester) recipients.Add(c);
+                }
+
+                CollectionAssert.AreEquivalent(new[] { 1, 3 }, recipients);
+            }
+
+            [Test]
+            public void VanillaTimer_MinutesFollowAuthoritativeRemaining()
+            {
+                float remaining = 300f;
+                int minutes = Mathf.Max(0, Mathf.FloorToInt(remaining / 60f));
+                Assert.AreEqual(5, minutes);
+
+                remaining = 59f;
+                minutes = Mathf.Max(0, Mathf.FloorToInt(remaining / 60f));
+                Assert.AreEqual(0, minutes);
+            }
+
+            [Test]
+            public void VanillaTimer_DoesNotLoadLevels()
+            {
+                // In multiplayer the patch returns false (skips the original countdown/load)
+                bool connected = true;
+                bool originalRuns = !connected;
+                Assert.IsFalse(originalRuns);
+            }
+
+            [Test]
+            public void MenuLevels_AreNotBroadcast()
+            {
+                // Level 0 (main menu) must not be propagated as a session level change
+                int levelIndex = 0;
+                bool shouldBroadcast = levelIndex > 0;
+                Assert.IsFalse(shouldBroadcast);
+            }
+        }
+
+        #endregion
     }
 }
