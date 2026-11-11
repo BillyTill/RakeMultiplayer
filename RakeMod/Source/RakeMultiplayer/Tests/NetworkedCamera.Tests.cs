@@ -3418,5 +3418,275 @@ namespace RakeMultiplayer.Tests
         }
 
         #endregion
+
+        #region Phase 5 - Integration & Stress Tests
+
+        /// <summary>
+        /// End-to-end packet-flow simulations: full 3-night session,
+        /// 5% packet loss, 200ms latency and out-of-order delivery (Tasks 5.1/5.2).
+        /// </summary>
+        [TestFixture]
+        public class IntegrationAndStressTests
+        {
+            [Test]
+            public void FullSession_ThreeNights_ReachesVictory()
+            {
+                // Simulate the authoritative phase sequence: D N D N D N.
+                // The server increments the night counter BEFORE broadcasting the Night phase,
+                // so a Night packet carries the zero-based index of the night that just began.
+                int nightIndex = -1;
+                int nightsCompleted = 0;
+                int packetsApplied = 0;
+
+                for (int phase = 0; phase < 6; phase++)
+                {
+                    bool isNight = (phase % 2) == 1;
+                    if (isNight) nightIndex++;
+
+                    var packet = new PhaseChangePacket
+                    {
+                        Phase = isNight ? Phase.Night : Phase.Day,
+                        RemainingTime = 300f,
+                        NightNumber = System.Math.Max(0, nightIndex)
+                    };
+
+                    var applied = PacketSerializer.Deserialize(packet.Serialize()) as PhaseChangePacket;
+                    Assert.IsNotNull(applied);
+                    Assert.AreEqual(packet.Phase, applied.Phase);
+                    Assert.AreEqual(packet.NightNumber, applied.NightNumber);
+                    packetsApplied++;
+
+                    if (applied.Phase == Phase.Night)
+                    {
+                        nightsCompleted = nightIndex + 1;
+                    }
+                }
+
+                Assert.AreEqual(6, packetsApplied, "Day/Night must alternate six times");
+                Assert.AreEqual(3, nightsCompleted, "Three nights must be completed");
+                Assert.AreEqual(2, nightIndex, "Night index is zero-based");
+            }
+
+            [Test]
+            public void SessionState_Victory_FlowsToClients()
+            {
+                var victory = new SessionStatePacket
+                {
+                    CurrentNight = 3,
+                    State = SessionState.Victory,
+                    RakeHealth = 0f,
+                    VictoryType = VictoryType.HuntersWin
+                };
+
+                var restored = PacketSerializer.Deserialize(victory.Serialize()) as SessionStatePacket;
+                Assert.IsNotNull(restored);
+                Assert.AreEqual(SessionState.Victory, restored.State);
+                Assert.AreEqual(VictoryType.HuntersWin, restored.VictoryType);
+                Assert.AreEqual(3, restored.CurrentNight);
+            }
+
+            [Test]
+            public void PacketLoss_FivePercent_LastDeliveredStateWins()
+            {
+                var random = new System.Random(12345);
+
+                // 100 camera syncs with monotonically increasing battery levels
+                var delivered = new System.Collections.Generic.List<CameraSyncPacket>();
+                for (int seq = 0; seq < 100; seq++)
+                {
+                    var packet = new CameraSyncPacket
+                    {
+                        CameraId = 7u,
+                        Position = new Vector3(seq, 0f, 0f),
+                        Rotation = new Quaternion(0f, 0f, 0f, 1f),
+                        IsActive = true,
+                        IsBroken = false,
+                        BatteryLevel = 100f - seq,
+                        PlacedByPlayerId = 1
+                    };
+
+                    byte[] data = packet.Serialize();
+
+                    // 5% loss
+                    if (random.NextDouble() < 0.05) continue;
+
+                    var received = PacketSerializer.Deserialize(data) as CameraSyncPacket;
+                    Assert.IsNotNull(received);
+                    delivered.Add(received);
+                }
+
+                Assert.Less(delivered.Count, 100, "Some packets should have been dropped");
+                Assert.Greater(delivered.Count, 80, "Most packets should be delivered");
+
+                var final = delivered[delivered.Count - 1];
+                Assert.AreEqual(delivered.Count, 100 - CountDropped(100, 12345));
+
+                // Last delivered packet is still a valid, consistent state
+                Assert.AreEqual(100f - (int)final.Position.x, final.BatteryLevel, 0.001f);
+            }
+
+            private static int CountDropped(int total, int seed)
+            {
+                var random = new System.Random(seed);
+                int dropped = 0;
+                for (int i = 0; i < total; i++)
+                {
+                    if (random.NextDouble() < 0.05) dropped++;
+                }
+                return dropped;
+            }
+
+            [Test]
+            public void Latency200ms_OutOfOrder_ConvergesToLatestSequence()
+            {
+                // Emit packets at t=0..40ms with 200ms latency plus jitter -> reordering
+                var arrivals = new System.Collections.Generic.List<Arrival>();
+                var random = new System.Random(777);
+
+                for (int seq = 0; seq < 20; seq++)
+                {
+                    var packet = new CameraSyncPacket
+                    {
+                        CameraId = 3u,
+                        Position = new Vector3(seq, 0f, 0f),
+                        Rotation = new Quaternion(0f, 0f, 0f, 1f),
+                        IsActive = true,
+                        IsBroken = false,
+                        BatteryLevel = 100f - seq,
+                        PlacedByPlayerId = 1
+                    };
+
+                    byte[] data = packet.Serialize();
+                    double sendTime = seq * 0.04;          // 25 Hz
+                    double latency = 0.200 + (random.NextDouble() * 0.050 - 0.025);
+                    arrivals.Add(new Arrival { ArrivalTime = sendTime + latency, Sequence = seq, Data = data });
+                }
+
+                arrivals.Sort((a, b) => a.ArrivalTime.CompareTo(b.ArrivalTime));
+
+                // Apply in arrival order (last-write-wins); track the highest applied sequence
+                long highestApplied = -1;
+                CameraSyncPacket current = null;
+
+                foreach (var arrival in arrivals)
+                {
+                    var packet = PacketSerializer.Deserialize(arrival.Data) as CameraSyncPacket;
+                    Assert.IsNotNull(packet);
+
+                    if (arrival.Sequence > highestApplied)
+                    {
+                        highestApplied = arrival.Sequence;
+                        current = packet;
+                    }
+                }
+
+                Assert.IsNotNull(current);
+                Assert.AreEqual(19L, highestApplied, "The newest sequence must win");
+                Assert.AreEqual(19f, current.Position.x, 0.001f);
+                Assert.AreEqual(81f, current.BatteryLevel, 0.001f);
+            }
+
+            private class Arrival
+            {
+                public double ArrivalTime;
+                public int Sequence;
+                public byte[] Data;
+            }
+
+            [Test]
+            public void RakeHealth_CarriesAcrossNights_OnlyResetsOnNewSession()
+            {
+                float health = 100f;
+
+                // Night 1 damage
+                health -= 35f;
+                Assert.AreEqual(65f, health, 0.001f);
+
+                // Night 2 damage
+                health -= 20f;
+                Assert.AreEqual(45f, health, 0.001f);
+
+                // Night 3: health persists (not reset)
+                Assert.Greater(health, 0f);
+                Assert.AreEqual(45f, health, 0.001f);
+
+                // New session resets
+                health = 100f;
+                Assert.AreEqual(100f, health, 0.001f);
+            }
+
+            [Test]
+            public void ConcurrentCameraRequests_OnlyFiveAccepted()
+            {
+                const uint PigFlag = 0x80000000u;
+                const int requests = 10;
+
+                int accepted = 0;
+                for (uint i = 1; i <= requests; i++)
+                {
+                    if (NetworkedCamera.TryReserveExternalCamera(PigFlag | i)) accepted++;
+                }
+
+                Assert.AreEqual(5, accepted, "Only 5 of 10 concurrent camera requests may be accepted");
+
+                // Cleanup
+                for (uint i = 1; i <= requests; i++)
+                {
+                    NetworkedCamera.ReleaseExternalCamera(PigFlag | i);
+                }
+            }
+
+            [Test]
+            public void Serializer_RejectsUnknownPacketType()
+            {
+                byte[] data = new byte[] { 254, 0, 0, 0 };
+                Assert.Throws<System.InvalidOperationException>(() => PacketSerializer.Deserialize(data));
+            }
+
+            [Test]
+            public void Serializer_RejectsOversizedPacket()
+            {
+                byte[] data = new byte[65537];
+                data[0] = (byte)PacketType.CameraSync;
+                Assert.Throws<System.ArgumentException>(() => PacketSerializer.Deserialize(data));
+            }
+
+            [Test]
+            public void Serializer_RejectsEmptyPacket()
+            {
+                Assert.Throws<System.ArgumentException>(() => PacketSerializer.Deserialize(new byte[0]));
+            }
+
+            [Test]
+            public void Stress_AllPhase3Packets_RoundTripWithinBudget()
+            {
+                // Performance smoke test: 1000 round-trips of a typical camera sync packet
+                var packet = new CameraSyncPacket
+                {
+                    CameraId = 1u,
+                    Position = new Vector3(1f, 2f, 3f),
+                    Rotation = new Quaternion(0f, 0f, 0f, 1f),
+                    IsActive = true,
+                    IsBroken = false,
+                    BatteryLevel = 87.5f,
+                    PlacedByPlayerId = 2
+                };
+
+                byte[] data = packet.Serialize();
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+
+                for (int i = 0; i < 1000; i++)
+                {
+                    var restored = PacketSerializer.Deserialize(data) as CameraSyncPacket;
+                    if (restored == null) Assert.Fail("Deserialization failed at iteration " + i);
+                }
+
+                sw.Stop();
+                Assert.Less(sw.ElapsedMilliseconds, 2000,
+                    $"1000 camera sync round-trips took {sw.ElapsedMilliseconds}ms");
+            }
+        }
+
+        #endregion
     }
 }

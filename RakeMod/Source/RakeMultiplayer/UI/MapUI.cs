@@ -28,6 +28,8 @@ namespace RakeMultiplayer.UI
         private readonly Dictionary<uint, Image> _markerImages = new Dictionary<uint, Image>();
         private readonly Dictionary<uint, byte> _markerTypes = new Dictionary<uint, byte>();
         private bool _visible = true;
+        private float _refreshTimer;
+        private const float RefreshInterval = 0.1f; // 10Hz is enough for a minimap
 
         private static readonly Color CameraColor = new Color(0.2f, 1f, 0.3f, 0.95f);   // green
         private static readonly Color TrapColor = new Color(1f, 0.2f, 0.2f, 0.95f);     // red
@@ -87,8 +89,10 @@ namespace RakeMultiplayer.UI
                 SetVisible(!_visible);
             }
 
-            if (_visible)
+            _refreshTimer += Time.deltaTime;
+            if (_visible && _refreshTimer >= RefreshInterval)
             {
+                _refreshTimer = 0f;
                 RefreshMarkers();
             }
         }

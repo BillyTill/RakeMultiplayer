@@ -189,8 +189,18 @@ namespace RakeMultiplayer
                 if (hasCamera != _localCameraVisible)
                 {
                     _localCameraVisible = hasCamera;
-                    try { _animal.SetCamera(hasCamera); }
-                    catch { /* animal may not have a collar camera */ }
+
+                    // Enable the collar camera transform directly (covers both
+                    // RecordCamera_obj and AnimalRecordCamera_obj collars)
+                    if (_animal.camera != null)
+                    {
+                        _animal.camera.gameObject.SetActive(hasCamera);
+                    }
+                    else
+                    {
+                        try { _animal.SetCamera(hasCamera); }
+                        catch { /* animal may not have a collar camera */ }
+                    }
                 }
             }
         }

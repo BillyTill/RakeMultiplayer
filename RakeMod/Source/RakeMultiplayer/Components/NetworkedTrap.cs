@@ -98,12 +98,18 @@ namespace RakeMultiplayer
                 return;
             }
 
-            // Local (host) player takes damage through the game's own controller
-            var fps = other.GetComponentInParent<FPSController>();
-            if (fps != null)
+            // Only the host's local player is damaged here. Remote players run their
+            // own controllers; player health is not server-authoritative in this mod yet
+            // (documented limitation), so damaging a remote proxy would not sync.
+            var netPlayer = other.GetComponentInParent<NetworkedPlayer>();
+            if (netPlayer != null && netPlayer.isLocalPlayer)
             {
-                try { fps.TakeDamage(35, "TrapDamage"); }
-                catch (Exception ex) { RakeMultiplayerPlugin.Log?.LogWarning($"[3.11] Trap damage failed: {ex.Message}"); }
+                var fps = other.GetComponentInParent<FPSController>();
+                if (fps != null)
+                {
+                    try { fps.TakeDamage(35, "TrapDamage"); }
+                    catch (Exception ex) { RakeMultiplayerPlugin.Log?.LogWarning($"[3.11] Trap damage failed: {ex.Message}"); }
+                }
                 Trigger();
             }
         }
