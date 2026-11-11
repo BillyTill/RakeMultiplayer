@@ -1245,11 +1245,11 @@ namespace RakeMultiplayer.Tests
             }
 
             [Test]
-            public void GetKnownPlayerCount_Client_ReturnsKnownPlayerIds()
+            public void GetKnownPlayerCount_Client_ReturnsKnownOthersPlusSelf()
             {
-                // Client: Math.Max(1, _knownPlayerIds.Count)
-                var knownPlayerIds = new HashSet<int> { 1, 2, 3 };
-                int count = Math.Max(1, knownPlayerIds.Count);
+                // Client: Math.Max(1, otherKnownPlayers + 1 for self)
+                var knownPlayerIds = new HashSet<int> { 1, 2 }; // host + one other client
+                int count = Math.Max(1, knownPlayerIds.Count + 1);
                 Assert.AreEqual(3, count);
             }
 
@@ -1257,8 +1257,8 @@ namespace RakeMultiplayer.Tests
             public void GetKnownPlayerCount_Client_Empty_Returns1()
             {
                 var knownPlayerIds = new HashSet<int>();
-                int count = Math.Max(1, knownPlayerIds.Count);
-                Assert.AreEqual(1, count); // At least self
+                int count = Math.Max(1, knownPlayerIds.Count + 1);
+                Assert.AreEqual(1, count); // self only
             }
         }
 

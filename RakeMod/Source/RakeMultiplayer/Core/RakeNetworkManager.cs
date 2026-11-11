@@ -109,7 +109,9 @@ namespace RakeMultiplayer
             }
             else
             {
-                return Math.Max(1, _knownPlayerIds.Count); // at least 1 (self)
+                // _knownPlayerIds stores the OTHER players only (self is excluded to
+                // avoid a self-proxy); add the local player back for the count.
+                return Math.Max(1, _knownPlayerIds.Count + 1);
             }
         }
 
@@ -1330,6 +1332,7 @@ namespace RakeMultiplayer
             if (!RakeMultiplayerPlugin.isServer && packet.IsYou)
             {
                 _pendingLocalPlayerId = packet.PlayerId;
+                _knownPlayerIds.Remove(packet.PlayerId);
 
                 // If a self-proxy was spawned before the id was known, remove it
                 if (PlayerSpawner.Instance != null && PlayerSpawner.Instance.TryGetRemotePlayer(packet.PlayerId, out _))
