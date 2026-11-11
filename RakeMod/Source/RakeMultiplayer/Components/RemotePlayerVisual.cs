@@ -44,8 +44,38 @@ namespace RakeMultiplayer
 
             var visual = go.AddComponent<RemotePlayerVisual>();
             visual._playerId = playerId;
-            visual.Build(playerId);
+
+            // The player root is usually at eye height, so the proxy must be lowered
+            // until its feet touch the ground.
+            visual.Build(playerId, ComputeFootOffset(playerObject));
             return visual;
+        }
+
+        /// <summary>
+        /// Vertical offset (relative to the player root) of the feet.
+        /// Derived from the CharacterController; falls back to a ground raycast.
+        /// </summary>
+        private static float ComputeFootOffset(GameObject playerObject)
+        {
+            if (playerObject == null) return 0f;
+
+            var controller = playerObject.GetComponent<CharacterController>();
+            if (controller == null) controller = playerObject.GetComponentInChildren<CharacterController>();
+            if (controller != null)
+            {
+                // bottom of the capsule relative to the transform
+                return controller.center.y - controller.height * 0.5f;
+            }
+
+            var origin = playerObject.transform.position + Vector3.up * 0.2f;
+            RaycastHit hit;
+            if (Physics.Raycast(origin, Vector3.down, out hit, 6f))
+            {
+                return hit.point.y - playerObject.transform.position.y;
+            }
+
+            // Last resort: assume the root sits at eye height
+            return -1.6f;
         }
 
         /// <summary>
@@ -80,13 +110,14 @@ namespace RakeMultiplayer
             }
         }
 
-        private void Build(int playerId)
+        private void Build(int playerId, float footOffset)
         {
             Color color = Palette[Mathf.Abs(playerId - 1) % Palette.Length];
             Color dark = Color.Lerp(color, Color.black, 0.35f);
 
             _bodyRoot = transform;
-            _bodyRoot.localPosition = Vector3.zero;
+            // Feet are modeled at local y = 0, so shift the whole proxy to the ground
+            _bodyRoot.localPosition = new Vector3(0f, footOffset, 0f);
             _bodyRoot.localRotation = Quaternion.identity;
 
             // Torso
@@ -154,6 +185,24 @@ namespace RakeMultiplayer
 
                 renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.On;
                 renderer.receiveShadows = true;
+            }
+        }
+
+        private void LateUpdate()
+        {
+            // Keep the proxy's feet on the ground even if the player root sits at eye
+            // height, and on stairs/slopes. The proxy has no colliders of its own.
+            var root = transform.parent;
+            if (root == null) return;
+
+            Vector3 origin = root.position + Vector3.up * 0.3f;
+            RaycastHit hit;
+            if (Physics.Raycast(origin, Vector3.down, out hit, 10f))
+            {
+                float targetY = hit.point.y - root.position.y;
+                Vector3 local = transform.localPosition;
+                local.y = Mathf.Lerp(local.y, targetY, Time.deltaTime * 12f);
+                transform.localPosition = local;
             }
         }
 
