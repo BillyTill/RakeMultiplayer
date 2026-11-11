@@ -513,6 +513,33 @@ namespace RakeMultiplayer
         }
 
         /// <summary>
+        /// Restore a persisted camera state after a scene reload (Task 4.4).
+        /// </summary>
+        public void RestoreState(bool active, bool broken, float battery, int placedByPlayerId)
+        {
+            if (!RakeMultiplayerPlugin.isServer) return;
+
+            _isPlaced = true;
+            _batteryLevel = Mathf.Clamp(battery, 0f, 100f);
+            _isBroken = broken;
+            _isActive = active && !broken;
+            _placedByPlayerId = placedByPlayerId;
+
+            if (!_cameraRegistry.ContainsKey(_cameraId))
+            {
+                _cameraRegistry[_cameraId] = this;
+            }
+
+            ApplySetupVisuals();
+            UpdateCameraVisuals();
+            SendCameraSpawn();
+            SendCameraUpdate();
+
+            RakeMultiplayerPlugin.Log?.LogInfo(
+                $"[4.4] Camera {CameraId} restored (active={active}, broken={broken}, battery={_batteryLevel:F1})");
+        }
+
+        /// <summary>
         /// Server: un-deploy the camera (player picked it up).
         /// </summary>
         /// <returns>true if the camera was deployed and is now un-deployed.</returns>

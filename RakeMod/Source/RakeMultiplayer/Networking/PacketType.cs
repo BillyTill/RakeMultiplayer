@@ -38,5 +38,6 @@ namespace RakeMultiplayer.Networking
         CameraSpawn = 29,
         CameraDestroy = 30,
         CameraSetupRequest = 31,
+        PlayerTeleport = 32,
     }
 }

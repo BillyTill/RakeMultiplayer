@@ -181,8 +181,67 @@ namespace RakeMultiplayer
             // Broadcast to all clients
             BroadcastPhaseChange();
 
+            // Server-side phase hooks (Tasks 4.5 / 4.6)
+            if (RakeMultiplayerPlugin.isServer)
+            {
+                if (_currentPhase == Phase.Night)
+                {
+                    ApplyPersistentRakeHealth();
+                }
+                else if (_currentPhase == Phase.Day)
+                {
+                    RespawnAtSafehouse();
+                }
+            }
+
             // Fire event for local listeners (SessionManager, etc.)
             OnPhaseChanged?.Invoke(_currentPhase, GetRemainingTime(), _nightNumber);
+        }
+
+        /// <summary>
+        /// Night start: keep the Rake's health across nights (Task 4.5).
+        /// Health is only reset when a brand-new session starts.
+        /// </summary>
+        private void ApplyPersistentRakeHealth()
+        {
+            if (SessionManager.Instance == null) return;
+
+            float health = SessionManager.Instance.RakeHealth;
+            if (health <= 0f) return;
+
+            var rake = UnityEngine.Object.FindObjectOfType<NetworkedRakeAI>();
+            if (rake != null)
+            {
+                rake.ApplyHealth(health);
+                RakeMultiplayerPlugin.Log?.LogInfo($"[4.5] Restored Rake health for night {_nightNumber + 1}: {health:F1}");
+            }
+        }
+
+        /// <summary>
+        /// Day start: teleport all hunters back to the safehouse (Task 4.6).
+        /// </summary>
+        private void RespawnAtSafehouse()
+        {
+            var settings = MapSettings.Current;
+            Vector3 target;
+            Quaternion rotation = Quaternion.identity;
+
+            if (settings != null && settings.hasSafehouse)
+            {
+                target = settings.safehousePosition;
+            }
+            else if (settings != null && settings.spawnPoints != null && settings.spawnPoints.Length > 0)
+            {
+                target = settings.spawnPoints[0];
+            }
+            else
+            {
+                RakeMultiplayerPlugin.Log?.LogWarning("[4.6] No safehouse or spawn point configured - skipping respawn");
+                return;
+            }
+
+            RakeNetworkManager.Instance?.ServerTeleportAllPlayers(target, rotation);
+            RakeMultiplayerPlugin.Log?.LogInfo($"[4.6] Day phase: hunters respawned at {target}");
         }
 
         /// <summary>

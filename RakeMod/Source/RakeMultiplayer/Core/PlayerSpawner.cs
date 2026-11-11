@@ -173,8 +173,31 @@ namespace RakeMultiplayer
             }
         }
 
+        private MapSettings _mapSettings;
+        private int _nightIndex;
+
+        /// <summary>
+        /// Apply per-night map settings (Task 4.2). Rotates spawn assignment by night
+        /// so hunters do not always start on the same spot.
+        /// </summary>
+        public void ApplyMapSettings(MapSettings settings, int nightIndex)
+        {
+            _mapSettings = settings;
+            _nightIndex = Mathf.Max(0, nightIndex);
+
+            RakeMultiplayerPlugin.Log?.LogInfo(
+                $"[4.2] PlayerSpawner using MapSettings for '{settings?.sceneName}' (night index {_nightIndex})");
+        }
+
         private Vector3 GetPlayerSpawnPoint(int connectionId)
         {
+            if (_mapSettings != null && _mapSettings.spawnPoints != null && _mapSettings.spawnPoints.Length > 0)
+            {
+                int index = (connectionId + _nightIndex) % _mapSettings.spawnPoints.Length;
+                if (index < 0) index += _mapSettings.spawnPoints.Length;
+                return _mapSettings.spawnPoints[index];
+            }
+
             if (playerSpawnPoints != null && playerSpawnPoints.Length > 0)
             {
                 int index = connectionId % playerSpawnPoints.Length;

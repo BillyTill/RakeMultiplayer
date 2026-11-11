@@ -1090,6 +1090,9 @@ namespace RakeMultiplayer
                     case PacketType.TrapState:
                         HandleClientTrapState((TrapStatePacket)packet);
                         break;
+                    case PacketType.PlayerTeleport:
+                        HandleClientPlayerTeleport((PlayerTeleportPacket)packet);
+                        break;
                     case PacketType.QuestTrigger:
                         HandleClientQuestTrigger((QuestTriggerPacket)packet);
                         break;
@@ -1120,6 +1123,77 @@ namespace RakeMultiplayer
             {
                 // Fallback: try as scene name
                 UnityEngine.Application.LoadLevel(packet.SceneName);
+            }
+        }
+
+        /// <summary>
+        /// Server: teleport every player to a position (safehouse respawn, Task 4.6).
+        /// The host moves locally; each client receives a targeted teleport packet.
+        /// </summary>
+        public void ServerTeleportAllPlayers(Vector3 position, Quaternion rotation)
+        {
+            if (!RakeMultiplayerPlugin.isServer) return;
+
+            int hostId = PlayerSpawner.Instance?.LocalPlayer?.PlayerId ?? 1;
+            if (PlayerSpawner.Instance?.LocalPlayer != null)
+            {
+                PlayerSpawner.Instance.LocalPlayer.transform.position = position;
+                PlayerSpawner.Instance.LocalPlayer.transform.rotation = rotation;
+            }
+
+            // Teleport remote player objects on the server
+            if (PlayerSpawner.Instance != null)
+            {
+                foreach (var kvp in PlayerSpawner.Instance.GetAllRemotePlayers())
+                {
+                    if (kvp.Value != null)
+                    {
+                        kvp.Value.transform.position = position;
+                        kvp.Value.transform.rotation = rotation;
+                    }
+                }
+            }
+
+            // Notify each client for its own local player
+            if (_server != null)
+            {
+                foreach (var kvp in _playerStates)
+                {
+                    int playerId = kvp.Key;
+                    if (playerId == hostId) continue;
+
+                    int connectionId = playerId - 1;
+                    var packet = new PlayerTeleportPacket
+                    {
+                        PlayerId = playerId,
+                        Position = position,
+                        Rotation = rotation
+                    };
+                    _server.Send(connectionId, packet.Serialize());
+                }
+            }
+
+            RakeMultiplayerPlugin.Log?.LogInfo($"[4.6] Teleported all players to {position}");
+        }
+
+        private void HandleClientPlayerTeleport(PlayerTeleportPacket packet)
+        {
+            int localId = PlayerSpawner.Instance?.LocalPlayer?.PlayerId ?? 1;
+
+            if (packet.PlayerId == localId)
+            {
+                if (PlayerSpawner.Instance?.LocalPlayer != null)
+                {
+                    PlayerSpawner.Instance.LocalPlayer.transform.position = packet.Position;
+                    PlayerSpawner.Instance.LocalPlayer.transform.rotation = packet.Rotation;
+                    RakeMultiplayerPlugin.Log?.LogInfo($"[4.6] Local player teleported to {packet.Position}");
+                }
+            }
+            else if (PlayerSpawner.Instance != null &&
+                     PlayerSpawner.Instance.TryGetRemotePlayer(packet.PlayerId, out var remote) && remote != null)
+            {
+                remote.ApplyPosition(packet.Position);
+                remote.ApplyRotation(packet.Rotation);
             }
         }
 

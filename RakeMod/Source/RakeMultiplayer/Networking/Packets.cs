@@ -346,6 +346,38 @@ namespace RakeMultiplayer.Networking
     }
 
     /// <summary>
+    /// Server-issued teleport (safehouse respawn, Task 4.6)
+    /// Server -> specific client (or broadcast)
+    /// </summary>
+    public class PlayerTeleportPacket : NetworkPacket
+    {
+        public override PacketType Type => PacketType.PlayerTeleport;
+
+        public int PlayerId;
+        public Vector3 Position;
+        public Quaternion Rotation;
+
+        public override void Write(BinaryWriter writer)
+        {
+            writer.Write(PlayerId);
+            writer.Write(Position.x);
+            writer.Write(Position.y);
+            writer.Write(Position.z);
+            writer.Write(Rotation.x);
+            writer.Write(Rotation.y);
+            writer.Write(Rotation.z);
+            writer.Write(Rotation.w);
+        }
+
+        public override void Read(BinaryReader reader)
+        {
+            PlayerId = reader.ReadInt32();
+            Position = new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
+            Rotation = new Quaternion(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
+        }
+    }
+
+    /// <summary>
     /// Day/Night phase change notification
     /// Server -> All (broadcast on phase transition)
     /// </summary>

@@ -117,6 +117,21 @@ namespace RakeMultiplayer
             if (_dayNightManager == null) _dayNightManager = UnityEngine.Object.FindObjectOfType<DayNightManager>();
             if (_sessionManager == null) _sessionManager = UnityEngine.Object.FindObjectOfType<SessionManager>();
 
+            // Discover per-scene POIs (Task 4.1) and apply spawn configuration (Task 4.2)
+            var settings = MapSettings.FindOrCreate(UnityEngine.Application.loadedLevelName);
+            if (playerSpawner != null)
+            {
+                int nightIndex = _sessionManager != null ? Mathf.Max(0, _sessionManager.CurrentNight - 1) : 0;
+                playerSpawner.ApplyMapSettings(settings, nightIndex);
+            }
+
+            // Restore world/inventory after a scene reload (Tasks 4.3 / 4.4)
+            WorldPersistence.RestoreWorld();
+            if (playerSpawner != null && playerSpawner.LocalPlayer != null)
+            {
+                WorldPersistence.RestoreInventory(playerSpawner.LocalPlayer);
+            }
+
             if (playerSpawner != null && RakeMultiplayerPlugin.isServer)
             {
                 playerSpawner.SpawnRake();
@@ -160,6 +175,13 @@ namespace RakeMultiplayer
 
         public void LoadGameScene()
         {
+            // Snapshot persistent state before the scene unloads (Tasks 4.3 / 4.4)
+            if (playerSpawner != null && playerSpawner.LocalPlayer != null)
+            {
+                WorldPersistence.SaveInventory(playerSpawner.LocalPlayer);
+            }
+            WorldPersistence.SaveWorld();
+
             Application.LoadLevel(gameScene);
         }
 

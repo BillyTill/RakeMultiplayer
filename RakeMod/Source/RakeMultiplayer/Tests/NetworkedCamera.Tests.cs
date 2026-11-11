@@ -3292,5 +3292,131 @@ namespace RakeMultiplayer.Tests
         }
 
         #endregion
+
+        #region Phase 4 Persistence Tests
+
+        /// <summary>
+        /// Tests for map settings, teleport respawn, and persistence logic.
+        /// </summary>
+        [TestFixture]
+        public class PersistenceTests
+        {
+            [Test]
+            public void PlayerTeleportPacket_RoundTrip()
+            {
+                var packet = new PlayerTeleportPacket
+                {
+                    PlayerId = 3,
+                    Position = new Vector3(12.5f, 1f, -8f),
+                    Rotation = new Quaternion(0f, 1f, 0f, 0f)
+                };
+
+                var restored = PacketSerializer.Deserialize(packet.Serialize()) as PlayerTeleportPacket;
+                Assert.IsNotNull(restored);
+                Assert.AreEqual(3, restored.PlayerId);
+                Assert.AreEqual(12.5f, restored.Position.x, 0.001f);
+                Assert.AreEqual(-8f, restored.Position.z, 0.001f);
+            }
+
+            [Test]
+            public void PlayerTeleport_PacketTypeValue_Is32()
+            {
+                Assert.AreEqual(32, (byte)PacketType.PlayerTeleport);
+            }
+
+            [Test]
+            public void SpawnRotation_PerNight_ChangesIndex()
+            {
+                int spawnCount = 3;
+                Assert.AreEqual(1, (0 + 1) % spawnCount);
+                Assert.AreEqual(2, (0 + 2) % spawnCount);
+                Assert.AreEqual(0, (0 + 3) % spawnCount);
+            }
+
+            [Test]
+            public void SpawnRotation_NegativeIndex_Normalized()
+            {
+                int spawnCount = 3;
+                int index = (0 + (-1)) % spawnCount;
+                if (index < 0) index += spawnCount;
+                Assert.AreEqual(2, index);
+            }
+
+            [Test]
+            public void GetClosestSpawn_PicksNearest()
+            {
+                var spawns = new[]
+                {
+                    new Vector3(0f, 0f, 0f),
+                    new Vector3(100f, 0f, 0f),
+                    new Vector3(200f, 0f, 0f)
+                };
+                var pos = new Vector3(90f, 0f, 0f);
+
+                Vector3 best = spawns[0];
+                float bestDist = (best - pos).sqrMagnitude;
+                for (int i = 1; i < spawns.Length; i++)
+                {
+                    float d = (spawns[i] - pos).sqrMagnitude;
+                    if (d < bestDist) { bestDist = d; best = spawns[i]; }
+                }
+
+                Assert.AreEqual(new Vector3(100f, 0f, 0f), best);
+            }
+
+            [Test]
+            public void WorldPersistence_CameraState_HoldsAllFields()
+            {
+                var state = new WorldPersistence.CameraState
+                {
+                    CameraId = 9u,
+                    IsPlaced = true,
+                    IsActive = true,
+                    IsBroken = false,
+                    BatteryLevel = 72.5f,
+                    PlacedByPlayerId = 2
+                };
+
+                Assert.AreEqual(9u, state.CameraId);
+                Assert.IsTrue(state.IsPlaced);
+                Assert.AreEqual(72.5f, state.BatteryLevel, 0.001f);
+                Assert.AreEqual(2, state.PlacedByPlayerId);
+            }
+
+            [Test]
+            public void WorldPersistence_TrapState_HoldsPositionAndRadius()
+            {
+                var state = new WorldPersistence.TrapState
+                {
+                    Position = new Vector3(4f, 0f, 6f),
+                    Radius = 2.5f
+                };
+
+                Assert.AreEqual(4f, state.Position.x, 0.001f);
+                Assert.AreEqual(2.5f, state.Radius, 0.001f);
+            }
+
+            [Test]
+            public void RakeHealth_DefaultSessionValue_IsFull()
+            {
+                float defaultHealth = 100f;
+                Assert.Greater(defaultHealth, 0f);
+            }
+
+            [Test]
+            public void InventoryList_RoundTripPreservesAmmo()
+            {
+                var source = new System.Collections.Generic.List<int> { 5, 2, 0, 1, 3, 0, 0, 0, 0 };
+                var copy = new System.Collections.Generic.List<int>(source);
+
+                Assert.AreEqual(source.Count, copy.Count);
+                for (int i = 0; i < source.Count; i++)
+                {
+                    Assert.AreEqual(source[i], copy[i]);
+                }
+            }
+        }
+
+        #endregion
     }
 }

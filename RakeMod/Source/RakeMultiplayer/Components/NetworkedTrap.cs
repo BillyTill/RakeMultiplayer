@@ -35,6 +35,13 @@ namespace RakeMultiplayer
 
         public static int GetTrapCount() => _registry.Count;
 
+        /// <summary>Snapshot of all live traps (for persistence).</summary>
+        public static System.Collections.Generic.IEnumerable<NetworkedTrap> GetAllTraps()
+        {
+            var list = new System.Collections.Generic.List<NetworkedTrap>(_registry.Values);
+            return list;
+        }
+
         /// <summary>
         /// Server: create a trap zone at the given position.
         /// </summary>
