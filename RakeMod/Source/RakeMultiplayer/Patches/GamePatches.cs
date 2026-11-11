@@ -728,28 +728,6 @@ namespace RakeMultiplayer.Patches
         }
     }
 
-    /// <summary>
-    /// In multiplayer the dead-Rake trigger must end the session instead of loading
-    /// the single-player main menu (level 0).
-    /// </summary>
-    [HarmonyPatch(typeof(RakeDead_obj))]
-    [HarmonyPatch("OnTriggerEnter")]
-    public class RakeDeadObjMultiplayerPatch
-    {
-        [HarmonyPrefix]
-        static bool Prefix()
-        {
-            if (!RakeMultiplayerPlugin.Enabled.Value) return true;
-            if (!RakeMultiplayerPlugin.isConnected) return true;
-
-            if (RakeMultiplayerPlugin.isServer)
-            {
-                SessionManager.Instance?.UpdateRakeHealth(0f);
-                SessionManager.Instance?.EndSession(VictoryType.HuntersWin);
-            }
-            return false; // no level 0 reload in multiplayer
-        }
-    }
     // === Remote clone singleton guards ===
 
     /// <summary>

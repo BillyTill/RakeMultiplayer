@@ -85,11 +85,34 @@ namespace RakeMultiplayer
             var harmony = new HarmonyLib.Harmony(PluginInfo.GUID);
             var applied = 0;
             var failed = 0;
+            // Apply each patch class independently: one broken target must never abort
+            // all remaining patches (PatchAll is all-or-nothing and hides the culprit).
+            var patchTypes = new System.Collections.Generic.List<Type>();
+            foreach (var t in Assembly.GetExecutingAssembly().GetTypes())
+            {
+                if (t == null) continue;
+                if (t.GetCustomAttributes(typeof(HarmonyLib.HarmonyPatch), false).Length > 0)
+                {
+                    patchTypes.Add(t);
+                }
+            }
+
+            foreach (var patchType in patchTypes)
+            {
+                try
+                {
+                    harmony.CreateClassProcessor(patchType).Patch();
+                    applied++;
+                }
+                catch (Exception ex)
+                {
+                    failed++;
+                    Log.LogError("[Harmony] Patch class " + patchType.FullName + " failed: " + ex);
+                }
+            }
+
             try
             {
-                harmony.PatchAll(Assembly.GetExecutingAssembly());
-                applied = harmony.GetPatchedMethods().Count();
-                
                 var patchedMethods = harmony.GetPatchedMethods();
                 var methodNames = new System.Collections.Generic.List<string>();
                 foreach (var m in patchedMethods)
@@ -100,8 +123,7 @@ namespace RakeMultiplayer
             }
             catch (Exception ex)
             {
-                failed++;
-                Log.LogError("Harmony patch error: " + ex.Message);
+                Log.LogWarning("[Harmony] Could not list patched methods: " + ex.Message);
             }
             Log.LogInfo("[RakeMultiplayer] Harmony patches: applied=" + applied + ", failed=" + failed);
 
