@@ -127,6 +127,7 @@ namespace RakeMultiplayer
                 CameraId = 0
             };
             RakeNetworkManager.Instance?.ServerBroadcast(quest.Serialize());
+            BroadcastMapMarker(false); // remove the spent trap from the minimap
 
             RakeMultiplayerPlugin.Log?.LogInfo($"[3.11] Trap {TrapId} triggered at {transform.position}");
         }
@@ -147,7 +148,7 @@ namespace RakeMultiplayer
         }
 
         /// <summary>Broadcast this trap as a minimap marker (MarkerType 1 = Trap).</summary>
-        public void BroadcastMapMarker()
+        public void BroadcastMapMarker(bool active = true)
         {
             if (!RakeMultiplayerPlugin.isServer) return;
 
@@ -156,7 +157,7 @@ namespace RakeMultiplayer
                 MarkerType = 1, // Trap
                 Position = transform.position,
                 MarkerId = TrapId,
-                IsActive = true
+                IsActive = active
             };
 
             RakeNetworkManager.Instance?.RegisterLocalMapMarker(marker);

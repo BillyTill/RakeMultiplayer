@@ -28,6 +28,7 @@ namespace RakeMultiplayer
         private float _sessionTimer = 0f;
         private float _rakeHealth = 100f;
         private VictoryType _victoryType = VictoryType.None;
+        private float _healthPollTimer;
         private bool _isRunning = false;
 
         // References
@@ -121,15 +122,21 @@ namespace RakeMultiplayer
         /// </summary>
         public void UpdateRakeHealth(float health)
         {
+            float previous = _rakeHealth;
             _rakeHealth = health;
 
             // Check for Rake defeat
             if (_rakeHealth <= RakeDefeatHealthThreshold && _isRunning)
             {
                 EndSession(VictoryType.HuntersWin);
+                return;
             }
 
-            BroadcastSessionState();
+            // Do not spam a SessionState packet every frame
+            if (Mathf.Abs(previous - health) > 0.25f)
+            {
+                BroadcastSessionState();
+            }
         }
 
         /// <summary>
@@ -182,6 +189,16 @@ namespace RakeMultiplayer
                 {
                     EndSession(VictoryType.Timeout);
                 }
+            }
+
+            // Poll health at 4 Hz (not every frame) and re-acquire after level reloads
+            _healthPollTimer += Time.deltaTime;
+            if (_healthPollTimer < 0.25f) return;
+            _healthPollTimer = 0f;
+
+            if (_networkedRake == null)
+            {
+                _networkedRake = FindObjectOfType<NetworkedRakeAI>();
             }
 
             // Update Rake health from NetworkedRakeAI if available

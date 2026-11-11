@@ -15,7 +15,7 @@ namespace RakeMultiplayer.UI
         public static MapUI Instance { get; private set; }
 
         [Header("Map")]
-        public KeyCode toggleKey = KeyCode.M;
+        public KeyCode toggleKey = KeyCode.F3;
         public float mapSize = 220f;
 
         [Tooltip("World-space X/Z bounds shown on the map")]
@@ -122,7 +122,7 @@ namespace RakeMultiplayer.UI
                 uint key = MakeKey(marker.MarkerType, marker.MarkerId);
                 live.Add(key);
 
-                if (!marker.IsActive && marker.MarkerType != 0)
+                if (!marker.IsActive)
                 {
                     RemoveMarker(key);
                     continue;
@@ -130,7 +130,7 @@ namespace RakeMultiplayer.UI
 
                 var image = GetOrCreateMarker(key, marker.MarkerType);
                 PositionMarker(image, marker.Position);
-                image.color = GetColor(marker.MarkerType, marker.MarkerType == 0 && !marker.IsActive);
+                image.color = GetColor(marker.MarkerType, false);
             }
 
             // Trap states (authoritative armed/triggered flags)

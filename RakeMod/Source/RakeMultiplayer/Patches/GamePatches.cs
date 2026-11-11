@@ -166,138 +166,123 @@ namespace RakeMultiplayer.Patches
     }
 
     /// <summary>
-    /// Patch Rifle weapon to send DamageRequest to server when local player fires
+    /// Rifle: detect an actual shot via ammo decrease (the vanilla Update fires a
+    /// coroutine that sets bCanFire=false and decrements ammo before any postfix runs).
+    /// Clients ask the server for authoritative damage; the host already applied it locally.
     /// </summary>
     [HarmonyPatch(typeof(Rifle_weapon))]
     [HarmonyPatch("Update")]
     public class RifleWeaponFireSyncPatch
     {
+        private static readonly System.Reflection.FieldInfo AmmoField =
+            typeof(Rifle_weapon).GetField("currentAmmo",
+                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        private static readonly System.Reflection.FieldInfo CasterField =
+            typeof(Rifle_weapon).GetField("caster",
+                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+        [HarmonyPrefix]
+        static void Prefix(Rifle_weapon __instance, out int __state)
+        {
+            __state = GetAmmo(__instance);
+        }
+
         [HarmonyPostfix]
-        static void Postfix(Rifle_weapon __instance)
+        static void Postfix(Rifle_weapon __instance, int __state)
         {
             if (!RakeMultiplayerPlugin.Enabled.Value) return;
             if (!RakeMultiplayerPlugin.isConnected) return;
+            if (RakeMultiplayerPlugin.isServer) return; // host damage already applied by vanilla
 
             var netPlayer = __instance.GetComponentInParent<NetworkedPlayer>();
             if (netPlayer == null || !netPlayer.isLocalPlayer) return;
 
-            // Check if shot was fired this frame (replicate the fire condition)
-            // Note: We can't easily detect "this frame only" without state tracking,
-            // so we'll use a simple approach: check if fire conditions are met
-            // The original code does the raycast and damage in Update, so we replicate that logic here
-            // for the network packet only (server will do authoritative raycast)
+            int after = GetAmmo(__instance);
+            if (after >= __state) return; // no shot this frame
 
-            if (Input.GetButtonDown("Fire1"))
+            var caster = GetCaster(__instance);
+            if (caster == null) return;
+
+            var packet = new DamageRequestPacket
             {
-                // Get the caster position and direction for the shot
-                // We need to access private fields via reflection
-                var casterField = typeof(Rifle_weapon).GetField("caster", 
-                    System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-                var bSightField = typeof(Rifle_weapon).GetField("bSight", 
-                    System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-                var bCanFireField = typeof(Rifle_weapon).GetField("bCanFire", 
-                    System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-                var currentAmmoField = typeof(Rifle_weapon).GetField("currentAmmo", 
-                    System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                ShooterId = PlayerSpawner.Instance?.LocalPlayer?.PlayerId ?? 1,
+                TargetId = 0,
+                Amount = 100,
+                DamageType = "Bullet",
+                ShooterPosition = caster.position
+            };
+            RakeNetworkManager.Instance?.ClientSend(packet.Serialize());
+            RakeMultiplayerPlugin.Log?.LogInfo($"[3.4] Client sent rifle DamageRequest from {caster.position}");
+        }
 
-                bool bSight = bSightField != null && (bool)bSightField.GetValue(__instance);
-                bool bCanFire = bCanFireField != null && (bool)bCanFireField.GetValue(__instance);
-                int currentAmmo = currentAmmoField != null ? (int)currentAmmoField.GetValue(__instance) : 0;
+        private static int GetAmmo(Rifle_weapon w)
+        {
+            return AmmoField != null ? (int)AmmoField.GetValue(w) : 0;
+        }
 
-                if (bSight && bCanFire && currentAmmo > 0 && casterField != null)
-                {
-                    var caster = casterField.GetValue(__instance) as Transform;
-                    if (caster != null)
-                    {
-                        // Send DamageRequest to server with shooter position
-                        var packet = new DamageRequestPacket
-                        {
-                            ShooterId = PlayerSpawner.Instance?.LocalPlayer?.PlayerId ?? 1,
-                            TargetId = 0, // 0 means "Rake" (server will find the Rake)
-                            Amount = 100, // Rifle damage
-                            DamageType = "Bullet",
-                            ShooterPosition = caster.position
-                        };
-
-                        if (RakeMultiplayerPlugin.isServer)
-                        {
-                            // Host: process locally via HandleServerDamageRequest
-                            RakeNetworkManager.Instance?.HandleServerDamageRequest(0, packet, packet.Serialize());
-                        }
-                        else
-                        {
-                            // Client: send to server
-                            RakeNetworkManager.Instance?.ClientSend(packet.Serialize());
-                        }
-
-                        RakeMultiplayerPlugin.Log?.LogInfo($"[3.4] Sent DamageRequest for Rifle shot from {caster.position}");
-                    }
-                }
-            }
+        private static Transform GetCaster(Rifle_weapon w)
+        {
+            return CasterField != null ? CasterField.GetValue(w) as Transform : null;
         }
     }
-
     /// <summary>
-    /// Patch Sniper Rifle weapon to send DamageRequest to server when local player fires
+    /// Sniper rifle: same ammo-delta shot detection as the rifle.
     /// </summary>
     [HarmonyPatch(typeof(SniperRifle_weapon))]
     [HarmonyPatch("Update")]
     public class SniperRifleWeaponFireSyncPatch
     {
+        private static readonly System.Reflection.FieldInfo AmmoField =
+            typeof(SniperRifle_weapon).GetField("currentAmmo",
+                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        private static readonly System.Reflection.FieldInfo CasterField =
+            typeof(SniperRifle_weapon).GetField("caster",
+                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+        [HarmonyPrefix]
+        static void Prefix(SniperRifle_weapon __instance, out int __state)
+        {
+            __state = GetAmmo(__instance);
+        }
+
         [HarmonyPostfix]
-        static void Postfix(SniperRifle_weapon __instance)
+        static void Postfix(SniperRifle_weapon __instance, int __state)
         {
             if (!RakeMultiplayerPlugin.Enabled.Value) return;
             if (!RakeMultiplayerPlugin.isConnected) return;
+            if (RakeMultiplayerPlugin.isServer) return;
 
             var netPlayer = __instance.GetComponentInParent<NetworkedPlayer>();
             if (netPlayer == null || !netPlayer.isLocalPlayer) return;
 
-            if (Input.GetButtonDown("Fire1"))
+            int after = GetAmmo(__instance);
+            if (after >= __state) return;
+
+            var caster = GetCaster(__instance);
+            if (caster == null) return;
+
+            var packet = new DamageRequestPacket
             {
-                var casterField = typeof(SniperRifle_weapon).GetField("caster", 
-                    System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-                var bSightField = typeof(SniperRifle_weapon).GetField("bSight", 
-                    System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-                var bCanFireField = typeof(SniperRifle_weapon).GetField("bCanFire", 
-                    System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-                var currentAmmoField = typeof(SniperRifle_weapon).GetField("currentAmmo", 
-                    System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                ShooterId = PlayerSpawner.Instance?.LocalPlayer?.PlayerId ?? 1,
+                TargetId = 0,
+                Amount = 200,
+                DamageType = "SniperShot",
+                ShooterPosition = caster.position
+            };
+            RakeNetworkManager.Instance?.ClientSend(packet.Serialize());
+            RakeMultiplayerPlugin.Log?.LogInfo($"[3.4] Client sent sniper DamageRequest from {caster.position}");
+        }
 
-                bool bSight = bSightField != null && (bool)bSightField.GetValue(__instance);
-                bool bCanFire = bCanFireField != null && (bool)bCanFireField.GetValue(__instance);
-                int currentAmmo = currentAmmoField != null ? (int)currentAmmoField.GetValue(__instance) : 0;
+        private static int GetAmmo(SniperRifle_weapon w)
+        {
+            return AmmoField != null ? (int)AmmoField.GetValue(w) : 0;
+        }
 
-                if (bSight && bCanFire && currentAmmo > 0 && casterField != null)
-                {
-                    var caster = casterField.GetValue(__instance) as Transform;
-                    if (caster != null)
-                    {
-                        var packet = new DamageRequestPacket
-                        {
-                            ShooterId = PlayerSpawner.Instance?.LocalPlayer?.PlayerId ?? 1,
-                            TargetId = 0,
-                            Amount = 200, // Sniper damage
-                            DamageType = "SniperShot",
-                            ShooterPosition = caster.position
-                        };
-
-                        if (RakeMultiplayerPlugin.isServer)
-                        {
-                            RakeNetworkManager.Instance?.HandleServerDamageRequest(0, packet, packet.Serialize());
-                        }
-                        else
-                        {
-                            RakeNetworkManager.Instance?.ClientSend(packet.Serialize());
-                        }
-
-                        RakeMultiplayerPlugin.Log?.LogInfo($"[3.4] Sent DamageRequest for Sniper shot from {caster.position}");
-                    }
-                }
-            }
+        private static Transform GetCaster(SniperRifle_weapon w)
+        {
+            return CasterField != null ? CasterField.GetValue(w) as Transform : null;
         }
     }
-
     // === Stage 3.5: Item Pickup Synchronization ===
     
     /// <summary>
@@ -370,6 +355,7 @@ namespace RakeMultiplayer.Patches
         static bool Prefix(UnityEngine.Object obj)
         {
             if (!RakeMultiplayerPlugin.Enabled.Value) return true;
+            if (!RakeMultiplayerPlugin.isConnected) return true; // single-player: vanilla behavior
 
             if (RakeMultiplayerPlugin.isServer)
             {
@@ -466,8 +452,9 @@ namespace RakeMultiplayer.Patches
 
             if (RakeMultiplayerPlugin.isServer)
             {
-                netCam.UnplaceCamera(); // applies visuals + broadcasts CameraDestroy
-                return false;
+                // If the camera was not tracked as placed (e.g. loaded from a save),
+                // let vanilla SetUnsetupState run so it is removed from CameraManager.
+                return netCam.UnplaceCamera();
             }
 
             var request = new RakeMultiplayer.Networking.CameraSetupRequestPacket
@@ -690,5 +677,76 @@ namespace RakeMultiplayer.Patches
                 };
                 RakeNetworkManager.Instance?.ServerBroadcast(quest.Serialize());
             }
+        }
+    }
+    // === Multiplayer damage authority (Rake / animals) ===
+
+    /// <summary>
+    /// Only the server applies damage to the Rake. Clients receive health through
+    /// RakeState/DamageApplied; local raycast damage would desync or locally kill it.
+    /// </summary>
+    [HarmonyPatch(typeof(Enemy_AI))]
+    [HarmonyPatch("TakeDamage")]
+    public class EnemyTakeDamageAuthorityPatch
+    {
+        [HarmonyPrefix]
+        static bool Prefix(Enemy_AI __instance)
+        {
+            if (!RakeMultiplayerPlugin.Enabled.Value) return true;
+            if (!RakeMultiplayerPlugin.isConnected) return true; // single-player
+            return RakeMultiplayerPlugin.isServer;
+        }
+
+        [HarmonyPostfix]
+        static void Postfix(Enemy_AI __instance)
+        {
+            if (!RakeMultiplayerPlugin.Enabled.Value) return;
+            if (!RakeMultiplayerPlugin.isConnected) return;
+            if (!RakeMultiplayerPlugin.isServer) return;
+            if (__instance == null) return;
+
+            if (__instance.Health <= 0f)
+            {
+                SessionManager.Instance?.UpdateRakeHealth(0f);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Animals are server-authoritative too (health/ragdoll driven by NetworkedPig).
+    /// </summary>
+    [HarmonyPatch(typeof(Animal_AI))]
+    [HarmonyPatch("TakeDamage")]
+    public class AnimalTakeDamageAuthorityPatch
+    {
+        [HarmonyPrefix]
+        static bool Prefix(Animal_AI __instance)
+        {
+            if (!RakeMultiplayerPlugin.Enabled.Value) return true;
+            if (!RakeMultiplayerPlugin.isConnected) return true;
+            return RakeMultiplayerPlugin.isServer;
+        }
+    }
+
+    /// <summary>
+    /// In multiplayer the dead-Rake trigger must end the session instead of loading
+    /// the single-player main menu (level 0).
+    /// </summary>
+    [HarmonyPatch(typeof(RakeDead_obj))]
+    [HarmonyPatch("OnTriggerEnter")]
+    public class RakeDeadObjMultiplayerPatch
+    {
+        [HarmonyPrefix]
+        static bool Prefix()
+        {
+            if (!RakeMultiplayerPlugin.Enabled.Value) return true;
+            if (!RakeMultiplayerPlugin.isConnected) return true;
+
+            if (RakeMultiplayerPlugin.isServer)
+            {
+                SessionManager.Instance?.UpdateRakeHealth(0f);
+                SessionManager.Instance?.EndSession(VictoryType.HuntersWin);
+            }
+            return false; // no level 0 reload in multiplayer
         }
     }}

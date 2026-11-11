@@ -64,6 +64,21 @@ namespace RakeMultiplayer
                 });
             }
 
+            // Also persist host-placed vanilla traps (they have no NetworkedTrap zone)
+            var levelItems = LevelItemsManager.instance;
+            if (levelItems != null && levelItems.trapObjects != null)
+            {
+                foreach (var trapObj in levelItems.trapObjects)
+                {
+                    if (trapObj == null) continue;
+                    _trapStates.Add(new TrapState
+                    {
+                        Position = trapObj.transform.position,
+                        Radius = NetworkedTrap.DefaultTriggerRadius
+                    });
+                }
+            }
+
             if (SessionManager.Instance != null)
             {
                 _rakeHealth = SessionManager.Instance.RakeHealth;
@@ -96,8 +111,10 @@ namespace RakeMultiplayer
                 _trapStates.Clear(); // avoid duplicating traps on repeated restores
             }
 
-            RakeMultiplayerPlugin.Log?.LogInfo(
-                $"[4.4] World restored: cameras={_cameraStates.Count}, traps={_trapStates.Count}");
+            // Snapshot is one-shot: do not re-apply a stale state later
+            _cameraStates.Clear();
+
+            RakeMultiplayerPlugin.Log?.LogInfo($"[4.4] World restored and snapshot cleared");
         }
 
         /// <summary>Snapshot the local player's weapon ammo list before a scene change (Task 4.3).</summary>

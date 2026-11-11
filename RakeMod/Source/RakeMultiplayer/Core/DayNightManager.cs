@@ -315,6 +315,16 @@ namespace RakeMultiplayer
         /// </summary>
         private void ApplyLighting(Phase targetPhase, float transitionProgress)
         {
+            // Level reloads destroy the old sun; re-acquire it
+            if (DirectionalLight == null)
+            {
+                var lights = FindObjectsOfType<Light>();
+                foreach (var l in lights)
+                {
+                    if (l != null && l.type == LightType.Directional) { DirectionalLight = l; break; }
+                }
+            }
+
             if (DirectionalLight == null) return;
 
             // Interpolate intensity

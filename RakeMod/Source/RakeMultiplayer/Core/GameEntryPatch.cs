@@ -20,6 +20,9 @@ namespace RakeMultiplayer
             if (!RakeMultiplayerPlugin.Enabled.Value) return;
             if (__instance == null) return;
 
+            // Remote clones also carry FPSController; never run scene setup for them
+            if (__instance.gameObject.name.StartsWith("RemotePlayer_")) return;
+
             RakeMultiplayerPlugin.Log?.LogInfo(
                 $"[GameEntry] Local player started in scene '{Application.loadedLevelName}' - (re)binding multiplayer");
 
@@ -60,6 +63,12 @@ namespace RakeMultiplayer
                 manager.PrepareForSceneLoad();
                 RegisterSceneObjects(manager);
 
+                // Restore persisted cameras/traps for the new scene
+                if (RakeMultiplayerPlugin.isServer)
+                {
+                    WorldPersistence.RestoreWorld();
+                }
+
                 if (RakeMultiplayerPlugin.isServer)
                 {
                     manager.UpdateHostPosition(__instance.transform.position);
@@ -87,8 +96,19 @@ namespace RakeMultiplayer
 
         private static void RegisterSceneObjects(RakeNetworkManager manager)
         {
-            // Items (deterministic sequential IDs on both host and client)
+            // Items: deterministic order (position, then name) so host and client agree
             var items = UnityEngine.Object.FindObjectsOfType<Item>();
+            System.Array.Sort(items, (a, b) =>
+            {
+                if (a == null || b == null) return 0;
+                var pa = a.transform.position;
+                var pb = b.transform.position;
+                int cmp = pa.x.CompareTo(pb.x); if (cmp != 0) return cmp;
+                cmp = pa.y.CompareTo(pb.y); if (cmp != 0) return cmp;
+                cmp = pa.z.CompareTo(pb.z); if (cmp != 0) return cmp;
+                return string.CompareOrdinal(a.gameObject.name, b.gameObject.name);
+            });
+
             for (int i = 0; i < items.Length; i++)
             {
                 manager.RegisterItem(items[i], i + 1);

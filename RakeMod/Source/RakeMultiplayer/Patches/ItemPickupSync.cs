@@ -35,6 +35,11 @@ namespace RakeMultiplayer.Patches
             return itemId > 0 && _consumed.Remove(itemId);
         }
 
+        internal static void ClearConsumed()
+        {
+            _consumed.Clear();
+        }
+
         internal static int GetItemId(Item item)
         {
             if (item == null) return 0;

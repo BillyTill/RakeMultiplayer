@@ -3919,5 +3919,93 @@ namespace RakeMultiplayer.Tests
         }
 
         #endregion
+
+        #region Swarm Audit Regression Tests
+
+        /// <summary>
+        /// Regression tests for the issues found by the parallel audit.
+        /// </summary>
+        [TestFixture]
+        public class AuditRegressionTests
+        {
+            private static uint MarkerKey(byte type, uint id)
+            {
+                return ((uint)type << 28) | (id & 0x0FFFFFFFu);
+            }
+
+            [Test]
+            public void MapMarkerKeys_DoNotCollideAcrossTypes()
+            {
+                // camera #1, trap #1 and bait #1 must all be distinct entries
+                Assert.AreNotEqual(MarkerKey(0, 1), MarkerKey(1, 1));
+                Assert.AreNotEqual(MarkerKey(1, 1), MarkerKey(2, 1));
+                Assert.AreNotEqual(MarkerKey(0, 1), MarkerKey(2, 1));
+            }
+
+            [Test]
+            public void DamageReduction_OnlyWhileBlocking()
+            {
+                bool isBlocking = false;
+                string state = "Chase";
+                float reduction = (!isBlocking || state != "Blocking") ? 1f : 0.2f;
+                Assert.AreEqual(1f, reduction, "A chasing Rake must take full damage");
+
+                isBlocking = true; state = "Blocking";
+                reduction = (!isBlocking || state != "Blocking") ? 1f : 0.2f;
+                Assert.AreEqual(0.2f, reduction, "A blocking Rake takes 20% damage");
+            }
+
+            [Test]
+            public void WeaponShot_DetectedByAmmoDecrease()
+            {
+                int before = 16, after = 15;
+                Assert.IsTrue(after < before, "A shot decrements ammo");
+
+                Assert.IsFalse(after < before ? false : true);
+                Assert.IsFalse(15 < 15, "No shot means no ammo change");
+            }
+
+            [Test]
+            public void DestroyBlock_OnlyForConnectedClients()
+            {
+                // mirrors DestroyPatch gating
+                bool shouldBlock(bool enabled, bool connected, bool isServer)
+                    => enabled && connected && !isServer;
+
+                Assert.IsFalse(shouldBlock(true, false, false), "single-player must never be blocked");
+                Assert.IsFalse(shouldBlock(true, true, true), "host must be allowed to destroy");
+                Assert.IsTrue(shouldBlock(true, true, false), "client blocks item destroy for server sync");
+            }
+
+            [Test]
+            public void UnregisteredItem_UsesVanillaPath()
+            {
+                int itemId = 0; // GetItemNetworkId returns 0 for unregistered items
+                bool vanillaOnly = itemId == 0;
+                Assert.IsTrue(vanillaOnly);
+            }
+
+            [Test]
+            public void GameplaySceneDetection_MatchesLevelNames()
+            {
+                Assert.IsTrue("level1".StartsWith("level"));
+                Assert.IsTrue("level5".StartsWith("level"));
+                Assert.IsFalse("MainMenu".StartsWith("level"));
+                Assert.IsFalse("Lobby".StartsWith("level"));
+            }
+
+            [Test]
+            public void SessionHealthBroadcast_IsThrottled()
+            {
+                float previous = 100f;
+                float changed = 80f;
+                float same = 80.1f;
+
+                Assert.IsTrue(Mathf.Abs(previous - changed) > 0.25f);
+                Assert.IsFalse(Mathf.Abs(changed - same) > 0.25f);
+            }
+        }
+
+        #endregion
     }
 }

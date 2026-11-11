@@ -157,7 +157,7 @@ namespace RakeMultiplayer
         {
             if (_remotePlayers.TryGetValue(playerId, out var player))
             {
-                Destroy(player.gameObject);
+                if (player != null) Destroy(player.gameObject);
                 _remotePlayers.Remove(playerId);
                 RakeMultiplayerPlugin.Log?.LogInfo($"[3.3] Removed remote player {playerId}");
                 return true;

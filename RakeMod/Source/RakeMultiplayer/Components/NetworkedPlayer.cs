@@ -133,6 +133,11 @@ namespace RakeMultiplayer
             var cml = GetComponentInChildren<CameraMouseLook>();
             if (cml) cml.enabled = false;
 
+            // FPSCamera runs the "Press E to pickup" raycast using the LOCAL keyboard;
+            // on a clone it would pick up items for the local player.
+            var fpsCamera = GetComponentInChildren<FPSCamera>();
+            if (fpsCamera) fpsCamera.enabled = false;
+
             var wm = GetComponent<WeaponManager>();
             if (wm) wm.enabled = false;
 

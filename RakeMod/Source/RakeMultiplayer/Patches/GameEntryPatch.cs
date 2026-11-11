@@ -63,6 +63,11 @@ namespace RakeMultiplayer.Patches
         /// </summary>
         private static void OnSceneChangeStart(string sceneName)
         {
+            // Snapshot world state before the scene unloads (cameras/traps/Rake HP)
+            if (RakeMultiplayerPlugin.isServer && RakeMultiplayerPlugin.isConnected)
+            {
+                WorldPersistence.SaveWorld();
+            }
             // Clear all networked objects but keep the network connection
             // NetIdentityManager removed - NetIdentity.Registry handles cleanup
             NetIdentity.Registry.Clear();

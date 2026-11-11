@@ -509,6 +509,13 @@ namespace RakeMultiplayer
                 }
             }
 
+            // Re-setup of an already deployed camera would grant a free recharge - reject
+            if (_isPlaced || _isBroken)
+            {
+                RakeMultiplayerPlugin.Log?.LogWarning($"[NetworkedCamera] Camera {CameraId} is already placed/broken");
+                return false;
+            }
+
             // Enforce the 5-camera quota (server-authoritative)
             if (!_isPlaced)
             {
@@ -524,7 +531,7 @@ namespace RakeMultiplayer
 
             _placedByPlayerId = placedByPlayerId;
             _batteryLevel = 100f;
-            _isActive = false;
+            _isActive = true; // deployed cameras transmit; battery drains
             _isBroken = false;
 
             RakeMultiplayerPlugin.Log?.LogInfo($"[NetworkedCamera] Camera {CameraId} placed by player {placedByPlayerId} ({GetUsableCameraCount()}/{MaxCameras})");
@@ -543,6 +550,7 @@ namespace RakeMultiplayer
         public void RestoreState(bool active, bool broken, float battery, int placedByPlayerId)
         {
             if (!RakeMultiplayerPlugin.isServer) return;
+            if (!_isPlaced && !CanPlaceCamera()) return; // do not bypass the quota on restore
 
             _isPlaced = true;
             _batteryLevel = Mathf.Clamp(battery, 0f, 100f);
@@ -559,6 +567,7 @@ namespace RakeMultiplayer
             UpdateCameraVisuals();
             SendCameraSpawn();
             SendCameraUpdate();
+            BroadcastMapMarker(!broken);
 
             RakeMultiplayerPlugin.Log?.LogInfo(
                 $"[4.4] Camera {CameraId} restored (active={active}, broken={broken}, battery={_batteryLevel:F1})");
@@ -658,11 +667,8 @@ namespace RakeMultiplayer
 
             ApplyUnsetupVisuals();
 
-            // Remove from client registry so the slot is freed locally
-            if (packet.CameraId != 0 && _cameraRegistry.ContainsKey(packet.CameraId))
-            {
-                _cameraRegistry.Remove(packet.CameraId);
-            }
+            // Keep the registry entry: the same camera object is set up again later and
+            // CameraSpawn/CameraSync must be resolvable by CameraId.
         }
 
         /// <summary>
@@ -900,19 +906,12 @@ namespace RakeMultiplayer
 
         private void UpdateCameraVisuals()
         {
-            if (_cameraVisuals != null)
-            {
-                bool shouldBeActive = _isActive && !_isBroken;
-                if (_cameraVisuals.activeSelf != shouldBeActive)
-                {
-                    _cameraVisuals.SetActive(shouldBeActive);
-                }
-            }
+            // The game's CameraManager owns the setupCamera active state (monitor view).
+            // Only enforce the broken state here.
+            if (!_isBroken) return;
 
-            if (_cameraComponent != null)
-            {
-                _cameraComponent.enabled = _isActive && !_isBroken;
-            }
+            if (_cameraVisuals != null) _cameraVisuals.SetActive(false);
+            if (_cameraComponent != null) _cameraComponent.enabled = false;
         }
 
         #endregion

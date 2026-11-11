@@ -68,13 +68,21 @@ namespace RakeMultiplayer
         // Camera registry tracking (deterministic IDs assigned by RegisterCameras)
         private int _nextCameraNetworkId = 1;
 
+        // Local player id decoded from the IsYou packet (may arrive before PlayerSpawner)
+        private int _pendingLocalPlayerId = 0;
+
         // Map markers (bait/trap/camera...) received from the server, for MapUI
         private readonly Dictionary<uint, MapMarkerPacket> _mapMarkers = new Dictionary<uint, MapMarkerPacket>();
         private readonly Dictionary<uint, TrapStatePacket> _trapStates = new Dictionary<uint, TrapStatePacket>();
         private readonly List<Transform> _activeBaitTransforms = new List<Transform>();
         private int _nextMarkerId = 1;
 
-        /// <summary>Map markers received from the server (MarkerId -> packet).</summary>
+        private static uint MarkerKey(byte markerType, uint markerId)
+        {
+            return ((uint)markerType << 28) | (markerId & 0x0FFFFFFFu);
+        }
+
+        /// <summary>Map markers received from the server (composite type+id key -> packet).</summary>
         public Dictionary<uint, MapMarkerPacket> GetMapMarkers() => _mapMarkers;
 
         /// <summary>
@@ -83,7 +91,7 @@ namespace RakeMultiplayer
         public void RegisterLocalMapMarker(MapMarkerPacket marker)
         {
             if (marker == null) return;
-            _mapMarkers[marker.MarkerId] = marker;
+            _mapMarkers[MarkerKey(marker.MarkerType, marker.MarkerId)] = marker;
             OnMapMarkerReceived?.Invoke(marker);
         }
         // Reverse lookup: Item -> assigned network ID (for consistent ID retrieval)
@@ -114,6 +122,9 @@ namespace RakeMultiplayer
         public void StartHost()
         {
             RakeMultiplayerPlugin.Log?.LogInfo("[RakeNetworkManager] Starting host...");
+
+            // Never leave a previous listener bound
+            if (_server != null) StopHost();
             
             // ОБЯЗАТЕЛЬНО установить оба флага!
             RakeMultiplayerPlugin.IsServer.Value = true;
@@ -130,6 +141,9 @@ namespace RakeMultiplayer
             else
             {
                 RakeMultiplayerPlugin.Log?.LogError("Failed to start server");
+                _server = null;
+                RakeMultiplayerPlugin.isServer = false;
+                RakeMultiplayerPlugin.isConnected = false;
             }
             
             // Store host spawn position after local player is registered
@@ -148,6 +162,8 @@ namespace RakeMultiplayer
             // ОБЯЗАТЕЛЬНО установить оба флага!
             RakeMultiplayerPlugin.IsServer.Value = false;
             RakeMultiplayerPlugin.isServer = false; // <--- КРИТИЧЕСКИЙ ФИКС
+
+            if (_client != null) Disconnect();
 
             _client = new Telepathy.Client();
             _client.NoDelay = true;
@@ -221,23 +237,49 @@ namespace RakeMultiplayer
                 _server.Stop();
                 _server = null;
             }
+
             _playerStates.Clear();
             _connectedClients.Clear();
+            _knownPlayerIds.Clear();
+            _pendingConnects.Clear();
             _networkedItems.Clear();
+            _itemToNetworkId.Clear();
+            _mapMarkers.Clear();
+            _trapStates.Clear();
+            _activeBaitTransforms.Clear();
+            _hostSpawnPositionSet = false;
+
             RakeMultiplayerPlugin.isConnected = false;
+            RakeMultiplayerPlugin.isServer = false;
         }
 
         public void Disconnect()
         {
             RakeMultiplayerPlugin.Log?.LogInfo("[RakeNetworkManager] Disconnecting...");
+
+            if (RakeMultiplayerPlugin.isServer || _server != null)
+            {
+                StopHost();
+                return;
+            }
+
             if (_client != null)
             {
                 _client.Disconnect();
                 _client = null;
             }
-            // Clear client-side player tracking
+
+            // Clear all client-side session state
             _knownPlayerIds.Clear();
+            _pendingConnects.Clear();
             _networkedItems.Clear();
+            _itemToNetworkId.Clear();
+            _mapMarkers.Clear();
+            _trapStates.Clear();
+            _activeBaitTransforms.Clear();
+            _hostSpawnPositionSet = false;
+            _clientSceneLoading = false;
+
             RakeMultiplayerPlugin.isConnected = false;
         }
 
@@ -376,7 +418,9 @@ namespace RakeMultiplayer
             RakeMultiplayerPlugin.Log?.LogInfo($"[Net] Server: client {connectionId} disconnected");
             _connectedClients.Remove(connectionId);
             _playerStates.Remove(connectionId);
-            _networkedItems.Clear(); // Clear items to avoid ghost items for remaining players
+
+            // Remove the host-side proxy of the departed player
+            PlayerSpawner.Instance?.RemoveRemotePlayer(connectionId + 1);
 
             var packet = new PlayerDisconnectedPacket { PlayerId = connectionId + 1 };
             var data = packet.Serialize();
@@ -596,48 +640,68 @@ namespace RakeMultiplayer
         // === Stage 3.5: Items ===
         private void HandleServerItemPickup(int connectionId, ItemPickupPacket packet, byte[] rawData)
         {
-            RakeMultiplayerPlugin.Log?.LogInfo($"[3.5] Server received ItemPickup from C{connectionId}: player={packet.PlayerId}, itemId={packet.ItemNetworkId}, type={packet.ItemType}");
+            int playerId = connectionId + 1;
+            RakeMultiplayerPlugin.Log?.LogInfo(
+                $"[3.5] Server received ItemPickup from C{connectionId} -> P{playerId}: itemId={packet.ItemNetworkId}");
 
-            // Race condition protection: check if item still exists in registry
-            if (!_networkedItems.ContainsKey(packet.ItemNetworkId))
+            if (!_networkedItems.TryGetValue(packet.ItemNetworkId, out var item) || item == null)
             {
-                RakeMultiplayerPlugin.Log?.LogWarning($"[3.5] Server: item {packet.ItemNetworkId} already picked up by someone else!");
+                RakeMultiplayerPlugin.Log?.LogWarning(
+                    $"[3.5] Server: item {packet.ItemNetworkId} already picked up or unknown");
                 return;
             }
 
-            // Get the item to clean up reverse lookup
-            var item = _networkedItems[packet.ItemNetworkId];
+            // Generous proximity check: a client cannot vacuum items across the map
+            Transform picker = null;
+            if (playerId == 1)
+            {
+                picker = PlayerSpawner.Instance?.LocalPlayer?.transform;
+            }
+            else if (PlayerSpawner.Instance != null &&
+                     PlayerSpawner.Instance.TryGetRemotePlayer(playerId, out var remote) && remote != null)
+            {
+                picker = remote.transform;
+            }
 
-            // ===== Task 3.3: 5-camera limit enforcement (server-authoritative) =====
-            // The original game allows at most 5 cameras set up at once
-            // (MP_RecordCamera_obj.CheckSetup: "You cannot setup no more 5 cameras").
-            // Reject acquiring further camera items once the quota is full so a 6th
-            // camera can never enter play. Broken cameras free a slot (see NetworkedCamera).
-            if (string.Equals(packet.ItemType, "Camera_item", StringComparison.Ordinal) && !NetworkedCamera.CanPlaceCamera())
+            if (picker != null && Vector3.Distance(picker.position, item.transform.position) > 8f)
             {
                 RakeMultiplayerPlugin.Log?.LogWarning(
-                    $"[3.3] Server rejected camera pickup for player {packet.PlayerId}: " +
-                    $"camera limit {NetworkedCamera.MaxCameras} reached " +
+                    $"[3.5] Server rejected pickup: P{playerId} is {Vector3.Distance(picker.position, item.transform.position):F1}m away from item {packet.ItemNetworkId}");
+                return;
+            }
+
+            // Item type comes from the server registry, never from the client packet
+            string itemType = item.GetType().Name;
+
+            // 5-camera quota (server-authoritative; broken cameras free a slot)
+            if (itemType == "Camera_item" && !NetworkedCamera.CanPlaceCamera())
+            {
+                RakeMultiplayerPlugin.Log?.LogWarning(
+                    $"[3.3] Server rejected camera pickup for P{playerId}: camera limit {NetworkedCamera.MaxCameras} reached " +
                     $"(placed={NetworkedCamera.GetPlacedCameraCount()}, usable={NetworkedCamera.GetUsableCameraCount()})");
 
                 var rejectPacket = new ItemPickupConfirmPacket
                 {
-                    PlayerId = packet.PlayerId,
+                    PlayerId = playerId,
                     ItemNetworkId = packet.ItemNetworkId,
                     Success = false,
                     Reason = "CameraLimit"
                 };
                 _server.Send(connectionId, rejectPacket.Serialize());
-                OnPickupRejected?.Invoke(packet.PlayerId, "CameraLimit");
+                OnPickupRejected?.Invoke(playerId, "CameraLimit");
                 return; // Item stays in the world
             }
-            
-            // Authorize: remove from the registry and let every client apply the exact
-            // vanilla pickup effect locally (the server cannot drive proxies' inventories).
-            ServerAuthorizeItemPickup(packet.ItemNetworkId, packet.PlayerId);
-            RakeMultiplayerPlugin.Log?.LogInfo($"[3.5] Server authorized pickup of item {packet.ItemNetworkId} by player {packet.PlayerId}");
-        }
 
+            // Remove the authoritative world object (the host does not receive its own broadcast)
+            RakeMultiplayerPlugin.IsApplyingNetworkDestroy = true;
+            try { UnityEngine.Object.Destroy(item.gameObject); }
+            catch { /* already destroyed */ }
+            finally { RakeMultiplayerPlugin.IsApplyingNetworkDestroy = false; }
+
+            ServerAuthorizeItemPickup(packet.ItemNetworkId, playerId);
+            RakeMultiplayerPlugin.Log?.LogInfo(
+                $"[3.5] Server authorized pickup of item {packet.ItemNetworkId} ({itemType}) by P{playerId}");
+        }
         // === Stage 3.4: Camera setup/pickup (server-authoritative) ===
         private void HandleServerCameraSetupRequest(int connectionId, CameraSetupRequestPacket packet, byte[] rawData)
         {
@@ -788,7 +852,7 @@ namespace RakeMultiplayer
                 }
                 packet.MarkerId = trap.TrapId;
                 ServerBroadcast(packet.Serialize());
-                _mapMarkers[packet.MarkerId] = packet;
+                _mapMarkers[MarkerKey(packet.MarkerType, packet.MarkerId)] = packet;
                 OnMapMarkerReceived?.Invoke(packet);
                 return;
             }
@@ -835,7 +899,7 @@ namespace RakeMultiplayer
             // Broadcast so every client can show the bait on the map
             packet.MarkerId = (uint)_nextMarkerId++;
             ServerBroadcast(packet.Serialize());
-            _mapMarkers[packet.MarkerId] = packet;
+            _mapMarkers[MarkerKey(packet.MarkerType, packet.MarkerId)] = packet;
             OnMapMarkerReceived?.Invoke(packet);
         }
 
@@ -922,6 +986,7 @@ namespace RakeMultiplayer
             _nextItemNetworkId = 1;
             _nextMarkerId = 1;
 
+            RakeMultiplayer.Patches.ItemPickupSync.ClearConsumed();
             NetworkedCamera.ClearRegistry();
 
             RakeMultiplayerPlugin.Log?.LogInfo("[Scene] Per-scene network registries reset");
@@ -1010,7 +1075,15 @@ namespace RakeMultiplayer
             else
             {
                 // Client: one remote object per known other player
-                int localId = spawner.LocalPlayer != null ? spawner.LocalPlayer.PlayerId : 0;
+                int localId = spawner.LocalPlayer != null && spawner.LocalPlayer.PlayerId > 0
+                    ? spawner.LocalPlayer.PlayerId
+                    : (spawner.LastLocalPlayerId > 0 ? spawner.LastLocalPlayerId : _pendingLocalPlayerId);
+
+                if (localId > 0 && spawner.TryGetRemotePlayer(localId, out _))
+                {
+                    spawner.RemoveRemotePlayer(localId); // remove accidental self-proxy
+                }
+
                 foreach (var playerId in _knownPlayerIds)
                 {
                     if (playerId == localId) continue;
@@ -1135,18 +1208,26 @@ namespace RakeMultiplayer
         {
             if (_clientSceneLoading) return;
             _clientSceneLoading = true;
-            
+
             RakeMultiplayerPlugin.Log?.LogInfo($"[Net] Received StartGame packet! Loading level index: {packet.SceneName}");
-            
-            // Parse as level index (game uses LoadLevel(int))
-            if (int.TryParse(packet.SceneName, out int levelIndex))
+
+            try
             {
-                UnityEngine.Application.LoadLevel(levelIndex);
+                // Parse as level index (game uses LoadLevel(int))
+                if (int.TryParse(packet.SceneName, out int levelIndex))
+                {
+                    UnityEngine.Application.LoadLevel(levelIndex);
+                }
+                else
+                {
+                    // Fallback: try as scene name
+                    UnityEngine.Application.LoadLevel(packet.SceneName);
+                }
             }
-            else
+            finally
             {
-                // Fallback: try as scene name
-                UnityEngine.Application.LoadLevel(packet.SceneName);
+                // Allow the next match to be started (and do not latch on load failure)
+                _clientSceneLoading = false;
             }
         }
 
@@ -1240,10 +1321,22 @@ namespace RakeMultiplayer
         {
             RakeMultiplayerPlugin.Log?.LogInfo($"[3.3] Client received PlayerConnected: playerId={packet.PlayerId}, spawnPos={packet.SpawnPosition}, IsYou={packet.IsYou}");
 
-            // Track known player IDs for UI (client-side)
-            if (!RakeMultiplayerPlugin.isServer)
+            // Track other players' IDs (client-side). Never track our own id.
+            if (!RakeMultiplayerPlugin.isServer && !packet.IsYou)
             {
                 _knownPlayerIds.Add(packet.PlayerId);
+            }
+
+            if (!RakeMultiplayerPlugin.isServer && packet.IsYou)
+            {
+                _pendingLocalPlayerId = packet.PlayerId;
+
+                // If a self-proxy was spawned before the id was known, remove it
+                if (PlayerSpawner.Instance != null && PlayerSpawner.Instance.TryGetRemotePlayer(packet.PlayerId, out _))
+                {
+                    PlayerSpawner.Instance.RemoveRemotePlayer(packet.PlayerId);
+                    RakeMultiplayerPlugin.Log?.LogWarning($"[Visual] Removed accidental self-proxy P{packet.PlayerId}");
+                }
             }
 
             // If PlayerSpawner not ready, queue the packet for later processing
@@ -1272,6 +1365,9 @@ namespace RakeMultiplayer
         private void HandleClientPlayerDisconnected(PlayerDisconnectedPacket packet)
         {
             RakeMultiplayerPlugin.Log?.LogInfo($"[3.3] Client received PlayerDisconnected: playerId={packet.PlayerId}");
+
+            // Forget the id, otherwise EnsureRemotePlayersSpawned respawns it as a ghost
+            _knownPlayerIds.Remove(packet.PlayerId);
 
             if (PlayerSpawner.Instance != null)
             {
@@ -1462,7 +1558,7 @@ namespace RakeMultiplayer
 
         private void HandleClientMapMarker(MapMarkerPacket packet)
         {
-            _mapMarkers[packet.MarkerId] = packet;
+            _mapMarkers[MarkerKey(packet.MarkerType, packet.MarkerId)] = packet;
             OnMapMarkerReceived?.Invoke(packet);
         }
 
@@ -1709,11 +1805,10 @@ namespace RakeMultiplayer
             if (item == null) return 0;
             if (_itemToNetworkId.TryGetValue(item, out int id))
                 return id;
-            // Fallback: generate from position (for items not yet registered)
-            int x = Mathf.RoundToInt(item.transform.position.x * 100f);
-            int y = Mathf.RoundToInt(item.transform.position.y * 100f);
-            int z = Mathf.RoundToInt(item.transform.position.z * 100f);
-            return (x * 73856093) ^ (y * 19349663) ^ (z * 83492791) ^ item.name.GetHashCode();
+
+            // Not registered (e.g. spawned by a script after scene init): let vanilla
+            // handle it instead of inventing a non-deterministic hash id.
+            return 0;
         }
 
         /// <summary>
@@ -1780,6 +1875,12 @@ namespace RakeMultiplayer
         /// </summary>
         public void ProcessPendingConnects()
         {
+            if (PlayerSpawner.Instance == null)
+            {
+                RakeMultiplayerPlugin.Log?.LogWarning("[Net] ProcessPendingConnects: PlayerSpawner not ready, keeping queue");
+                return;
+            }
+
             while (_pendingConnects.Count > 0)
             {
                 var packet = _pendingConnects.Dequeue();

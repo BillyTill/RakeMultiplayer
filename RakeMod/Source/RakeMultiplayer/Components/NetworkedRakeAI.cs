@@ -120,6 +120,8 @@ namespace RakeMultiplayer
         private float originalAgentSpeed = 5f;
 
         private bool _initialized = false;
+        private bool _loggedHealthWarning = false;
+        private bool _loggedMaxHealthWarning = false;
 
         private void Awake()
         {
@@ -364,11 +366,7 @@ namespace RakeMultiplayer
                     break;
             }
 
-            // Update animator state integer
-            if (animator != null)
-            {
-                animator.SetInteger("State", (int)currentState);
-            }
+            // Animator is driven by the game's own Enemy_AI parameters (WalkType/Speed/bCrouch).
         }
 
         private void UpdateIdle()
@@ -681,8 +679,31 @@ namespace RakeMultiplayer
             // Stun is applied by traps (Task 3.11); auto-recover after stunDuration
             if (stateTimer > stunDuration)
             {
+                SetStunnedPhysics(false);
                 TransitionToState(RakeState.Follow);
             }
+        }
+
+        /// <summary>Freeze/resume the vanilla Enemy_AI and its NavMeshAgent during a stun.</summary>
+        private void SetStunnedPhysics(bool stunned)
+        {
+            var agent = GetEnemyAgent();
+            if (agent != null && agent.isOnNavMesh)
+            {
+                if (stunned) agent.Stop();
+                else agent.Resume();
+            }
+
+            if (enemyAI != null)
+            {
+                enemyAI.enabled = !stunned;
+            }
+        }
+
+        private NavMeshAgent GetEnemyAgent()
+        {
+            if (enemyAI == null || enemyAgentField == null) return null;
+            return enemyAgentField.GetValue(enemyAI) as NavMeshAgent;
         }
 
         /// <summary>
@@ -702,6 +723,8 @@ namespace RakeMultiplayer
             {
                 TransitionToState(RakeState.Stunned);
             }
+
+            SetStunnedPhysics(true);
 
             RakeMultiplayerPlugin.Log?.LogInfo($"[3.11] Rake stunned for {stunDuration:F1}s");
         }
@@ -727,7 +750,7 @@ namespace RakeMultiplayer
             switch (newState)
             {
                 case RakeState.Stealth:
-                    if (animator != null) animator.SetBool("Crouch", true);
+                    if (animator != null) animator.SetBool("bCrouch", true);
                     break;
                 case RakeState.Follow:
                 case RakeState.Idle:
@@ -739,15 +762,14 @@ namespace RakeMultiplayer
                 case RakeState.Blocking:
                 case RakeState.FeignedRetreat:
                 case RakeState.Dead:
-                    if (animator != null) animator.SetBool("Crouch", false);
+                    if (animator != null) animator.SetBool("bCrouch", false);
                     if (newState == RakeState.Chase)
                         chaseVocalizationTimer = 0f; // Reset vocalization timer on Chase entry
                     if (newState == RakeState.Blocking)
-                        isBlocking = true; // Set immediately on entry
-                    if (newState == RakeState.FeignedRetreat && animator != null)
-                        animator.SetTrigger("Flee");
-                    if (newState == RakeState.Blocking && animator != null)
-                        animator.SetTrigger("Block");
+                    {
+                        isBlocking = true;
+                        blockingEndTime = Time.time + UnityEngine.Random.Range(blockingDurationMin, blockingDurationMax);
+                    }
                     break;
             }
 
@@ -823,9 +845,12 @@ namespace RakeMultiplayer
 
         public float CalculateDamageReduction(Vector3 hitDirection, Vector3 rakeForward)
         {
+            // Only an active Blocking state reduces damage
+            if (!isBlocking || currentState != RakeState.Blocking) return 1f;
+
             // hitDirection: direction FROM which the hit came (e.g., shooter to target)
             // rakeForward: Rake's forward vector
-            
+
             Vector3 toRake = -hitDirection.normalized;
             float angle = Vector3.Angle(rakeForward, toRake);
             
@@ -860,7 +885,10 @@ namespace RakeMultiplayer
 
             transform.position = teleportPos;
             targetPosition = teleportPos; // For client interpolation
-            
+
+            var agent = GetEnemyAgent();
+            if (agent != null) agent.Warp(teleportPos);
+
             RakeMultiplayerPlugin.Log?.LogInfo($"[AI] FeignedRetreat teleport behind hunter at {teleportPos}");
         }
 
@@ -950,7 +978,11 @@ namespace RakeMultiplayer
             {
                 return Convert.ToSingle(enemyHealthField.GetValue(enemyAI));
             }
-            RakeMultiplayerPlugin.Log?.LogWarning("[AI] Enemy_AI Health field not found via reflection - using fallback 100f");
+            if (!_loggedHealthWarning)
+            {
+                _loggedHealthWarning = true;
+                RakeMultiplayerPlugin.Log?.LogWarning("[AI] Enemy_AI Health field not found via reflection - using fallback 100f");
+            }
             return 100f;
         }
 
@@ -967,7 +999,11 @@ namespace RakeMultiplayer
             {
                 return Convert.ToSingle(altField.GetValue(enemyAI));
             }
-            RakeMultiplayerPlugin.Log?.LogWarning("[AI] Enemy_AI MaxHealth field not found via reflection - using fallback 100f");
+            if (!_loggedMaxHealthWarning)
+            {
+                _loggedMaxHealthWarning = true;
+                RakeMultiplayerPlugin.Log?.LogWarning("[AI] Enemy_AI MaxHealth field not found via reflection - using fallback 100f");
+            }
             return 100f; // Default fallback
         }
 
@@ -1011,8 +1047,8 @@ namespace RakeMultiplayer
                 switch (newState)
                 {
                     case RakeState.Stealth:
-                        if (animator != null) animator.SetBool("Crouch", true);
-                        isBlocking = false; // Explicitly clear blocking when entering Stealth
+                        if (animator != null) animator.SetBool("bCrouch", true);
+                        isBlocking = false;
                         break;
                     case RakeState.Follow:
                     case RakeState.Idle:
@@ -1022,18 +1058,16 @@ namespace RakeMultiplayer
                     case RakeState.Search:
                     case RakeState.Stunned:
                     case RakeState.Dead:
-                        if (animator != null) animator.SetBool("Crouch", false);
-                        isBlocking = false; // Clear blocking for all non-Blocking states
+                        if (animator != null) animator.SetBool("bCrouch", false);
+                        isBlocking = false;
                         break;
                     case RakeState.Blocking:
-                        if (animator != null) animator.SetBool("Crouch", false);
+                        if (animator != null) animator.SetBool("bCrouch", true);
                         isBlocking = true;
-                        if (animator != null) animator.SetTrigger("Block");
                         break;
                     case RakeState.FeignedRetreat:
-                        if (animator != null) animator.SetBool("Crouch", false);
-                        isBlocking = false; // Clear blocking
-                        if (animator != null) animator.SetTrigger("Flee");
+                        if (animator != null) animator.SetBool("bCrouch", false);
+                        isBlocking = false;
                         break;
                 }
             }
@@ -1043,10 +1077,13 @@ namespace RakeMultiplayer
                 isBlocking = false;
             }
 
-            // Update animator
+            // Speed is a real animator parameter on the game's Rake
             if (animator != null)
             {
-                animator.SetInteger("State", state);
+                float speed = newState == RakeState.Chase ? 2f
+                            : newState == RakeState.Follow ? 1f
+                            : 0f;
+                animator.SetFloat("Speed", speed);
             }
         }
 

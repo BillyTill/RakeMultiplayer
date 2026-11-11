@@ -78,7 +78,8 @@ namespace RakeMultiplayer
                 RakeNetworkManager.Instance?.EnsureRemotePlayersSpawned();
             }
 
-            if (sceneName == gameScene)
+            // Rake uses level0..level5 scene names; treat any level scene as gameplay
+            if (sceneName == gameScene || sceneName.StartsWith("level"))
             {
                 OnGameSceneLoaded();
             }

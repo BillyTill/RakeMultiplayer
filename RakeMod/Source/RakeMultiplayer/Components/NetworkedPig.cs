@@ -60,6 +60,10 @@ namespace RakeMultiplayer
 
         public void SetAttachedCamera(uint cameraId)
         {
+            if (AttachedCameraId != 0 && AttachedCameraId != cameraId)
+            {
+                NetworkedCamera.ReleaseExternalCamera(AttachedCameraId);
+            }
             AttachedCameraId = cameraId;
         }
 
