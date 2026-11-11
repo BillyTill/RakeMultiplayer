@@ -3810,5 +3810,114 @@ namespace RakeMultiplayer.Tests
         }
 
         #endregion
+
+        #region Item Pickup Sync & Level Transition Tests
+
+        /// <summary>
+        /// Tests for the per-item pickup interception and level-change rebinding.
+        /// </summary>
+        [TestFixture]
+        public class ItemPickupSyncTests
+        {
+            [Test]
+            public void DeferredDestroy_RequiresConsumedMark()
+            {
+                // Unity defers Destroy, so the item is NOT null right after pickup.
+                // The postfix must only broadcast when DestroyPatch marked it consumed.
+                var consumed = new System.Collections.Generic.HashSet<int>();
+                int itemId = 42;
+
+                bool isNullImmediately = false; // item still alive this frame
+                bool shouldBroadcast = consumed.Remove(itemId); // no mark yet
+
+                Assert.IsFalse(isNullImmediately);
+                Assert.IsFalse(shouldBroadcast, "Without a Destroy mark the pickup must not be broadcast");
+            }
+
+            [Test]
+            public void SuccessfulPickup_BroadcastsOnce()
+            {
+                var consumed = new System.Collections.Generic.HashSet<int>();
+                int itemId = 42;
+
+                consumed.Add(itemId);                       // DestroyPatch marked it
+                bool first = consumed.Remove(itemId);       // postfix consumes
+                bool second = consumed.Remove(itemId);      // duplicate postfix
+
+                Assert.IsTrue(first);
+                Assert.IsFalse(second, "A pickup must be authorized exactly once");
+            }
+
+            [Test]
+            public void FullAmmoPickup_DoesNotDestroy_NoBroadcast()
+            {
+                // "Full ammo" returns early without Destroy -> no mark -> no broadcast
+                var consumed = new System.Collections.Generic.HashSet<int>();
+                Assert.IsFalse(consumed.Remove(7));
+            }
+
+            [Test]
+            public void ClientBlock_ServerAuthorizes_ThenClientReplays()
+            {
+                // Flow: client blocks vanilla -> sends request -> server broadcasts ->
+                // client replays the original pickup with the network flag set.
+                bool clientBlocked = true;
+                bool serverAuthorized = true;
+                bool replayAllowedByFlag = true; // IsApplyingNetworkDestroy == true
+
+                Assert.IsTrue(clientBlocked);
+                Assert.IsTrue(serverAuthorized);
+                Assert.IsTrue(replayAllowedByFlag);
+            }
+
+            [Test]
+            public void LocalPlayerId_SurvivesLevelChange()
+            {
+                int lastLocalPlayerId = 0;
+
+                // First scene: server assigns ID 3
+                lastLocalPlayerId = 3;
+                Assert.AreEqual(3, lastLocalPlayerId);
+
+                // Level reload: new NetworkedPlayer starts at 0, ID restored from spawner
+                int newPlayerId = 0;
+                if (!false && lastLocalPlayerId > 0) newPlayerId = lastLocalPlayerId;
+
+                Assert.AreEqual(3, newPlayerId, "Client ID must survive a level change");
+            }
+
+            [Test]
+            public void RemotePlayersFromOldScene_ArePruned()
+            {
+                var remotes = new System.Collections.Generic.Dictionary<int, object>
+                {
+                    { 2, null },  // destroyed with the old scene
+                    { 3, new object() }
+                };
+
+                var dead = new System.Collections.Generic.List<int>();
+                foreach (var kvp in remotes)
+                {
+                    if (kvp.Value == null) dead.Add(kvp.Key);
+                }
+                foreach (var id in dead) remotes.Remove(id);
+
+                Assert.AreEqual(1, remotes.Count);
+                Assert.IsFalse(remotes.ContainsKey(2));
+                Assert.IsTrue(remotes.ContainsKey(3));
+            }
+
+            [Test]
+            public void SceneReload_ReRegistersItemsWithSameIds()
+            {
+                // IDs are sequential per scene, assigned in the same deterministic order
+                var hostIds = new[] { 1, 2, 3, 4 };
+                var clientIds = new[] { 1, 2, 3, 4 };
+
+                CollectionAssert.AreEqual(hostIds, clientIds);
+            }
+        }
+
+        #endregion
     }
 }

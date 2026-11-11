@@ -67,6 +67,17 @@ namespace RakeMultiplayer
             // Re-bind persistent managers after scene load
             RebindPersistentManagers();
 
+            // "Skip day" and night transitions reload the level: every remote proxy was
+            // destroyed with the old scene, so recreate them for the new one.
+            if (RakeMultiplayerPlugin.isConnected)
+            {
+                if (playerSpawner != null)
+                {
+                    playerSpawner.PruneDestroyedRemotePlayers();
+                }
+                RakeNetworkManager.Instance?.EnsureRemotePlayersSpawned();
+            }
+
             if (sceneName == gameScene)
             {
                 OnGameSceneLoaded();

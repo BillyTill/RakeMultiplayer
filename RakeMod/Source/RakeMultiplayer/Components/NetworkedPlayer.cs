@@ -109,6 +109,11 @@ namespace RakeMultiplayer
         public void SetPlayerId(int id)
         {
             PlayerId = id;
+
+            if (isLocalPlayer && PlayerSpawner.Instance != null)
+            {
+                PlayerSpawner.Instance.NotifyLocalPlayerId(id);
+            }
         }
 
         public void SetAsRemotePlayer()

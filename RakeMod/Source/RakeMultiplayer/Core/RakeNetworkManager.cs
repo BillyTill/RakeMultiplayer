@@ -632,126 +632,9 @@ namespace RakeMultiplayer
                 return; // Item stays in the world
             }
             
-            // Remove from server registry immediately to prevent double-pickup
-            _networkedItems.Remove(packet.ItemNetworkId);
-            if (item != null) _itemToNetworkId.Remove(item);
-
-            // ===== Give item to the player on the server (host) =====
-            // Find the WeaponManager for this player and call AddWeapon/AddAmmo
-            // PlayerId 1 = Host, PlayerId > 1 = Clients (connectionId = PlayerId - 1)
-            try
-            {
-                WeaponManager weaponManager = null;
-                
-                if (packet.PlayerId == 1)
-                {
-                    // Host player - find WeaponManager on the local player
-                    if (PlayerSpawner.Instance != null && PlayerSpawner.Instance.LocalPlayer != null)
-                    {
-                        weaponManager = PlayerSpawner.Instance.LocalPlayer.GetComponent<WeaponManager>();
-                    }
-                }
-                else
-                {
-                    // Remote player (client) - find their NetworkedPlayer
-                    if (PlayerSpawner.Instance != null && PlayerSpawner.Instance.TryGetRemotePlayer(packet.PlayerId, out var remotePlayer))
-                    {
-                        weaponManager = remotePlayer.GetComponent<WeaponManager>();
-                    }
-                }
-
-                if (weaponManager != null && item != null)
-                {
-                    // Determine what to give based on item type
-                    // This mimics the logic in Item.PickupItem overrides
-                    string itemType = packet.ItemType;
-                    int weaponId = 0;
-                    int ammoCount = 1;
-                    bool isNewWeapon = false;
-
-                    switch (itemType)
-                    {
-                        case "Medkit_item":
-                            weaponId = 8; // Medkit weapon ID
-                            isNewWeapon = !weaponManager.CheckWeapon(weaponId);
-                            break;
-                        case "Rifle_item":
-                            weaponId = 1; // Rifle weapon ID
-                            ammoCount = 2;
-                            isNewWeapon = !weaponManager.CheckWeapon(weaponId);
-                            break;
-                        case "RifleAmmo_item":
-                            weaponId = 1;
-                            ammoCount = 2;
-                            isNewWeapon = false; // Ammo only
-                            break;
-                        case "SniperRifle_item":
-                            weaponId = 6; // Sniper weapon ID
-                            isNewWeapon = !weaponManager.CheckWeapon(weaponId);
-                            break;
-                        case "SniperAmmo_item":
-                            weaponId = 6;
-                            ammoCount = 2;
-                            isNewWeapon = false;
-                            break;
-                        case "Trap_item":
-                            weaponId = 4;
-                            isNewWeapon = !weaponManager.CheckWeapon(weaponId);
-                            break;
-                        case "Camera_item":
-                            weaponId = 2;
-                            ammoCount = 1;
-                            isNewWeapon = !weaponManager.CheckWeapon(weaponId);
-                            break;
-                        case "Binocular_weapon":
-                        case "Binocular_item":
-                            weaponId = 7;
-                            isNewWeapon = !weaponManager.CheckWeapon(weaponId);
-                            break;
-                        case "MapCase_weapon":
-                        case "MapCase_item":
-                            weaponId = 3;
-                            isNewWeapon = !weaponManager.CheckWeapon(weaponId);
-                            break;
-                        case "Food_item":
-                            weaponId = 5;
-                            isNewWeapon = !weaponManager.CheckWeapon(weaponId);
-                            break;
-                        default:
-                            RakeMultiplayerPlugin.Log?.LogWarning($"[3.5] Unknown item type for server pickup: {itemType}");
-                            break;
-                    }
-
-                    if (weaponId > 0)
-                    {
-                        if (isNewWeapon)
-                        {
-                            weaponManager.AddWeapon(weaponId, ammoCount, true);
-                            RakeMultiplayerPlugin.Log?.LogInfo($"[3.5] Server gave weapon {weaponId} to player {packet.PlayerId}");
-                        }
-                        else
-                        {
-                            weaponManager.AddAmmo(weaponId, ammoCount);
-                            RakeMultiplayerPlugin.Log?.LogInfo($"[3.5] Server gave ammo {ammoCount} for weapon {weaponId} to player {packet.PlayerId}");
-                        }
-                    }
-                }
-                else
-                {
-                    RakeMultiplayerPlugin.Log?.LogWarning($"[3.5] Could not find WeaponManager for player {packet.PlayerId} or item was null");
-                }
-            }
-            catch (Exception ex)
-            {
-                RakeMultiplayerPlugin.Log?.LogError($"[3.5] Error giving item to player on server: {ex.Message}");
-            }
-
-            var destroyedPacket = new ItemDestroyedPacket
-            {
-                ItemNetworkId = packet.ItemNetworkId,
-                PickerId = packet.PlayerId
-            };
-            ServerBroadcast(destroyedPacket.Serialize());
+            // Authorize: remove from the registry and let every client apply the exact
+            // vanilla pickup effect locally (the server cannot drive proxies' inventories).
+            ServerAuthorizeItemPickup(packet.ItemNetworkId, packet.PlayerId);
             RakeMultiplayerPlugin.Log?.LogInfo($"[3.5] Server authorized pickup of item {packet.ItemNetworkId} by player {packet.PlayerId}");
         }
 
@@ -1002,6 +885,49 @@ namespace RakeMultiplayer
         }
 
         /// <summary>
+        /// Server: authorize an item pickup, remove it from the registry and broadcast it.
+        /// </summary>
+        public void ServerAuthorizeItemPickup(int itemNetworkId, int pickerId)
+        {
+            if (!RakeMultiplayerPlugin.isServer) return;
+
+            _networkedItems.Remove(itemNetworkId);
+
+            Item removed = null;
+            foreach (var kvp in _itemToNetworkId)
+            {
+                if (kvp.Value == itemNetworkId) { removed = kvp.Key; break; }
+            }
+            if (removed != null) _itemToNetworkId.Remove(removed);
+
+            var packet = new ItemDestroyedPacket
+            {
+                ItemNetworkId = itemNetworkId,
+                PickerId = pickerId
+            };
+            ServerBroadcast(packet.Serialize());
+        }
+
+        /// <summary>
+        /// Called per game scene load: scene objects (items, cameras, animals) are recreated,
+        /// so the per-scene registries must be rebuilt with the same deterministic IDs.
+        /// </summary>
+        public void PrepareForSceneLoad()
+        {
+            _networkedItems.Clear();
+            _itemToNetworkId.Clear();
+            _mapMarkers.Clear();
+            _trapStates.Clear();
+            _activeBaitTransforms.Clear();
+            _nextItemNetworkId = 1;
+            _nextMarkerId = 1;
+
+            NetworkedCamera.ClearRegistry();
+
+            RakeMultiplayerPlugin.Log?.LogInfo("[Scene] Per-scene network registries reset");
+        }
+
+        /// <summary>
         /// Spawn remote player objects for everyone we know about.
         /// Must be called after the game scene loads (the player prefab is only assigned
         /// then), otherwise clients that connected in the lobby are never visible to the host.
@@ -1014,6 +940,22 @@ namespace RakeMultiplayer
             {
                 RakeMultiplayerPlugin.Log?.LogWarning("[Visual] EnsureRemotePlayersSpawned: PlayerSpawner missing");
                 return;
+            }
+
+            // Objects from the previous scene are destroyed but may still be in the dictionary
+            spawner.PruneDestroyedRemotePlayers();
+
+            // The prefab may be a destroyed reference after a level change - re-acquire it
+            if (spawner.playerPrefab == null)
+            {
+                if (spawner.LocalPlayer != null)
+                {
+                    spawner.playerPrefab = spawner.LocalPlayer.gameObject;
+                }
+                else if (FPSController.instance != null)
+                {
+                    spawner.playerPrefab = FPSController.instance.gameObject;
+                }
             }
 
             if (spawner.playerPrefab == null)
@@ -1369,39 +1311,49 @@ namespace RakeMultiplayer
         {
             RakeMultiplayerPlugin.Log?.LogInfo($"[3.5] Client received ItemDestroyed: itemId={packet.ItemNetworkId}, pickerId={packet.PickerId}");
 
-            // Use flag to prevent recursive patch execution
-            RakeMultiplayerPlugin.IsApplyingNetworkDestroy = true;
-            try
+            if (!_networkedItems.TryGetValue(packet.ItemNetworkId, out var item) || item == null)
             {
-                if (_networkedItems.TryGetValue(packet.ItemNetworkId, out var item))
-                {
-                    // Grant the pickup effect to the local player when they were the picker
-                    int localPlayerId = PlayerSpawner.Instance?.LocalPlayer?.PlayerId ?? 1;
-                    if (packet.PickerId == localPlayerId)
-                    {
-                        GrantItemEffectLocally(item);
-                    }
+                RakeMultiplayerPlugin.Log?.LogError($"[3.5] Client FAILED to find item {packet.ItemNetworkId} in registry! Registered items: {_networkedItems.Count}");
+                return;
+            }
 
-                    UnityEngine.Object.Destroy(item.gameObject);
-                    _networkedItems.Remove(packet.ItemNetworkId);
-                    _itemToNetworkId.Remove(item); // Clean up reverse lookup
-                    RakeMultiplayerPlugin.Log?.LogInfo($"[3.5] Client destroyed item {packet.ItemNetworkId} ({item.name})");
-                }
-                else
-                {
-                    RakeMultiplayerPlugin.Log?.LogError($"[3.5] Client FAILED to find item {packet.ItemNetworkId} in registry! Registered items: {_networkedItems.Count}");
-                    foreach (var kvp in _networkedItems)
-                    {
-                        RakeMultiplayerPlugin.Log?.LogInfo($"  - Registry: {kvp.Key} = {kvp.Value.name} at {kvp.Value.transform.position}");
-                    }
-                }
-            }
-            finally
+            // Remove registries first (the vanilla pickup may destroy the object)
+            _networkedItems.Remove(packet.ItemNetworkId);
+            _itemToNetworkId.Remove(item);
+
+            int localPlayerId = PlayerSpawner.Instance?.LocalPlayer?.PlayerId ?? 1;
+            bool isPicker = packet.PickerId == localPlayerId;
+
+            if (isPicker)
             {
-                RakeMultiplayerPlugin.IsApplyingNetworkDestroy = false;
+                // Replay the exact vanilla pickup (weapon/ammo/hints/sounds). The network
+                // flag lets our per-item prefix pass through the original override.
+                RakeMultiplayerPlugin.IsApplyingNetworkDestroy = true;
+                try
+                {
+                    item.PickupItem();
+                }
+                catch (Exception ex)
+                {
+                    RakeMultiplayerPlugin.Log?.LogError($"[3.5] Client pickup replay failed: {ex.Message}");
+                    GrantItemEffectLocally(item);
+                }
+                finally
+                {
+                    RakeMultiplayerPlugin.IsApplyingNetworkDestroy = false;
+                }
             }
+
+            // Make sure the world object disappears even if the replay did not destroy it
+            if (item != null)
+            {
+                RakeMultiplayerPlugin.IsApplyingNetworkDestroy = true;
+                try { UnityEngine.Object.Destroy(item.gameObject); }
+                finally { RakeMultiplayerPlugin.IsApplyingNetworkDestroy = false; }
+            }
+
+            RakeMultiplayerPlugin.Log?.LogInfo($"[3.5] Client applied pickup {packet.ItemNetworkId} (picker={packet.PickerId}, local={localPlayerId})");
         }
-
         private void HandleClientItemPickupConfirm(ItemPickupConfirmPacket packet)
         {
             if (packet.Success)

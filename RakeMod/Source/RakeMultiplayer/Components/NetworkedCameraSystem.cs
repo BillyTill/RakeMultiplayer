@@ -170,6 +170,15 @@ namespace RakeMultiplayer
         }
 
         /// <summary>
+        /// Drop all registry entries (called before a scene reload rebuilds them).
+        /// </summary>
+        public static void ClearRegistry()
+        {
+            _cameraRegistry.Clear();
+            _externalCameras.Clear();
+        }
+
+        /// <summary>
         /// Number of cameras currently deployed in the world (includes broken ones).
         /// </summary>
         public static int GetPlacedCameraCount()

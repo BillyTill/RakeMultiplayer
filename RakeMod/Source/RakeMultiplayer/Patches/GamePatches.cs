@@ -346,12 +346,9 @@ namespace RakeMultiplayer.Patches
                     return false; // Block local pickup, camera stays in the world
                 }
 
-                // Host: execute original PickupItem (gives effect) + broadcast destruction
-                // Original PickupItem will handle effect and call Destroy
-                RakeNetworkManager.Instance?.ServerBroadcast(
-                    new ItemDestroyedPacket { ItemNetworkId = itemId, PickerId = 1 }.Serialize()
-                );
-                return true; // Allow original PickupItem to execute (gives effect, destroys object)
+                // Host: execute the original PickupItem. The removal is broadcast by the
+                // per-item pickup postfix (ItemPickupSync) only if the item was consumed.
+                return true;
             }
             else
             {
@@ -373,7 +370,22 @@ namespace RakeMultiplayer.Patches
         static bool Prefix(UnityEngine.Object obj)
         {
             if (!RakeMultiplayerPlugin.Enabled.Value) return true;
-            if (RakeMultiplayerPlugin.isServer) return true; // Host can destroy
+
+            if (RakeMultiplayerPlugin.isServer)
+            {
+                // Remember consumed items so the pickup postfix can broadcast the removal
+                var serverItem = obj as Item;
+                if (serverItem != null)
+                {
+                    var mgr = RakeNetworkManager.Instance;
+                    if (mgr != null)
+                    {
+                        ItemPickupSync.MarkConsumed(mgr.GetItemNetworkId(serverItem));
+                    }
+                }
+                return true; // Host can destroy
+            }
+
             if (RakeMultiplayerPlugin.IsApplyingNetworkDestroy) return true; // Network-driven destroy
 
             // Block client-side destruction of networked Items

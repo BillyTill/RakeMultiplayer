@@ -25,6 +25,9 @@ namespace RakeMultiplayer
         private Dictionary<int, NetworkedPlayer> _remotePlayers = new Dictionary<int, NetworkedPlayer>();
         public NetworkedPlayer LocalPlayer { get; private set; }
 
+        /// <summary>Last player ID assigned to this client (survives level changes).</summary>
+        public int LastLocalPlayerId { get; private set; }
+
         private void Awake()
         {
             if (Instance != null && Instance != this)
@@ -47,6 +50,11 @@ namespace RakeMultiplayer
         public void RegisterLocalPlayer(NetworkedPlayer player)
         {
             LocalPlayer = player;
+
+            if (player != null && player.PlayerId > 0)
+            {
+                LastLocalPlayerId = player.PlayerId;
+            }
             
             if (RakeMultiplayerPlugin.isServer)
             {
@@ -126,6 +134,17 @@ namespace RakeMultiplayer
             RemotePlayerVisual.Attach(playerObj, playerId);
 
             _remotePlayers[playerId] = netPlayer;
+
+            // Safety net: a freshly instantiated clone must never keep the global singletons
+            if (LocalPlayer != null)
+            {
+                var localFps = LocalPlayer.GetComponent<FPSController>();
+                if (localFps != null) FPSController.instance = localFps;
+
+                var localWm = LocalPlayer.GetComponent<WeaponManager>();
+                if (localWm != null) WeaponManager.instance = localWm;
+            }
+
             RakeMultiplayerPlugin.Log?.LogInfo($"[3.3] Spawned remote player {playerId} at {spawnPosition}");
         }
 
@@ -235,15 +254,45 @@ namespace RakeMultiplayer
             }
         }
 
+        /// <summary>Remember a newly assigned local player ID (called by the network layer).</summary>
+        public void NotifyLocalPlayerId(int playerId)
+        {
+            if (playerId > 0) LastLocalPlayerId = playerId;
+        }
+
+        /// <summary>Remove entries whose GameObjects were destroyed by a level change.</summary>
+        public void PruneDestroyedRemotePlayers()
+        {
+            List<int> dead = null;
+            foreach (var kvp in _remotePlayers)
+            {
+                if (kvp.Value == null)
+                {
+                    if (dead == null) dead = new List<int>();
+                    dead.Add(kvp.Key);
+                }
+            }
+            if (dead != null)
+            {
+                foreach (var id in dead) _remotePlayers.Remove(id);
+                RakeMultiplayerPlugin.Log?.LogInfo($"[PlayerSpawner] Pruned {dead.Count} destroyed remote player(s)");
+            }
+        }
+
         /// <summary>
-        /// Refresh player spawner state after scene load
+        /// Refresh player spawner state after scene load.
+        /// Scene objects are recreated, but the local player reference is kept when alive.
         /// </summary>
         public void Refresh()
         {
             RakeMultiplayerPlugin.Log?.LogInfo("[PlayerSpawner] Refreshed after scene load");
-            // Clear remote players dictionary to prevent stale references
-            _remotePlayers.Clear();
-            LocalPlayer = null;
+            PruneDestroyedRemotePlayers();
+
+            if (LocalPlayer == null)
+            {
+                // The local player was destroyed with the old scene (Unity fake-null)
+                LocalPlayer = null;
+            }
         }
 
         /// <summary>
