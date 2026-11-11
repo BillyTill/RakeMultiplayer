@@ -33,6 +33,7 @@ Cooperative multiplayer mod for **Rake (2015)** by Konsordo. Adds 2–4 player c
 - **Bait**: lures the nearest animal (server-side animal AI)
 - **Traps**: server-authoritative trap zones; a triggered trap **stuns the Rake for 3 seconds**
 - **Minimap** (toggle **M**): cameras = green, traps = red, bait = yellow, safehouse = blue, cave = red
+- **Remote players**: coloured third-person proxies (first-person hands, weapons and cameras are disabled on remote clones)
 
 ### Persistence (Phase 4)
 - Per-scene `MapSettings` auto-discovery (spawns, cameras, traps, cave, safehouse)
@@ -139,6 +140,7 @@ Day/night durations and camera battery drain are runtime fields on
 4. **Steam P2P** is not implemented (LAN/direct IP only).
 5. **Save games** — multiplayer progression is per-session; the game's own save system is not synchronized.
 6. High ping (>200 ms) can cause minor position differences; the state protocol is last-write-wins.
+7. Remote players are shown as simple coloured humanoid proxies - the game ships no third-person body model.
 
 ---
 
