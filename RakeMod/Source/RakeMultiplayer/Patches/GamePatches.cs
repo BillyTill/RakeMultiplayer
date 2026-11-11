@@ -749,4 +749,47 @@ namespace RakeMultiplayer.Patches
             }
             return false; // no level 0 reload in multiplayer
         }
+    }
+    // === Remote clone singleton guards ===
+
+    /// <summary>
+    /// Clones are created from the scene player prefab. Their FPSController.Start must
+    /// never run: it would capture the FPSController.instance and initialize the clone
+    /// as another local player. (Disabled before Start in SpawnRemotePlayer; this is a
+    /// hard safety net for any other instantiation path.)
+    /// </summary>
+    [HarmonyPatch(typeof(FPSController))]
+    [HarmonyPatch("Start")]
+    public class FPSControllerCloneGuardPatch
+    {
+        [HarmonyPrefix]
+        static bool Prefix(FPSController __instance)
+        {
+            if (__instance == null) return true;
+            if (__instance.gameObject.name.StartsWith("RemotePlayer_")) return false;
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// The same for WeaponManager.instance - a remote clone must not become the weapon
+    /// manager used by the local HUD/keyboard.
+    /// </summary>
+    [HarmonyPatch(typeof(WeaponManager))]
+    [HarmonyPatch("Start")]
+    public class WeaponManagerCloneGuardPatch
+    {
+        [HarmonyPrefix]
+        static bool Prefix(WeaponManager __instance)
+        {
+            if (__instance == null) return true;
+
+            var root = __instance.transform.root;
+            if (root != null && root.gameObject.name.StartsWith("RemotePlayer_")) return false;
+
+            var netPlayer = __instance.GetComponentInParent<NetworkedPlayer>();
+            if (netPlayer != null && netPlayer.PlayerId > 0 && !netPlayer.isLocalPlayer) return false;
+
+            return true;
+        }
     }}

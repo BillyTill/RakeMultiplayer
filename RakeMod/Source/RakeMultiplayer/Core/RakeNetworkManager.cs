@@ -1416,6 +1416,8 @@ namespace RakeMultiplayer
                 return;
             }
 
+            string itemType = item.GetType().Name;
+
             // Remove registries first (the vanilla pickup may destroy the object)
             _networkedItems.Remove(packet.ItemNetworkId);
             _itemToNetworkId.Remove(item);
@@ -1425,12 +1427,54 @@ namespace RakeMultiplayer
 
             if (isPicker)
             {
+                // Force the local player's WeaponManager: a remote clone must never
+                // become WeaponManager.instance (otherwise the weapon lands on the clone
+                // and the local HUD says "You do not have ...").
+                var localPlayer = PlayerSpawner.Instance != null ? PlayerSpawner.Instance.LocalPlayer : null;
+                var localWm = localPlayer != null ? localPlayer.GetComponent<WeaponManager>() : null;
+                if (localWm != null)
+                {
+                    WeaponManager.instance = localWm;
+                }
+                if (localPlayer != null)
+                {
+                    FPSController.instance = localPlayer.GetComponent<FPSController>();
+                }
+
                 // Replay the exact vanilla pickup (weapon/ammo/hints/sounds). The network
                 // flag lets our per-item prefix pass through the original override.
                 RakeMultiplayerPlugin.IsApplyingNetworkDestroy = true;
                 try
                 {
                     item.PickupItem();
+
+                    bool hasCamera = false;
+                    try { hasCamera = localWm != null && localWm.CheckWeapon(2); } catch { }
+
+                    // Safety net: a camera pickup must leave the local player with the
+                    // camera weapon, otherwise the HUD shows ammo but pressing C says
+                    // "You do not have camera".
+                    if (itemType == "Camera_item" && localWm != null && !hasCamera)
+                    {
+                        try
+                        {
+                            if (localWm.allWeapons != null && localWm.allWeapons.Count > 2 &&
+                                localWm.allWeapons[2] != null)
+                            {
+                                localWm.AddWeapon(2, 1, true);
+                                hasCamera = localWm.CheckWeapon(2);
+                                RakeMultiplayerPlugin.Log?.LogWarning(
+                                    "[3.5] Camera weapon was missing after replay - re-added to local player");
+                            }
+                        }
+                        catch (Exception weaponEx)
+                        {
+                            RakeMultiplayerPlugin.Log?.LogError($"[3.5] Camera weapon repair failed: {weaponEx.Message}");
+                        }
+                    }
+
+                    RakeMultiplayerPlugin.Log?.LogInfo(
+                        $"[3.5] Pickup replay {itemType} -> local WM (camera weapon={hasCamera})");
                 }
                 catch (Exception ex)
                 {

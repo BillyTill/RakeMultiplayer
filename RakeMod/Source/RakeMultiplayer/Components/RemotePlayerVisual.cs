@@ -108,6 +108,21 @@ namespace RakeMultiplayer
                 if (light == null) continue;
                 light.enabled = false;
             }
+
+            // Screen-space canvases are NOT renderers: without this the clone's ammo HUD,
+            // hints and menus stay visible on the local screen.
+            foreach (var canvas in playerObject.GetComponentsInChildren<Canvas>(true))
+            {
+                if (canvas == null) continue;
+                canvas.gameObject.SetActive(false);
+            }
+
+            // Do not play remote footsteps/weapon sounds twice
+            foreach (var audio in playerObject.GetComponentsInChildren<AudioSource>(true))
+            {
+                if (audio == null) continue;
+                audio.enabled = false;
+            }
         }
 
         private void Build(int playerId, float footOffset)
