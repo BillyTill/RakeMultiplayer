@@ -53,6 +53,12 @@ namespace RakeMultiplayer.UI
                 ToggleMenu();
             }
 
+            // Runtime diagnostics: dump weapon/inventory state to the BepInEx log
+            if (Input.GetKeyDown(KeyCode.F8))
+            {
+                WeaponDiagnostics.Dump("F8 pressed");
+            }
+
             // Ждем подключения клиента перед показом лобби
             if (_waitingForConnection)
             {
