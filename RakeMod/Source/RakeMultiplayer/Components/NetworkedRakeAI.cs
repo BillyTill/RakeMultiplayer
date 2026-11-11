@@ -47,6 +47,7 @@ namespace RakeMultiplayer
         // Last sent values
         private Vector3 lastSentPosition;
         private byte lastSentState;
+        private float stunDuration = 3f;
         private float lastSentHealth;
 
         // Interpolation targets for clients
@@ -677,12 +678,32 @@ namespace RakeMultiplayer
 
         private void UpdateStunned()
         {
-            // Wait for stun to end (external system should clear stun)
-            // For now, auto-recover after 3 seconds
-            if (stateTimer > 3f)
+            // Stun is applied by traps (Task 3.11); auto-recover after stunDuration
+            if (stateTimer > stunDuration)
             {
                 TransitionToState(RakeState.Follow);
             }
+        }
+
+        /// <summary>
+        /// Server: stun the Rake (e.g. triggered trap, Task 3.11).
+        /// </summary>
+        public void Stun(float seconds = 3f)
+        {
+            if (!RakeMultiplayerPlugin.isServer) return;
+
+            stunDuration = Mathf.Max(0.1f, seconds);
+
+            if (currentState == RakeState.Stunned)
+            {
+                stateTimer = 0f; // refresh the stun
+            }
+            else
+            {
+                TransitionToState(RakeState.Stunned);
+            }
+
+            RakeMultiplayerPlugin.Log?.LogInfo($"[3.11] Rake stunned for {stunDuration:F1}s");
         }
 
         private void UpdateDead()

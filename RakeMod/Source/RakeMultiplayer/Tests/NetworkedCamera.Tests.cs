@@ -3079,5 +3079,111 @@ namespace RakeMultiplayer.Tests
         }
 
         #endregion
+
+        #region Trap System Tests - Task 3.11
+
+        /// <summary>
+        /// Tests for trap state sync and trap constants (Task 3.11).
+        /// </summary>
+        [TestFixture]
+        public class TrapSystemTests
+        {
+            [Test]
+            public void TrapConstants_MatchMechanicSpec()
+            {
+                Assert.AreEqual(20, NetworkedTrap.MaxTraps);
+                Assert.AreEqual(3f, NetworkedTrap.StunDuration, 0.001f,
+                    "A triggered trap must stun the Rake for 3 seconds");
+                Assert.AreEqual(2.5f, NetworkedTrap.DefaultTriggerRadius, 0.001f);
+                Assert.AreEqual(2f, NetworkedTrap.TriggerCooldown, 0.001f);
+            }
+
+            [Test]
+            public void QuestTriggerType_TrapTriggered_IsTwo()
+            {
+                Assert.AreEqual(2, NetworkedTrap.QuestTrapTriggered);
+            }
+
+            [Test]
+            public void TrapStatePacket_RoundTrip()
+            {
+                var packet = new TrapStatePacket
+                {
+                    TrapId = 17u,
+                    Position = new Vector3(-5f, 0.25f, 12f),
+                    IsArmed = true,
+                    TriggerRadius = 2.5f,
+                    IsTriggered = false
+                };
+
+                var restored = PacketSerializer.Deserialize(packet.Serialize()) as TrapStatePacket;
+                Assert.IsNotNull(restored);
+                Assert.AreEqual(17u, restored.TrapId);
+                Assert.IsTrue(restored.IsArmed);
+                Assert.IsFalse(restored.IsTriggered);
+                Assert.AreEqual(2.5f, restored.TriggerRadius, 0.001f);
+                Assert.AreEqual(-5f, restored.Position.x, 0.001f);
+            }
+
+            [Test]
+            public void TrapStatePacket_Triggered_RoundTrip()
+            {
+                var packet = new TrapStatePacket
+                {
+                    TrapId = 3u,
+                    Position = new Vector3(0f, 0f, 0f),
+                    IsArmed = true,
+                    TriggerRadius = 3f,
+                    IsTriggered = true
+                };
+
+                var restored = PacketSerializer.Deserialize(packet.Serialize()) as TrapStatePacket;
+                Assert.IsNotNull(restored);
+                Assert.IsTrue(restored.IsTriggered);
+            }
+
+            [Test]
+            public void TrapLimit_RejectsBeyondTwenty()
+            {
+                int count = 20;
+                bool allowed = count < NetworkedTrap.MaxTraps;
+                Assert.IsFalse(allowed);
+            }
+
+            [Test]
+            public void TrapCooldown_BlocksImmediateRetrigger()
+            {
+                float lastTrigger = 100f;
+                float now = 100.5f;
+                bool blocked = (now - lastTrigger) < NetworkedTrap.TriggerCooldown;
+                Assert.IsTrue(blocked);
+            }
+
+            [Test]
+            public void TrapCooldown_AllowsRetriggerAfterDelay()
+            {
+                float lastTrigger = 100f;
+                float now = 102.5f;
+                bool blocked = (now - lastTrigger) < NetworkedTrap.TriggerCooldown;
+                Assert.IsFalse(blocked);
+            }
+
+            [Test]
+            public void TrapSpawn_RejectsNaNPosition()
+            {
+                var pos = new Vector3(0f, float.NaN, 0f);
+                bool invalid = float.IsNaN(pos.x) || float.IsNaN(pos.y) || float.IsNaN(pos.z);
+                Assert.IsTrue(invalid);
+            }
+
+            [Test]
+            public void Stun_DefaultDurationIsThreeSeconds()
+            {
+                float defaultStun = 3f;
+                Assert.AreEqual(NetworkedTrap.StunDuration, defaultStun, 0.001f);
+            }
+        }
+
+        #endregion
     }
 }

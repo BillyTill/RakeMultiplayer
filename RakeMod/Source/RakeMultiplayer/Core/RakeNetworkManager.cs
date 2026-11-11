@@ -70,6 +70,7 @@ namespace RakeMultiplayer
 
         // Map markers (bait/trap/camera...) received from the server, for MapUI
         private readonly Dictionary<uint, MapMarkerPacket> _mapMarkers = new Dictionary<uint, MapMarkerPacket>();
+        private readonly Dictionary<uint, TrapStatePacket> _trapStates = new Dictionary<uint, TrapStatePacket>();
         private readonly List<Transform> _activeBaitTransforms = new List<Transform>();
         private int _nextMarkerId = 1;
 
@@ -883,7 +884,22 @@ namespace RakeMultiplayer
 
         private void HandleServerMapMarker(int connectionId, MapMarkerPacket packet, byte[] rawData)
         {
-            // Clients may only place bait markers; camera/trap/etc. markers are server-owned.
+            // Clients may place bait (2) and trap (1) markers; other marker types are server-owned.
+            if (packet.MarkerType == 1) // Trap
+            {
+                var trap = NetworkedTrap.SpawnServerTrap(packet.Position);
+                if (trap == null)
+                {
+                    RakeMultiplayerPlugin.Log?.LogWarning($"[3.11] Trap placement rejected (limit {NetworkedTrap.MaxTraps} or bad position)");
+                    return;
+                }
+                packet.MarkerId = trap.TrapId;
+                ServerBroadcast(packet.Serialize());
+                _mapMarkers[packet.MarkerId] = packet;
+                OnMapMarkerReceived?.Invoke(packet);
+                return;
+            }
+
             if (packet.MarkerType != 2) // 2 = Bait
             {
                 RakeMultiplayerPlugin.Log?.LogWarning(
@@ -1060,6 +1076,9 @@ namespace RakeMultiplayer
                         break;
                     case PacketType.MapMarker:
                         HandleClientMapMarker((MapMarkerPacket)packet);
+                        break;
+                    case PacketType.TrapState:
+                        HandleClientTrapState((TrapStatePacket)packet);
                         break;
                     case PacketType.QuestTrigger:
                         HandleClientQuestTrigger((QuestTriggerPacket)packet);
@@ -1329,6 +1348,19 @@ namespace RakeMultiplayer
             _mapMarkers[packet.MarkerId] = packet;
             OnMapMarkerReceived?.Invoke(packet);
         }
+
+        private void HandleClientTrapState(TrapStatePacket packet)
+        {
+            _trapStates[packet.TrapId] = packet;
+
+            if (NetworkedTrap.TryGetTrap(packet.TrapId, out var trap) && trap != null)
+            {
+                trap.ApplyState(packet);
+            }
+        }
+
+        /// <summary>Trap states received from the server (TrapId -> packet), for MapUI.</summary>
+        public Dictionary<uint, TrapStatePacket> GetTrapStates() => _trapStates;
 
         private void HandleClientPhaseChange(PhaseChangePacket packet)
         {

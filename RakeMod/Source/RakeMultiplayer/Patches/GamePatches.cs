@@ -608,4 +608,75 @@ namespace RakeMultiplayer.Patches
             RakeMultiplayerPlugin.Log?.LogInfo($"[3.9] Client requested pig-camera setup (camera {cameraId})");
             return true;
         }
+    }
+    // === Stage 3.11: Trap synchronization ===
+
+    /// <summary>
+    /// A trap placed by a client must create an authoritative server zone.
+    /// The client keeps its local trap visual but cannot deal damage itself.
+    /// </summary>
+    [HarmonyPatch(typeof(LevelItemsManager))]
+    [HarmonyPatch("AddTrap")]
+    public class LevelItemsManagerAddTrapPatch
+    {
+        [HarmonyPostfix]
+        static void Postfix(LevelItemsManager __instance, GameObject obj)
+        {
+            if (!RakeMultiplayerPlugin.Enabled.Value) return;
+            if (obj == null) return;
+            if (RakeMultiplayerPlugin.isServer) return; // host trap is already server-side
+
+            var marker = new RakeMultiplayer.Networking.MapMarkerPacket
+            {
+                MarkerType = 1, // Trap
+                Position = obj.transform.position,
+                MarkerId = 0,
+                IsActive = true
+            };
+            RakeNetworkManager.Instance?.ClientSend(marker.Serialize());
+            RakeMultiplayerPlugin.Log?.LogInfo($"[3.11] Client reported trap placement at {obj.transform.position}");
+        }
+    }
+
+    /// <summary>
+    /// Trap triggers are server-authoritative. Clients do not apply damage locally;
+    /// the host trap also stuns the Rake for 3 seconds.
+    /// </summary>
+    [HarmonyPatch(typeof(Trap_proj))]
+    [HarmonyPatch("OnTriggerEnter", new Type[] { typeof(Collider) })]
+    public class TrapProjTriggerPatch
+    {
+        [HarmonyPrefix]
+        static bool Prefix(Trap_proj __instance, Collider info)
+        {
+            if (!RakeMultiplayerPlugin.Enabled.Value) return true;
+
+            // Clients never resolve trap damage/effects
+            if (!RakeMultiplayerPlugin.isServer) return false;
+
+            return true; // server runs the original damage logic
+        }
+
+        [HarmonyPostfix]
+        static void Postfix(Trap_proj __instance, Collider info)
+        {
+            if (!RakeMultiplayerPlugin.Enabled.Value) return;
+            if (!RakeMultiplayerPlugin.isServer) return;
+            if (info == null) return;
+
+            // Extra effect required by the mechanic spec: trap stuns the Rake for 3s
+            var rake = info.GetComponentInParent<NetworkedRakeAI>();
+            if (rake != null)
+            {
+                rake.Stun(NetworkedTrap.StunDuration);
+
+                var quest = new RakeMultiplayer.Networking.QuestTriggerPacket
+                {
+                    TriggerType = NetworkedTrap.QuestTrapTriggered,
+                    Position = __instance.transform.position,
+                    CameraId = 0
+                };
+                RakeNetworkManager.Instance?.ServerBroadcast(quest.Serialize());
+            }
+        }
     }}
