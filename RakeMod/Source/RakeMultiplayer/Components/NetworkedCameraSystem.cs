@@ -236,6 +236,21 @@ namespace RakeMultiplayer
             return GetTotalUsableCameraCount() < MaxCameras;
         }
 
+        /// <summary>Cross-process stable string hash (FNV-1a).</summary>
+        internal static uint StableNameHash(string value)
+        {
+            uint hash = 2166136261u;
+            if (!string.IsNullOrEmpty(value))
+            {
+                foreach (char c in value)
+                {
+                    hash ^= c;
+                    hash *= 16777619u;
+                }
+            }
+            return hash;
+        }
+
         /// <summary>
         /// Assign a deterministic CameraId (called by RakeNetworkManager.RegisterCameras
         /// on both host and client so scene cameras share IDs).
@@ -263,7 +278,7 @@ namespace RakeMultiplayer
             int x = Mathf.RoundToInt(p.x * 100f);
             int y = Mathf.RoundToInt(p.y * 100f);
             int z = Mathf.RoundToInt(p.z * 100f);
-            uint hash = (uint)((x * 73856093) ^ (y * 19349663) ^ (z * 83492791) ^ gameObject.name.GetHashCode());
+            uint hash = (uint)((x * 73856093) ^ (y * 19349663) ^ (z * 83492791)) ^ StableNameHash(gameObject.name);
             return hash == 0 ? 1u : hash;
         }
 

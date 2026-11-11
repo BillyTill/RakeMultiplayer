@@ -93,6 +93,7 @@ namespace RakeMultiplayer
                 {
                     NetworkedTrap.SpawnServerTrap(trap.Position, trap.Radius);
                 }
+                _trapStates.Clear(); // avoid duplicating traps on repeated restores
             }
 
             RakeMultiplayerPlugin.Log?.LogInfo(

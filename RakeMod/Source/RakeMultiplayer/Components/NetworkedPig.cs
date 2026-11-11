@@ -77,7 +77,7 @@ namespace RakeMultiplayer
             int x = Mathf.RoundToInt(p.x * 100f);
             int y = Mathf.RoundToInt(p.y * 100f);
             int z = Mathf.RoundToInt(p.z * 100f);
-            uint hash = (uint)((x * 73856093) ^ (y * 19349663) ^ (z * 83492791) ^ gameObject.name.GetHashCode());
+            uint hash = (uint)((x * 73856093) ^ (y * 19349663) ^ (z * 83492791)) ^ NetworkedCamera.StableNameHash(gameObject.name);
             AssignPigId(hash == 0 ? 1u : hash);
         }
 

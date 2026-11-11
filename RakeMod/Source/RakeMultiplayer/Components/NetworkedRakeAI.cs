@@ -883,7 +883,7 @@ namespace RakeMultiplayer
             lastDamageTime = Time.time;
 
             // Apply damage reduction if blocking
-            if (currentState == RakeState.Blocking && WasHitFromFront())
+            if (isBlocking && WasHitFromFront())
             {
                 float reduction = CalculateDamageReduction(hitDirection, transform.forward);
                 // The actual damage application happens in RakeNetworkManager.ApplyDamageToEnemy

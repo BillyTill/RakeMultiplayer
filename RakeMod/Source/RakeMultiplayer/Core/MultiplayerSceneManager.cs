@@ -26,7 +26,6 @@ namespace RakeMultiplayer
         private DayNightManager _dayNightManager;
         private SessionManager _sessionManager;
 
-        private bool isInitialized = false;
         private string lastSceneName;
 
         private void Awake()

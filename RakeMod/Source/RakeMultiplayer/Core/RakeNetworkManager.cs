@@ -1157,12 +1157,11 @@ namespace RakeMultiplayer
             // Notify each client for its own local player
             if (_server != null)
             {
-                foreach (var kvp in _playerStates)
+                foreach (var connectionId in _connectedClients)
                 {
-                    int playerId = kvp.Key;
+                    int playerId = connectionId + 1;
                     if (playerId == hostId) continue;
 
-                    int connectionId = playerId - 1;
                     var packet = new PlayerTeleportPacket
                     {
                         PlayerId = playerId,
