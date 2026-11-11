@@ -203,6 +203,37 @@ namespace RakeMultiplayer
             return GetUsableCameraCount() < MaxCameras;
         }
 
+        /// <summary>
+        /// Assign a deterministic CameraId (called by RakeNetworkManager.RegisterCameras
+        /// on both host and client so scene cameras share IDs).
+        /// </summary>
+        public void AssignCameraId(uint cameraId)
+        {
+            if (cameraId == 0) return;
+
+            if (_cameraId != 0 && _cameraRegistry.TryGetValue(_cameraId, out var existing) && existing == this)
+            {
+                _cameraRegistry.Remove(_cameraId);
+            }
+
+            _cameraId = cameraId;
+            _cameraRegistry[cameraId] = this;
+        }
+
+        /// <summary>
+        /// Deterministic CameraId used when explicit registration did not run.
+        /// Mirrors the item-ID fallback: position hash + name hash.
+        /// </summary>
+        private uint ComputeDeterministicCameraId()
+        {
+            var p = transform.position;
+            int x = Mathf.RoundToInt(p.x * 100f);
+            int y = Mathf.RoundToInt(p.y * 100f);
+            int z = Mathf.RoundToInt(p.z * 100f);
+            uint hash = (uint)((x * 73856093) ^ (y * 19349663) ^ (z * 83492791) ^ gameObject.name.GetHashCode());
+            return hash == 0 ? 1u : hash;
+        }
+
         #region Unity Lifecycle
 
         private void Awake()
@@ -232,10 +263,12 @@ namespace RakeMultiplayer
                 _netIdentity.Register();
             }
 
-            // Server assigns CameraId if not set (sole authority)
-            if (RakeMultiplayerPlugin.isServer && _cameraId == 0)
+            // CameraId is assigned by RakeNetworkManager.RegisterCameras() on BOTH
+            // host and client so the same scene camera gets the same ID everywhere.
+            // Fallback to a deterministic position hash only if registration was skipped.
+            if (_cameraId == 0)
             {
-                _cameraId = _netIdentity.NetId;
+                _cameraId = ComputeDeterministicCameraId();
             }
 
             // Register in static registry if CameraId is set
@@ -436,7 +469,30 @@ namespace RakeMultiplayer
             _isBroken = false;
 
             RakeMultiplayerPlugin.Log?.LogInfo($"[NetworkedCamera] Camera {CameraId} placed by player {placedByPlayerId} ({GetUsableCameraCount()}/{MaxCameras})");
+
+            // Host does not receive its own broadcasts - apply the visual setup locally
+            ApplySetupVisuals();
+
             SendCameraSpawn();
+            return true;
+        }
+
+        /// <summary>
+        /// Server: un-deploy the camera (player picked it up).
+        /// </summary>
+        /// <returns>true if the camera was deployed and is now un-deployed.</returns>
+        public bool UnplaceCamera()
+        {
+            if (!RakeMultiplayerPlugin.isServer) return false;
+            if (!_isPlaced) return false;
+
+            _isPlaced = false;
+            _isActive = false;
+
+            ApplyUnsetupVisuals();
+            SendCameraDestroy();
+
+            RakeMultiplayerPlugin.Log?.LogInfo($"[NetworkedCamera] Camera {CameraId} picked up ({GetUsableCameraCount()}/{MaxCameras})");
             return true;
         }
 
@@ -496,6 +552,7 @@ namespace RakeMultiplayer
                 _cameraRegistry[_cameraId] = this;
             }
 
+            ApplySetupVisuals();
             UpdateCameraVisuals();
             RakeMultiplayerPlugin.Log?.LogInfo($"[NetworkedCamera] Client received camera spawn: {CameraId} placed by player {packet.PlacedByPlayerId}");
         }
@@ -510,6 +567,8 @@ namespace RakeMultiplayer
             RakeMultiplayerPlugin.Log?.LogInfo($"[NetworkedCamera] Client received camera destroy: {packet.CameraId}");
 
             _isPlaced = false;
+
+            ApplyUnsetupVisuals();
 
             // Remove from client registry so the slot is freed locally
             if (packet.CameraId != 0 && _cameraRegistry.ContainsKey(packet.CameraId))
@@ -686,6 +745,51 @@ namespace RakeMultiplayer
         #endregion
 
         #region Visual Updates
+
+        /// <summary>
+        /// Drive the game's RecordCamera_obj into its "setup" visual state
+        /// (enables the camera child and registers it with CameraManager for the monitor view).
+        /// Safe to call repeatedly; guarded against recursive patch execution.
+        /// </summary>
+        private void ApplySetupVisuals()
+        {
+            var recordCamera = GetComponent<RecordCamera_obj>();
+            if (recordCamera == null) return;
+            if (recordCamera.cameraState == RecordCamera_obj.Camera_state.Setup) return; // already set up
+
+            bool prev = RakeMultiplayerPlugin.IsApplyingNetworkCameraState;
+            RakeMultiplayerPlugin.IsApplyingNetworkCameraState = true;
+            try
+            {
+                recordCamera.SetSetupState();
+            }
+            finally
+            {
+                RakeMultiplayerPlugin.IsApplyingNetworkCameraState = prev;
+            }
+        }
+
+        /// <summary>
+        /// Drive the game's RecordCamera_obj back into its "unsetup" visual state
+        /// (removes it from CameraManager and disables the camera child).
+        /// </summary>
+        private void ApplyUnsetupVisuals()
+        {
+            var recordCamera = GetComponent<RecordCamera_obj>();
+            if (recordCamera == null) return;
+            if (recordCamera.cameraState == RecordCamera_obj.Camera_state.Unsetup) return; // already unsetup
+
+            bool prev = RakeMultiplayerPlugin.IsApplyingNetworkCameraState;
+            RakeMultiplayerPlugin.IsApplyingNetworkCameraState = true;
+            try
+            {
+                recordCamera.SetUnsetupState();
+            }
+            finally
+            {
+                RakeMultiplayerPlugin.IsApplyingNetworkCameraState = prev;
+            }
+        }
 
         private void UpdateCameraVisuals()
         {

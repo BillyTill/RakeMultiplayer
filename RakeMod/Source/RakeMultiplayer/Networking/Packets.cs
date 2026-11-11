@@ -310,6 +310,42 @@ namespace RakeMultiplayer.Networking
     }
 
     /// <summary>
+    /// Camera setup/pickup request and result
+    /// Client -> Server (request), Server -> Requester (result)
+    /// </summary>
+    public class CameraSetupRequestPacket : NetworkPacket
+    {
+        public override PacketType Type => PacketType.CameraSetupRequest;
+
+        public uint CameraId;
+        public int PlayerId;
+        public bool IsSetup;    // true = set up (deploy), false = pick up (un-deploy)
+        public bool IsResult;   // false = request, true = server response
+        public bool Approved;   // valid when IsResult
+        public string Reason;   // rejection reason, e.g. "CameraLimit"
+
+        public override void Write(BinaryWriter writer)
+        {
+            writer.Write(CameraId);
+            writer.Write(PlayerId);
+            writer.Write(IsSetup);
+            writer.Write(IsResult);
+            writer.Write(Approved);
+            writer.Write(Reason ?? string.Empty);
+        }
+
+        public override void Read(BinaryReader reader)
+        {
+            CameraId = reader.ReadUInt32();
+            PlayerId = reader.ReadInt32();
+            IsSetup = reader.ReadBoolean();
+            IsResult = reader.ReadBoolean();
+            Approved = reader.ReadBoolean();
+            Reason = reader.ReadString();
+        }
+    }
+
+    /// <summary>
     /// Day/Night phase change notification
     /// Server -> All (broadcast on phase transition)
     /// </summary>

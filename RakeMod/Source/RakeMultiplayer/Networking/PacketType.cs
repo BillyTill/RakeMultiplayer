@@ -37,5 +37,6 @@ namespace RakeMultiplayer.Networking
         TrapState = 28,
         CameraSpawn = 29,
         CameraDestroy = 30,
+        CameraSetupRequest = 31,
     }
 }

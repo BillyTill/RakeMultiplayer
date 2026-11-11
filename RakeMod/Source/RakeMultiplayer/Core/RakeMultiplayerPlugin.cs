@@ -31,6 +31,10 @@ namespace RakeMultiplayer
         // Item synchronization flag (prevents recursive patch execution)
         internal static bool IsApplyingNetworkDestroy = false;
 
+        // Camera synchronization flag (prevents recursive patch execution when the
+        // network layer drives RecordCamera_obj.SetSetupState/SetUnsetupState)
+        internal static bool IsApplyingNetworkCameraState = false;
+
         // Config accessors
         internal static ConfigEntry<string> GameSceneName { get; private set; }
 

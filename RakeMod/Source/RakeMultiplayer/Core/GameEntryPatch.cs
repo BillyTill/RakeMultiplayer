@@ -108,6 +108,9 @@ namespace RakeMultiplayer
                     RakeNetworkManager.Instance.RegisterItem(items[i], i + 1);
                 }
                 RakeMultiplayerPlugin.Log?.LogInfo($"[GameEntry] Registered {items.Length} networked items with deterministic IDs");
+
+                // Register networked cameras with deterministic IDs (Stage 3.4)
+                RakeNetworkManager.Instance.RegisterCameras();
             }
 
             // If host, update and broadcast host position now that local player is initialized

@@ -20,6 +20,11 @@ namespace RakeMultiplayer
         /// </summary>
         public static event Action<int, string> OnPickupRejected;
 
+        /// <summary>
+        /// Fired when the server rejects a camera setup/pickup request (playerId, reason).
+        /// </summary>
+        public static event Action<int, string> OnCameraSetupRejected;
+
         [Header("Player Prefabs")]
         public GameObject playerPrefab;
 
@@ -54,6 +59,9 @@ namespace RakeMultiplayer
 
         // Item registry for networked items (key = deterministic network ID)
         private Dictionary<int, Item> _networkedItems = new Dictionary<int, Item>();
+
+        // Camera registry tracking (deterministic IDs assigned by RegisterCameras)
+        private int _nextCameraNetworkId = 1;
         // Reverse lookup: Item -> assigned network ID (for consistent ID retrieval)
         private Dictionary<Item, int> _itemToNetworkId = new Dictionary<Item, int>();
         private int _nextItemNetworkId = 1;
@@ -391,6 +399,9 @@ namespace RakeMultiplayer
                         // QuestTrigger is SERVER-AUTHORITATIVE only — clients must not send it
                         RakeMultiplayerPlugin.Log?.LogWarning($"[Net] Server: received QuestTrigger from C{connectionId} (client-spoofed, ignoring)");
                         break;
+                    case PacketType.CameraSetupRequest:
+                        HandleServerCameraSetupRequest(connectionId, (CameraSetupRequestPacket)packet, data);
+                        break;
                     default:
                         RakeMultiplayerPlugin.Log?.LogWarning($"[Net] Server: unexpected {packet.Type} from C{connectionId}");
                         break;
@@ -717,6 +728,96 @@ namespace RakeMultiplayer
             RakeMultiplayerPlugin.Log?.LogInfo($"[3.5] Server authorized pickup of item {packet.ItemNetworkId} by player {packet.PlayerId}");
         }
 
+        // === Stage 3.4: Camera setup/pickup (server-authoritative) ===
+        private void HandleServerCameraSetupRequest(int connectionId, CameraSetupRequestPacket packet, byte[] rawData)
+        {
+            // Validate the claimed player identity (clients cannot act as another player)
+            int expectedPlayerId = connectionId + 1;
+            if (packet.PlayerId != expectedPlayerId)
+            {
+                RakeMultiplayerPlugin.Log?.LogWarning(
+                    $"[3.4] Server rejected camera request from C{connectionId}: claimed player {packet.PlayerId}, expected {expectedPlayerId}");
+                SendCameraSetupResult(connectionId, packet, false, "Unauthorized");
+                return;
+            }
+
+            if (!NetworkedCamera.TryGetCamera(packet.CameraId, out var camera) || camera == null)
+            {
+                RakeMultiplayerPlugin.Log?.LogWarning($"[3.4] Server: camera {packet.CameraId} not found for setup request");
+                SendCameraSetupResult(connectionId, packet, false, "NotFound");
+                return;
+            }
+
+            bool approved = packet.IsSetup
+                ? camera.InitializePlacement(packet.PlayerId)
+                : camera.UnplaceCamera();
+
+            string reason = approved ? string.Empty : (packet.IsSetup ? "CameraLimit" : "NotPlaced");
+            if (!approved)
+            {
+                RakeMultiplayerPlugin.Log?.LogWarning(
+                    $"[3.4] Server rejected {(packet.IsSetup ? "setup" : "pickup")} of camera {packet.CameraId} by player {packet.PlayerId}: {reason}");
+            }
+
+            SendCameraSetupResult(connectionId, packet, approved, reason);
+        }
+
+        private void SendCameraSetupResult(int connectionId, CameraSetupRequestPacket request, bool approved, string reason)
+        {
+            var result = new CameraSetupRequestPacket
+            {
+                CameraId = request.CameraId,
+                PlayerId = request.PlayerId,
+                IsSetup = request.IsSetup,
+                IsResult = true,
+                Approved = approved,
+                Reason = reason ?? string.Empty
+            };
+            _server.Send(connectionId, result.Serialize());
+        }
+
+        /// <summary>
+        /// Assign deterministic CameraIds to every camera object in the scene.
+        /// Must be called on BOTH host and client during scene initialization
+        /// (same order on every machine: position, then name).
+        /// </summary>
+        public void RegisterCameras()
+        {
+            var cameras = UnityEngine.Object.FindObjectsOfType<RecordCamera_obj>();
+            if (cameras == null || cameras.Length == 0)
+            {
+                RakeMultiplayerPlugin.Log?.LogInfo("[3.4] No RecordCamera_obj found in scene");
+                return;
+            }
+
+            System.Array.Sort(cameras, (a, b) =>
+            {
+                if (a == null || b == null) return 0;
+                var pa = a.transform.position;
+                var pb = b.transform.position;
+                int cmp = pa.x.CompareTo(pb.x); if (cmp != 0) return cmp;
+                cmp = pa.y.CompareTo(pb.y); if (cmp != 0) return cmp;
+                cmp = pa.z.CompareTo(pb.z); if (cmp != 0) return cmp;
+                return string.CompareOrdinal(a.gameObject.name, b.gameObject.name);
+            });
+
+            for (int i = 0; i < cameras.Length; i++)
+            {
+                var recordCam = cameras[i];
+                if (recordCam == null) continue;
+
+                var netCam = recordCam.GetComponent<NetworkedCamera>();
+                if (netCam == null)
+                {
+                    netCam = recordCam.gameObject.AddComponent<NetworkedCamera>();
+                }
+                netCam.AssignCameraId((uint)(i + 1));
+            }
+
+            _nextCameraNetworkId = Math.Max(_nextCameraNetworkId, cameras.Length + 1);
+            RakeMultiplayerPlugin.Log?.LogInfo($"[3.4] Registered {cameras.Length} networked cameras with deterministic IDs");
+        }
+
         private void HandleServerStartGame(int connectionId, StartGamePacket packet, byte[] rawData)
         {
             RakeMultiplayerPlugin.Log?.LogInfo($"[Net] Server received StartGame from C{connectionId}: scene={packet.SceneName}");
@@ -793,6 +894,9 @@ namespace RakeMultiplayer
                         break;
                     case PacketType.CameraDestroy:
                         HandleClientCameraDestroy((CameraDestroyPacket)packet);
+                        break;
+                    case PacketType.CameraSetupRequest:
+                        HandleClientCameraSetupResult((CameraSetupRequestPacket)packet);
                         break;
                     case PacketType.QuestTrigger:
                         HandleClientQuestTrigger((QuestTriggerPacket)packet);
@@ -924,6 +1028,13 @@ namespace RakeMultiplayer
             {
                 if (_networkedItems.TryGetValue(packet.ItemNetworkId, out var item))
                 {
+                    // Grant the pickup effect to the local player when they were the picker
+                    int localPlayerId = PlayerSpawner.Instance?.LocalPlayer?.PlayerId ?? 1;
+                    if (packet.PickerId == localPlayerId)
+                    {
+                        GrantItemEffectLocally(item);
+                    }
+
                     UnityEngine.Object.Destroy(item.gameObject);
                     _networkedItems.Remove(packet.ItemNetworkId);
                     _itemToNetworkId.Remove(item); // Clean up reverse lookup
@@ -967,6 +1078,79 @@ namespace RakeMultiplayer
             }
 
             OnPickupRejected?.Invoke(packet.PlayerId, packet.Reason);
+        }
+
+        /// <summary>
+        /// Mirror the server-side item effect locally for the picking client
+        /// (clients block the original PickupItem, so this is the only place the
+        /// weapon/ammo actually reaches a remote player).
+        /// </summary>
+        private void GrantItemEffectLocally(Item item)
+        {
+            if (item == null) return;
+
+            var weaponManager = PlayerSpawner.Instance?.LocalPlayer?.GetComponent<WeaponManager>();
+            if (weaponManager == null) return;
+
+            string itemType = item.GetType().Name;
+            int weaponId = 0;
+            int ammoCount = 1;
+            bool isNewWeapon = false;
+
+            switch (itemType)
+            {
+                case "Medkit_item": weaponId = 8; isNewWeapon = !weaponManager.CheckWeapon(weaponId); break;
+                case "Rifle_item": weaponId = 1; ammoCount = 2; isNewWeapon = !weaponManager.CheckWeapon(weaponId); break;
+                case "RifleAmmo_item": weaponId = 1; ammoCount = 2; isNewWeapon = false; break;
+                case "SniperRifle_item": weaponId = 6; isNewWeapon = !weaponManager.CheckWeapon(weaponId); break;
+                case "SniperAmmo_item": weaponId = 6; ammoCount = 2; isNewWeapon = false; break;
+                case "Trap_item": weaponId = 4; isNewWeapon = !weaponManager.CheckWeapon(weaponId); break;
+                case "Camera_item": weaponId = 2; ammoCount = 1; isNewWeapon = !weaponManager.CheckWeapon(weaponId); break;
+                case "Binocular_weapon":
+                case "Binocular_item": weaponId = 7; isNewWeapon = !weaponManager.CheckWeapon(weaponId); break;
+                case "MapCase_weapon":
+                case "MapCase_item": weaponId = 3; isNewWeapon = !weaponManager.CheckWeapon(weaponId); break;
+                case "Food_item": weaponId = 5; isNewWeapon = !weaponManager.CheckWeapon(weaponId); break;
+                default:
+                    RakeMultiplayerPlugin.Log?.LogWarning($"[3.5] Client: unknown item type for local grant: {itemType}");
+                    break;
+            }
+
+            if (weaponId <= 0) return;
+
+            if (isNewWeapon)
+            {
+                weaponManager.AddWeapon(weaponId, ammoCount, true);
+                RakeMultiplayerPlugin.Log?.LogInfo($"[3.5] Client granted weapon {weaponId} (ammo {ammoCount})");
+            }
+            else
+            {
+                weaponManager.AddAmmo(weaponId, ammoCount);
+                RakeMultiplayerPlugin.Log?.LogInfo($"[3.5] Client granted ammo {ammoCount} for weapon {weaponId}");
+            }
+        }
+
+        private void HandleClientCameraSetupResult(CameraSetupRequestPacket packet)
+        {
+            if (!packet.IsResult) return;
+
+            if (packet.Approved)
+            {
+                RakeMultiplayerPlugin.Log?.LogInfo(
+                    $"[3.4] Server approved {(packet.IsSetup ? "setup" : "pickup")} of camera {packet.CameraId}");
+                return;
+            }
+
+            RakeMultiplayerPlugin.Log?.LogWarning(
+                $"[3.4] Server rejected {(packet.IsSetup ? "setup" : "pickup")} of camera {packet.CameraId}: {packet.Reason}");
+
+            if (packet.Reason == "CameraLimit")
+            {
+                try { InformationUI.instance?.DrawHint($"You cannot setup no more {NetworkedCamera.MaxCameras} cameras"); }
+                catch { /* InformationUI may not exist in this scene */ }
+            }
+
+            OnCameraSetupRejected?.Invoke(packet.PlayerId, packet.Reason);
         }
 
         private void HandleClientPhaseChange(PhaseChangePacket packet)

@@ -49,6 +49,7 @@ namespace RakeMultiplayer.Networking
                     PacketType.TrapState => new TrapStatePacket(),
                     PacketType.CameraSpawn => new CameraSpawnPacket(),
                     PacketType.CameraDestroy => new CameraDestroyPacket(),
+                    PacketType.CameraSetupRequest => new CameraSetupRequestPacket(),
                     _ => throw new InvalidOperationException($"Unknown packet type: {type} (byte value: {(byte)type})")
                 };
                 packet.Read(reader);

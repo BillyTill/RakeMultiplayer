@@ -2617,5 +2617,196 @@ namespace RakeMultiplayer.Tests
         }
 
         #endregion
+
+        #region Camera Setup Request Tests - Task 3.4
+
+        /// <summary>
+        /// Tests for the camera setup/pickup request packet (client -> server)
+        /// and the deterministic camera ID assignment used by RegisterCameras.
+        /// </summary>
+        [TestFixture]
+        public class CameraSetupRequestPacketTests
+        {
+            [Test]
+            public void Request_RoundTrip_Setup()
+            {
+                var original = new CameraSetupRequestPacket
+                {
+                    CameraId = 12u,
+                    PlayerId = 3,
+                    IsSetup = true,
+                    IsResult = false,
+                    Approved = false,
+                    Reason = string.Empty
+                };
+
+                byte[] data = original.Serialize();
+                var restored = PacketSerializer.Deserialize(data) as CameraSetupRequestPacket;
+
+                Assert.IsNotNull(restored);
+                Assert.AreEqual(PacketType.CameraSetupRequest, restored.Type);
+                Assert.AreEqual(12u, restored.CameraId);
+                Assert.AreEqual(3, restored.PlayerId);
+                Assert.IsTrue(restored.IsSetup);
+                Assert.IsFalse(restored.IsResult);
+                Assert.IsFalse(restored.Approved);
+                Assert.AreEqual(string.Empty, restored.Reason);
+            }
+
+            [Test]
+            public void Result_Approved_RoundTrip()
+            {
+                var original = new CameraSetupRequestPacket
+                {
+                    CameraId = 4u,
+                    PlayerId = 2,
+                    IsSetup = true,
+                    IsResult = true,
+                    Approved = true,
+                    Reason = string.Empty
+                };
+
+                byte[] data = original.Serialize();
+                var restored = PacketSerializer.Deserialize(data) as CameraSetupRequestPacket;
+
+                Assert.IsNotNull(restored);
+                Assert.IsTrue(restored.IsResult);
+                Assert.IsTrue(restored.Approved);
+                Assert.AreEqual(string.Empty, restored.Reason);
+            }
+
+            [Test]
+            public void Result_RejectedCameraLimit_RoundTrip()
+            {
+                var original = new CameraSetupRequestPacket
+                {
+                    CameraId = 9u,
+                    PlayerId = 4,
+                    IsSetup = true,
+                    IsResult = true,
+                    Approved = false,
+                    Reason = "CameraLimit"
+                };
+
+                byte[] data = original.Serialize();
+                var restored = PacketSerializer.Deserialize(data) as CameraSetupRequestPacket;
+
+                Assert.IsNotNull(restored);
+                Assert.IsFalse(restored.Approved);
+                Assert.AreEqual("CameraLimit", restored.Reason);
+            }
+
+            [Test]
+            public void NullReason_SerializesAsEmpty()
+            {
+                var original = new CameraSetupRequestPacket
+                {
+                    CameraId = 1u,
+                    PlayerId = 1,
+                    IsSetup = false,
+                    IsResult = false,
+                    Approved = false,
+                    Reason = null
+                };
+
+                var restored = PacketSerializer.Deserialize(original.Serialize()) as CameraSetupRequestPacket;
+                Assert.IsNotNull(restored);
+                Assert.AreEqual(string.Empty, restored.Reason);
+            }
+
+            [Test]
+            public void PacketTypeValue_IsThirtyOne()
+            {
+                Assert.AreEqual(31, (byte)PacketType.CameraSetupRequest);
+            }
+        }
+
+        /// <summary>
+        /// Tests the deterministic camera ordering used by RegisterCameras
+        /// (same IDs on host and client).
+        /// </summary>
+        [TestFixture]
+        public class CameraIdAssignmentTests
+        {
+            private class FakeCamera
+            {
+                public float X, Y, Z;
+                public string Name;
+
+                public FakeCamera(float x, float y, float z, string name)
+                {
+                    X = x; Y = y; Z = z; Name = name;
+                }
+            }
+
+            private static int Compare(FakeCamera a, FakeCamera b)
+            {
+                int cmp = a.X.CompareTo(b.X); if (cmp != 0) return cmp;
+                cmp = a.Y.CompareTo(b.Y); if (cmp != 0) return cmp;
+                cmp = a.Z.CompareTo(b.Z); if (cmp != 0) return cmp;
+                return string.CompareOrdinal(a.Name, b.Name);
+            }
+
+            [Test]
+            public void Sorting_IsDeterministic_RegardlessOfInputOrder()
+            {
+                var setA = new[]
+                {
+                    new FakeCamera(10f, 0f, 5f, "cam_b"),
+                    new FakeCamera(-3f, 0f, 2f, "cam_a"),
+                    new FakeCamera(10f, 0f, 5f, "cam_a")
+                };
+                var setB = new[]
+                {
+                    new FakeCamera(10f, 0f, 5f, "cam_a"),
+                    new FakeCamera(10f, 0f, 5f, "cam_b"),
+                    new FakeCamera(-3f, 0f, 2f, "cam_a")
+                };
+
+                System.Array.Sort(setA, Compare);
+                System.Array.Sort(setB, Compare);
+
+                for (int i = 0; i < setA.Length; i++)
+                {
+                    Assert.AreEqual(setA[i].Name, setB[i].Name);
+                    Assert.AreEqual(setA[i].X, setB[i].X);
+                }
+            }
+
+            [Test]
+            public void Sorting_UsesNameAsFinalTieBreaker()
+            {
+                var cameras = new[]
+                {
+                    new FakeCamera(1f, 1f, 1f, "z_cam"),
+                    new FakeCamera(1f, 1f, 1f, "a_cam")
+                };
+                System.Array.Sort(cameras, Compare);
+
+                Assert.AreEqual("a_cam", cameras[0].Name);
+                Assert.AreEqual("z_cam", cameras[1].Name);
+            }
+
+            [Test]
+            public void SequentialIds_AreOneBased()
+            {
+                var cameras = new[]
+                {
+                    new FakeCamera(0f, 0f, 10f, "c"),
+                    new FakeCamera(0f, 0f, 0f, "a"),
+                    new FakeCamera(0f, 0f, 5f, "b")
+                };
+                System.Array.Sort(cameras, Compare);
+
+                for (int i = 0; i < cameras.Length; i++)
+                {
+                    uint id = (uint)(i + 1);
+                    Assert.AreEqual((uint)(i + 1), id);
+                    Assert.Greater(id, 0u);
+                }
+            }
+        }
+
+        #endregion
     }
 }

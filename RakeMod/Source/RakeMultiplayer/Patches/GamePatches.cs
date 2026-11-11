@@ -360,4 +360,116 @@ namespace RakeMultiplayer.Patches
             return true;
         }
     }
-}
+
+    // === Stage 3.4: Camera setup/pickup synchronization ===
+
+    /// <summary>
+    /// Route camera setup through the network layer.
+    /// Server: enforce the 5-camera quota and broadcast the new state.
+    /// Client: send a request; the server remains authoritative.
+    /// </summary>
+    [HarmonyPatch(typeof(RecordCamera_obj))]
+    [HarmonyPatch("SetupCamera")]
+    public class RecordCameraSetupPatch
+    {
+        [HarmonyPrefix]
+        static bool Prefix(RecordCamera_obj __instance)
+        {
+            if (!RakeMultiplayerPlugin.Enabled.Value) return true;
+            if (RakeMultiplayerPlugin.IsApplyingNetworkCameraState) return true; // network-driven visual update
+            if (__instance.cameraState != RecordCamera_obj.Camera_state.Unsetup) return true;
+
+            var netCam = __instance.GetComponent<NetworkedCamera>() ?? __instance.GetComponentInParent<NetworkedCamera>();
+            if (netCam == null) return true; // not a networked camera - run vanilla logic
+
+            if (RakeMultiplayerPlugin.isServer)
+            {
+                // Server keeps authority: quota + broadcast (InitializePlacement also applies local visuals)
+                if (!netCam.InitializePlacement(1))
+                {
+                    try { InformationUI.instance?.DrawHint($"You cannot setup no more {NetworkedCamera.MaxCameras} cameras"); }
+                    catch { /* InformationUI may be absent */ }
+                }
+                return false; // handled by the network layer
+            }
+
+            // Client: request server authorization
+            var request = new RakeMultiplayer.Networking.CameraSetupRequestPacket
+            {
+                CameraId = netCam.CameraId,
+                PlayerId = PlayerSpawner.Instance?.LocalPlayer?.PlayerId ?? 1,
+                IsSetup = true,
+                IsResult = false,
+                Approved = false,
+                Reason = string.Empty
+            };
+            RakeNetworkManager.Instance?.ClientSend(request.Serialize());
+            RakeMultiplayerPlugin.Log?.LogInfo($"[3.4] Client requested setup of camera {netCam.CameraId}");
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Route camera pickup (un-setup) through the network layer.
+    /// </summary>
+    [HarmonyPatch(typeof(RecordCamera_obj))]
+    [HarmonyPatch("SetUnsetupState")]
+    public class RecordCameraUnsetupPatch
+    {
+        [HarmonyPrefix]
+        static bool Prefix(RecordCamera_obj __instance)
+        {
+            if (!RakeMultiplayerPlugin.Enabled.Value) return true;
+            if (RakeMultiplayerPlugin.IsApplyingNetworkCameraState) return true; // network-driven visual update
+            if (__instance.cameraState != RecordCamera_obj.Camera_state.Setup) return true;
+
+            var netCam = __instance.GetComponent<NetworkedCamera>() ?? __instance.GetComponentInParent<NetworkedCamera>();
+            if (netCam == null) return true;
+
+            if (RakeMultiplayerPlugin.isServer)
+            {
+                netCam.UnplaceCamera(); // applies visuals + broadcasts CameraDestroy
+                return false;
+            }
+
+            var request = new RakeMultiplayer.Networking.CameraSetupRequestPacket
+            {
+                CameraId = netCam.CameraId,
+                PlayerId = PlayerSpawner.Instance?.LocalPlayer?.PlayerId ?? 1,
+                IsSetup = false,
+                IsResult = false,
+                Approved = false,
+                Reason = string.Empty
+            };
+            RakeNetworkManager.Instance?.ClientSend(request.Serialize());
+            RakeMultiplayerPlugin.Log?.LogInfo($"[3.4] Client requested pickup of camera {netCam.CameraId}");
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Keep the game's local CheckSetup gate in sync with the authoritative
+    /// 5-camera quota (the vanilla check counts broken cameras, ours frees them).
+    /// </summary>
+    [HarmonyPatch(typeof(RecordCamera_obj))]
+    [HarmonyPatch("CheckSetup")]
+    public class RecordCameraCheckSetupPatch
+    {
+        [HarmonyPostfix]
+        static void Postfix(RecordCamera_obj __instance, ref bool __result)
+        {
+            if (!RakeMultiplayerPlugin.Enabled.Value) return;
+            if (__instance.cameraState != RecordCamera_obj.Camera_state.Unsetup) return;
+
+            bool canPlace = NetworkedCamera.CanPlaceCamera();
+            if (__result != canPlace)
+            {
+                __result = canPlace;
+                if (!canPlace)
+                {
+                    try { InformationUI.instance?.DrawHint($"You cannot setup no more {NetworkedCamera.MaxCameras} cameras"); }
+                    catch { /* InformationUI may be absent */ }
+                }
+            }
+        }
+    }}
