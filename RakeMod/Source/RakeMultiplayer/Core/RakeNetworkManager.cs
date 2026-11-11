@@ -671,7 +671,20 @@ namespace RakeMultiplayer
                 picker = remote.transform;
             }
 
-            if (picker != null && Vector3.Distance(picker.position, item.transform.position) > 8f)
+            if (picker == null)
+            {
+                // Fallback to the last reported position (proxy not spawned yet, etc.)
+                if (_playerStates.TryGetValue(connectionId, out var st) && st != null)
+                {
+                    var fallbackPos = st.Position;
+                    if (Vector3.Distance(fallbackPos, item.transform.position) <= 15f)
+                    {
+                        picker = null; // allow
+                    }
+                }
+            }
+
+            if (picker != null && Vector3.Distance(picker.position, item.transform.position) > 15f)
             {
                 RakeMultiplayerPlugin.Log?.LogWarning(
                     $"[3.5] Server rejected pickup: P{playerId} is {Vector3.Distance(picker.position, item.transform.position):F1}m away from item {packet.ItemNetworkId}");
@@ -1503,7 +1516,7 @@ namespace RakeMultiplayer
                 // become WeaponManager.instance (otherwise the weapon lands on the clone
                 // and the local HUD says "You do not have ...").
                 var localPlayer = PlayerSpawner.Instance != null ? PlayerSpawner.Instance.LocalPlayer : null;
-                var localWm = localPlayer != null ? localPlayer.GetComponent<WeaponManager>() : null;
+                var localWm = localPlayer != null ? localPlayer.GetComponentInChildren<WeaponManager>() : null;
                 if (localWm != null)
                 {
                     WeaponManager.instance = localWm;
@@ -1603,7 +1616,7 @@ namespace RakeMultiplayer
         {
             if (item == null) return;
 
-            var weaponManager = PlayerSpawner.Instance?.LocalPlayer?.GetComponent<WeaponManager>();
+            var weaponManager = PlayerSpawner.Instance?.LocalPlayer?.GetComponentInChildren<WeaponManager>();
             if (weaponManager == null) return;
 
             string itemType = item.GetType().Name;

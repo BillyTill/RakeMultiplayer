@@ -122,7 +122,7 @@ namespace RakeMultiplayer
         {
             if (player == null) return;
 
-            var weaponManager = player.GetComponent<WeaponManager>();
+            var weaponManager = player.GetComponentInChildren<WeaponManager>();
             if (weaponManager == null || weaponManager.weaponsAmmo == null) return;
 
             _inventories[player.PlayerId] = new List<int>(weaponManager.weaponsAmmo);
@@ -135,7 +135,7 @@ namespace RakeMultiplayer
             if (player == null) return;
             if (!_inventories.TryGetValue(player.PlayerId, out var ammo)) return;
 
-            var weaponManager = player.GetComponent<WeaponManager>();
+            var weaponManager = player.GetComponentInChildren<WeaponManager>();
             if (weaponManager == null) return;
 
             if (weaponManager.weaponsAmmo == null || weaponManager.weaponsAmmo.Count != ammo.Count)

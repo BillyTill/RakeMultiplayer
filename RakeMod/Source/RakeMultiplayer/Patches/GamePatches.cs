@@ -744,7 +744,11 @@ namespace RakeMultiplayer.Patches
         static bool Prefix(FPSController __instance)
         {
             if (__instance == null) return true;
-            if (__instance.gameObject.name.StartsWith("RemotePlayer_")) return false;
+            if (__instance.gameObject.name.StartsWith("RemotePlayer_"))
+            {
+                __instance.enabled = false;
+                return false;
+            }
             return true;
         }
     }
@@ -763,10 +767,18 @@ namespace RakeMultiplayer.Patches
             if (__instance == null) return true;
 
             var root = __instance.transform.root;
-            if (root != null && root.gameObject.name.StartsWith("RemotePlayer_")) return false;
+            if (root != null && root.gameObject.name.StartsWith("RemotePlayer_"))
+            {
+                __instance.enabled = false;
+                return false;
+            }
 
             var netPlayer = __instance.GetComponentInParent<NetworkedPlayer>();
-            if (netPlayer != null && netPlayer.PlayerId > 0 && !netPlayer.isLocalPlayer) return false;
+            if (netPlayer != null && netPlayer.PlayerId > 0 && !netPlayer.isLocalPlayer)
+            {
+                __instance.enabled = false;
+                return false;
+            }
 
             return true;
         }

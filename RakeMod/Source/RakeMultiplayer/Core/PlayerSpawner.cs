@@ -97,11 +97,18 @@ namespace RakeMultiplayer
                 RakeMultiplayerPlugin.Log?.LogInfo($"[3.3] Disabled FPSController on remote player {playerId} BEFORE Start()");
             }
 
-            var wm = playerObj.GetComponent<WeaponManager>();
+            // WeaponManager lives on a child object, not on the player root
+            var wm = playerObj.GetComponentInChildren<WeaponManager>();
             if (wm != null)
             {
                 wm.enabled = false;
                 RakeMultiplayerPlugin.Log?.LogInfo($"[3.3] Disabled WeaponManager on remote player {playerId} BEFORE Start()");
+            }
+
+            // Stop every weapon behaviour (input/hints) on the clone
+            foreach (var weapon in playerObj.GetComponentsInChildren<Weapon>(true))
+            {
+                if (weapon != null) weapon.enabled = false;
             }
 
             var pm = playerObj.GetComponent<PlayerMovement>();
@@ -141,7 +148,7 @@ namespace RakeMultiplayer
                 var localFps = LocalPlayer.GetComponent<FPSController>();
                 if (localFps != null) FPSController.instance = localFps;
 
-                var localWm = LocalPlayer.GetComponent<WeaponManager>();
+                var localWm = LocalPlayer.GetComponentInChildren<WeaponManager>();
                 if (localWm != null) WeaponManager.instance = localWm;
             }
 

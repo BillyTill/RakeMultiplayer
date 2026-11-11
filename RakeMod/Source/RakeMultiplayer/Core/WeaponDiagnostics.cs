@@ -23,7 +23,7 @@ namespace RakeMultiplayer
 
             log.LogInfo($"[WeaponDiag] LocalPlayer present={local != null} id={localId}");
 
-            var localWm = local != null ? local.GetComponent<WeaponManager>() : null;
+            var localWm = local != null ? local.GetComponentInChildren<WeaponManager>() : null;
             log.LogInfo($"[WeaponDiag] WeaponManager.instance={(WeaponManager.instance != null ? WeaponManager.instance.transform.root.name : "null")}");
             log.LogInfo($"[WeaponDiag] instance==localWM={ReferenceEquals(WeaponManager.instance, localWm)}");
 

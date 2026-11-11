@@ -138,8 +138,13 @@ namespace RakeMultiplayer
             var fpsCamera = GetComponentInChildren<FPSCamera>();
             if (fpsCamera) fpsCamera.enabled = false;
 
-            var wm = GetComponent<WeaponManager>();
+            var wm = GetComponentInChildren<WeaponManager>();
             if (wm) wm.enabled = false;
+
+            foreach (var weapon in GetComponentsInChildren<Weapon>(true))
+            {
+                if (weapon != null) weapon.enabled = false;
+            }
 
             var rifle = GetComponentInChildren<Rifle_weapon>();
             if (rifle) rifle.enabled = false;
