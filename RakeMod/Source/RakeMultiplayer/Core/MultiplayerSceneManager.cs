@@ -124,6 +124,9 @@ namespace RakeMultiplayer
                 playerSpawner.ApplyMapSettings(settings, nightIndex);
             }
 
+            // Spawn any remote players that connected before the scene loaded
+            RakeNetworkManager.Instance?.EnsureRemotePlayersSpawned();
+
             // Restore world/inventory after a scene reload (Tasks 4.3 / 4.4)
             WorldPersistence.RestoreWorld();
             if (playerSpawner != null && playerSpawner.LocalPlayer != null)

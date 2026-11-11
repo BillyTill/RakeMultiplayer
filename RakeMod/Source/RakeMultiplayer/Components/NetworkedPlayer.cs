@@ -195,7 +195,17 @@ namespace RakeMultiplayer
             if (anim) anim.enabled = true;
         }
 
-        private void SendPlayerState()
+        /// <summary>
+        /// Immediately broadcast the local player's state (used right after a scene load /
+        /// remote-player spawn so others do not have to wait for movement to see us).
+        /// </summary>
+        public void ForceSendState()
+        {
+            if (!isLocalPlayer) return;
+            SendPlayerState(force: true);
+        }
+
+        private void SendPlayerState(bool force = false)
         {
             Vector3 currentPos = transform.position;
             Quaternion currentRot = transform.rotation;
@@ -206,7 +216,7 @@ namespace RakeMultiplayer
             bool rotChanged = Quaternion.Angle(currentRot, lastSentRotation) > 0.5f;
             bool animChanged = currentAnimState != lastSentAnimState;
 
-            if (!posChanged && !rotChanged && !animChanged) return;
+            if (!force && !posChanged && !rotChanged && !animChanged) return;
 
             var packet = new PlayerStatePacket
             {

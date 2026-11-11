@@ -111,14 +111,7 @@ namespace RakeMultiplayer
                 anim.SetBool("Grounded", true);
             }
             
-            // DEBUG: Add visible capsule so we can see remote player position
-            var debugCapsule = GameObject.CreatePrimitive(PrimitiveType.Capsule);
-            debugCapsule.name = "DebugCapsule";
-            debugCapsule.transform.SetParent(playerObj.transform, false);
-            debugCapsule.transform.localPosition = Vector3.up; // At eye level
-            UnityEngine.Object.Destroy(debugCapsule.GetComponent<Collider>()); // Disable physics
-            RakeMultiplayerPlugin.Log?.LogInfo("[3.5] Spawned DEBUG CAPSULE for remote player!");
-            
+
             var netPlayer = playerObj.GetComponent<NetworkedPlayer>();
             if (netPlayer == null)
             {
@@ -126,7 +119,10 @@ namespace RakeMultiplayer
             }
 
             netPlayer.SetPlayerId(playerId);
-            netPlayer.SetAsRemotePlayer(); // Отключит рендеры, камеры, руки
+            netPlayer.SetAsRemotePlayer();
+
+            // Visible third-person proxy (the original prefab is first-person only)
+            RemotePlayerVisual.Attach(playerObj, playerId);
 
             _remotePlayers[playerId] = netPlayer;
             RakeMultiplayerPlugin.Log?.LogInfo($"[3.3] Spawned remote player {playerId} at {spawnPosition}");

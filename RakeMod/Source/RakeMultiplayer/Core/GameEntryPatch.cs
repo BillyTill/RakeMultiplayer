@@ -92,6 +92,9 @@ namespace RakeMultiplayer
                 RakeMultiplayerPlugin.Log?.LogInfo("[GameEntry] Assigned playerPrefab from scene FPSController");
             }
 
+            // Now that the prefab exists, spawn remote players that connected in the lobby
+            RakeNetworkManager.Instance?.EnsureRemotePlayersSpawned();
+
             // Register local player in PlayerSpawner (Fix: гарантирует localPlayer != null)
             if (spawner != null && netPlayer != null)
             {

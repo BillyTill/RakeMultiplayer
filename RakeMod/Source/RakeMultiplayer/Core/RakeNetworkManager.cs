@@ -1001,6 +1001,88 @@ namespace RakeMultiplayer
             RakeMultiplayerPlugin.Log?.LogInfo($"[3.8] Registered {animals.Length} networked animals");
         }
 
+        /// <summary>
+        /// Spawn remote player objects for everyone we know about.
+        /// Must be called after the game scene loads (the player prefab is only assigned
+        /// then), otherwise clients that connected in the lobby are never visible to the host.
+        /// Idempotent - already-spawned players are skipped.
+        /// </summary>
+        public void EnsureRemotePlayersSpawned()
+        {
+            var spawner = PlayerSpawner.Instance;
+            if (spawner == null)
+            {
+                RakeMultiplayerPlugin.Log?.LogWarning("[Visual] EnsureRemotePlayersSpawned: PlayerSpawner missing");
+                return;
+            }
+
+            if (spawner.playerPrefab == null)
+            {
+                RakeMultiplayerPlugin.Log?.LogWarning("[Visual] EnsureRemotePlayersSpawned: playerPrefab not assigned yet - will retry on next scene tick");
+                return;
+            }
+
+            if (RakeMultiplayerPlugin.isServer)
+            {
+                // Host: one remote object per connected client
+                foreach (var connId in _connectedClients)
+                {
+                    int playerId = connId + 1;
+                    if (spawner.TryGetRemotePlayer(playerId, out _)) continue;
+
+                    Vector3 pos = _playerStates.TryGetValue(connId, out var state)
+                        ? state.Position
+                        : new Vector3(playerId * 2f, 0f, 0f);
+
+                    spawner.SpawnRemotePlayer(playerId, pos);
+                    RakeMultiplayerPlugin.Log?.LogInfo($"[Visual] Host spawned missing remote player P{playerId}");
+                }
+
+                // Push authoritative positions so clients can place the host/other players
+                var host = spawner.LocalPlayer;
+                if (host != null)
+                {
+                    var hostState = new PlayerStatePacket
+                    {
+                        PlayerId = host.PlayerId,
+                        Position = host.transform.position,
+                        Rotation = host.transform.rotation,
+                        AnimState = 0
+                    };
+                    ServerBroadcast(hostState.Serialize());
+                }
+
+                foreach (var kvp in spawner.GetAllRemotePlayers())
+                {
+                    if (kvp.Value == null) continue;
+                    var packet = new PlayerStatePacket
+                    {
+                        PlayerId = kvp.Key,
+                        Position = kvp.Value.transform.position,
+                        Rotation = kvp.Value.transform.rotation,
+                        AnimState = 0
+                    };
+                    ServerBroadcast(packet.Serialize());
+                }
+            }
+            else
+            {
+                // Client: one remote object per known other player
+                int localId = spawner.LocalPlayer != null ? spawner.LocalPlayer.PlayerId : 0;
+                foreach (var playerId in _knownPlayerIds)
+                {
+                    if (playerId == localId) continue;
+                    if (spawner.TryGetRemotePlayer(playerId, out _)) continue;
+
+                    spawner.SpawnRemotePlayer(playerId, new Vector3(playerId * 2f, 0f, 0f));
+                    RakeMultiplayerPlugin.Log?.LogInfo($"[Visual] Client spawned missing remote player P{playerId}");
+                }
+
+                // Tell the server/host where we actually are
+                spawner.LocalPlayer?.ForceSendState();
+            }
+        }
+
         private void HandleServerStartGame(int connectionId, StartGamePacket packet, byte[] rawData)
         {
             RakeMultiplayerPlugin.Log?.LogInfo($"[Net] Server received StartGame from C{connectionId}: scene={packet.SceneName}");

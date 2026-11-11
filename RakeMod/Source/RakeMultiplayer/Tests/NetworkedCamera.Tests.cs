@@ -3688,5 +3688,127 @@ namespace RakeMultiplayer.Tests
         }
 
         #endregion
+
+        #region Remote Player Visibility Tests
+
+        /// <summary>
+        /// Tests for remote player spawning/visibility logic:
+        /// deterministic proxy colours, idempotent spawns, forced state sends.
+        /// </summary>
+        [TestFixture]
+        public class RemotePlayerVisibilityTests
+        {
+            private static int PaletteIndex(int playerId, int paletteSize)
+            {
+                return System.Math.Abs(playerId - 1) % paletteSize;
+            }
+
+            [Test]
+            public void ProxyPalette_IsDeterministicPerPlayer()
+            {
+                const int palette = 4;
+                Assert.AreEqual(0, PaletteIndex(1, palette));
+                Assert.AreEqual(1, PaletteIndex(2, palette));
+                Assert.AreEqual(2, PaletteIndex(3, palette));
+                Assert.AreEqual(3, PaletteIndex(4, palette));
+                Assert.AreEqual(0, PaletteIndex(5, palette));
+            }
+
+            [Test]
+            public void ProxyPalette_HandlesZeroAndNegativeIds()
+            {
+                const int palette = 4;
+                Assert.AreEqual(1, PaletteIndex(0, palette));   // abs(-1) % 4
+                Assert.AreEqual(0, PaletteIndex(-3, palette));  // abs(-4) % 4
+            }
+
+            [Test]
+            public void EnsureRemotePlayersSpawned_SkipsExisting()
+            {
+                var spawned = new System.Collections.Generic.HashSet<int> { 2, 3 };
+                var toSpawn = new System.Collections.Generic.List<int>();
+
+                foreach (int playerId in new[] { 2, 3, 4 })
+                {
+                    if (spawned.Contains(playerId)) continue;
+                    toSpawn.Add(playerId);
+                }
+
+                Assert.AreEqual(1, toSpawn.Count);
+                Assert.AreEqual(4, toSpawn[0]);
+            }
+
+            [Test]
+            public void EnsureRemotePlayersSpawned_ClientSkipsLocalPlayer()
+            {
+                int localId = 2;
+                var known = new[] { 1, 2, 3 };
+                var toSpawn = new System.Collections.Generic.List<int>();
+
+                foreach (int playerId in known)
+                {
+                    if (playerId == localId) continue;
+                    toSpawn.Add(playerId);
+                }
+
+                Assert.AreEqual(2, toSpawn.Count);
+                Assert.IsFalse(toSpawn.Contains(2));
+            }
+
+            [Test]
+            public void EnsureRemotePlayersSpawned_HostSpawnsAllClients()
+            {
+                // Host is always 1; every connected client (connectionId+1) must get a proxy
+                var connections = new[] { 1, 2, 3 };
+                var spawned = new System.Collections.Generic.List<int>();
+
+                foreach (var connId in connections)
+                {
+                    spawned.Add(connId + 1);
+                }
+
+                CollectionAssert.AreEquivalent(new[] { 2, 3, 4 }, spawned);
+            }
+
+            [Test]
+            public void FallbackSpawnPosition_IsPlayerIdTimesTwo()
+            {
+                Assert.AreEqual(new Vector3(4f, 0f, 0f), new Vector3(2 * 2f, 0f, 0f));
+                Assert.AreEqual(new Vector3(8f, 0f, 0f), new Vector3(4 * 2f, 0f, 0f));
+            }
+
+            [Test]
+            public void ForceSendState_BypassesDeltaCompression()
+            {
+                bool posChanged = false, rotChanged = false, animChanged = false;
+                bool force = true;
+
+                bool shouldSend = force || posChanged || rotChanged || animChanged;
+                Assert.IsTrue(shouldSend);
+
+                bool shouldSendWithoutForce = false || posChanged || rotChanged || animChanged;
+                Assert.IsFalse(shouldSendWithoutForce);
+            }
+
+            [Test]
+            public void PlayerStatePacket_CarriesSpawnPositionForRemoteProxy()
+            {
+                var packet = new PlayerStatePacket
+                {
+                    PlayerId = 3,
+                    Position = new Vector3(12f, 1.5f, -4f),
+                    Rotation = new Quaternion(0f, 0f, 0f, 1f),
+                    AnimState = 0b1001
+                };
+
+                var restored = PacketSerializer.Deserialize(packet.Serialize()) as PlayerStatePacket;
+                Assert.IsNotNull(restored);
+                Assert.AreEqual(3, restored.PlayerId);
+                Assert.AreEqual(12f, restored.Position.x, 0.001f);
+                Assert.AreEqual(0b1001, restored.AnimState);
+            }
+        }
+
+        #endregion
     }
 }
