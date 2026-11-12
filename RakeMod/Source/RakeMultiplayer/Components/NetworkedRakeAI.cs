@@ -18,6 +18,13 @@ namespace RakeMultiplayer
         [Header("Sync Settings")]
         public float syncRate = 0.066f; // 15Hz unified rate
 
+        [Header("Client Interpolation")]
+        [Tooltip("How quickly a client catches up to the last snapshot (higher = snappier)")]
+        public float interpolationSpeed = 12f;
+
+        [Tooltip("Distance beyond which the client teleports instead of interpolating")]
+        public float snapDistance = 10f;
+
         [Header("AI Configuration")]
         public float followMinDistance = 15f;
         public float followMaxDistance = 25f;
@@ -60,6 +67,9 @@ namespace RakeMultiplayer
 
         // Client-side state tracking for animator triggers
         private byte lastAppliedState = 255;
+
+        // Smoothed animator speed (clients only) so state flapping does not jerk the walk blend
+        private float targetSpeed;
 
         // AI State Machine
         public enum RakeState : byte
@@ -175,6 +185,13 @@ namespace RakeMultiplayer
                 enemyAI.enabled = false;
             }
 
+            if (!RakeMultiplayerPlugin.isServer && animator != null)
+            {
+                // Root motion would move the transform locally and then the next
+                // snapshot would drag it back, which reads as jitter.
+                animator.applyRootMotion = false;
+            }
+
             // Initial state: Follow at session start
             if (RakeMultiplayerPlugin.isServer)
             {
@@ -224,13 +241,20 @@ namespace RakeMultiplayer
                 // Client: interpolate to target values
                 if (!RakeMultiplayerPlugin.isConnected) return;
 
+                float t = 1f - Mathf.Exp(-interpolationSpeed * Time.deltaTime);
                 if (hasTargetPosition)
                 {
-                    transform.position = Vector3.Lerp(transform.position, targetPosition, Time.deltaTime * 15f);
+                    transform.position = Vector3.Lerp(transform.position, targetPosition, t);
                 }
                 if (hasTargetRotation)
                 {
-                    transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, Time.deltaTime * 15f);
+                    transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, t);
+
+                if (animator != null)
+                {
+                    float currentSpeed = animator.GetFloat("Speed");
+                    animator.SetFloat("Speed", Mathf.MoveTowards(currentSpeed, targetSpeed, Time.deltaTime * 2.5f));
+                }
                 }
             }
         }
@@ -1013,6 +1037,12 @@ namespace RakeMultiplayer
             if (RakeMultiplayerPlugin.isServer) return; // Don't apply on server
 
             // Set interpolation targets instead of direct assignment
+            if (!hasTargetPosition || Vector3.Distance(transform.position, position) > snapDistance)
+            {
+                transform.position = position;
+                transform.rotation = rotation;
+            }
+
             targetPosition = position;
             targetRotation = rotation;
             hasTargetPosition = true;
@@ -1077,14 +1107,11 @@ namespace RakeMultiplayer
                 isBlocking = false;
             }
 
-            // Speed is a real animator parameter on the game's Rake
-            if (animator != null)
-            {
-                float speed = newState == RakeState.Chase ? 2f
-                            : newState == RakeState.Follow ? 1f
-                            : 0f;
-                animator.SetFloat("Speed", speed);
-            }
+            // Speed is a real animator parameter on the game's Rake. Store it as a
+            // target and let the client update blend towards it.
+            targetSpeed = newState == RakeState.Chase ? 2f
+                        : newState == RakeState.Follow ? 1f
+                        : 0f;
         }
 
         public void ApplyHealth(float health)
