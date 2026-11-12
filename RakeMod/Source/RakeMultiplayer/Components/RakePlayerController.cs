@@ -105,6 +105,7 @@ namespace RakeMultiplayer
         private Vector3 _climbNormal = Vector3.forward;
         private Vector3 _climbMove;
         private float _mantleTimer;
+        private float _climbVertical;
 
         private float _scanTimer;
         private readonly List<NetworkedPlayer> _players = new List<NetworkedPlayer>();
@@ -517,13 +518,14 @@ namespace RakeMultiplayer
 
             Vector3 move = moving ? direction * speed : Vector3.zero;
 
-            // Mid-leap the body keeps the ballistic horizontal speed from the jump.
-            if (_jumpActive) move = _jumpDirection * _jumpSpeed;
-            else if (_rakeController != null && _rakeController.enabled)
+            // Wall grabs can happen mid-leap too, so climbing is checked every frame.
+            if (_rakeController != null && _rakeController.enabled)
             {
                 UpdateClimbing(dt, moving, direction);
-                if (_climbing) move = _climbMove;
             }
+
+            if (_climbing) move = _climbMove;
+            else if (_jumpActive) move = _jumpDirection * _jumpSpeed;
 
             if (_rakeController != null && _rakeController.enabled)
             {
@@ -594,9 +596,10 @@ namespace RakeMultiplayer
                 if (_climbing)
                 {
                     // No climb clip in the game: a walk cycle against the wall reads as climbing.
+                    // Standing still on the wall is the idle hanging pose.
                     _animator.SetBool("bCrouch", false);
                     _animator.SetInteger("WalkType", 1);
-                    _animator.SetFloat("Speed", 1f);
+                    _animator.SetFloat("Speed", Mathf.Abs(_climbVertical) > 0.01f ? 1f : 0f);
                 }
                 else if (stealth)
                 {
@@ -891,7 +894,8 @@ namespace RakeMultiplayer
         {
             if (_climbing)
             {
-                if (Input.GetKeyDown(KeyCode.Space) || !moving)
+                // Space lets go. Releasing the movement keys does NOT: the Rake hangs.
+                if (Input.GetKeyDown(KeyCode.Space))
                 {
                     StopClimbing(false);
                     return;
@@ -906,12 +910,12 @@ namespace RakeMultiplayer
                     _climbNormal = wall.normal;
                     _mantleTimer = 0f;
                 }
-                else if (up && FindWall(-_climbNormal, ClimbKneeHeight, out wall))
+                else if (FindWall(-_climbNormal, ClimbKneeHeight, out wall))
                 {
-                    // Only the lower part still touches the wall, and we are going up:
-                    // this is the top edge, pull the body over it.
+                    // Only the lower part still touches the wall. Going up: this is the
+                    // top edge, pull the body over it. Otherwise just hang here.
                     _climbNormal = wall.normal;
-                    _mantleTimer = 0.45f;
+                    if (up) _mantleTimer = 0.45f;
                 }
                 else
                 {
@@ -937,6 +941,7 @@ namespace RakeMultiplayer
                 }
 
                 float climb = (Input.GetKey(KeyCode.W) ? 1f : 0f) - (Input.GetKey(KeyCode.S) ? 1f : 0f);
+                _climbVertical = climb;
                 _climbMove = Vector3.up * (climb * ClimbSpeed) - _climbNormal * 1.4f;
 
                 float side = (Input.GetKey(KeyCode.D) ? 1f : 0f) - (Input.GetKey(KeyCode.A) ? 1f : 0f);
@@ -944,8 +949,8 @@ namespace RakeMultiplayer
                 return;
             }
 
-            if (!moving || _jumpActive) return;
-            if (_rakeController == null || !_rakeController.isGrounded) return;
+            if (!moving) return;
+            if (_rakeController == null) return;
 
             RaycastHit hit;
             if (!FindWall(direction, ClimbChestHeight, out hit)) return;
@@ -962,8 +967,10 @@ namespace RakeMultiplayer
             _climbNormal = hit.normal;
             _climbMove = Vector3.zero;
             _verticalVelocity = 0f;
+            _climbVertical = 0f;
+            _jumpActive = false; // a grab cancels the leap
 
-            RakeMultiplayerPlugin.Log?.LogInfo("[RakePlay] climbing wall: " + hit.collider.name);
+            RakeMultiplayerPlugin.Log?.LogInfo("[RakePlay] grabbed the wall: " + hit.collider.name);
         }
 
         private void StopClimbing(bool reachedTop)
@@ -973,6 +980,7 @@ namespace RakeMultiplayer
             _climbing = false;
             _mantleTimer = 0f;
             _climbMove = Vector3.zero;
+            _climbVertical = 0f;
             _verticalVelocity = reachedTop ? 2f : 0f;
 
             if (_animator != null) _animator.SetFloat("Speed", 0f);
@@ -1144,7 +1152,7 @@ namespace RakeMultiplayer
 
             _small.normal.textColor = Color.white;
             GUI.Label(new Rect(16f, 36f, 620f, 20f),
-                "WASD move, Shift run, Ctrl sneak (silent), Space leap, W at a wall - climb, V view (" + (_firstPerson ? "1st" : "3rd") + "), mouse look", _small);
+                "WASD move, Shift run, Ctrl sneak (silent), Space leap, W at a wall - climb/hang, V view (" + (_firstPerson ? "1st" : "3rd") + "), mouse look", _small);
             GUI.Label(new Rect(16f, 56f, 620f, 20f),
                 "Cooldowns: player " + Mathf.CeilToInt(_playerCooldown) + "s / animal " +
                 Mathf.CeilToInt(_animalCooldown) + "s / camera " + Mathf.CeilToInt(_cameraCooldown) +
