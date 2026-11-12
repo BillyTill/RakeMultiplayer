@@ -521,33 +521,8 @@ namespace RakeMultiplayer
 
         private void LateUpdate()
         {
-            if (SafetyNet()) return;
-
             _timer += Time.deltaTime;
             if (_timer >= Duration && !_restored) Restore();
-        }
-
-        /// <summary>
-        /// If the ragdoll tunnels through the level (the physics can slip a fast body
-        /// through a mesh collider) it would fall onto whatever is below the map. Cut the
-        /// reaction short instead of dragging the camera down there.
-        /// </summary>
-        private bool SafetyNet()
-        {
-            if (_pelvis == null) return false;
-
-            Vector3 pelvis = _pelvis.position;
-            float drop = _spawnPosition.y - pelvis.y;
-            float horizontal = new Vector2(pelvis.x - _spawnPosition.x, pelvis.z - _spawnPosition.z).magnitude;
-
-            if (drop > 2.5f || horizontal > 6f)
-            {
-                RakeMultiplayerPlugin.Log?.LogWarning("[Ragdoll] body escaped the play area (drop=" +
-                    drop.ToString("F2") + " dist=" + horizontal.ToString("F2") + "), restoring");
-                Restore();
-                return true;
-            }
-            return false;
         }
 
         private void Restore()
