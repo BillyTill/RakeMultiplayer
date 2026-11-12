@@ -227,7 +227,8 @@ namespace RakeMultiplayer.Patches
                 TargetId = 0,
                 Amount = 100,
                 DamageType = "Bullet",
-                ShooterPosition = caster.position
+                ShooterPosition = caster.position,
+                Direction = caster.forward
             };
             manager.ClientSend(packet.Serialize());
             RakeMultiplayerPlugin.Log?.LogInfo($"[3.4] Client sent rifle DamageRequest from {caster.position}");
@@ -302,7 +303,8 @@ namespace RakeMultiplayer.Patches
                 TargetId = 0,
                 Amount = 200,
                 DamageType = "SniperShot",
-                ShooterPosition = caster.position
+                ShooterPosition = caster.position,
+                Direction = caster.forward
             };
             manager.ClientSend(packet.Serialize());
             RakeMultiplayerPlugin.Log?.LogInfo($"[3.4] Client sent sniper DamageRequest from {caster.position}");
@@ -723,9 +725,20 @@ namespace RakeMultiplayer.Patches
     [HarmonyPatch("TakeDamage")]
     public class EnemyTakeDamageAuthorityPatch
     {
+        // Captured before TakeDamage runs: the vanilla death path destroys the object,
+        // so its transform cannot be read afterwards.
+        private static Vector3 _deathPosition;
+        private static Quaternion _deathRotation;
+
         [HarmonyPrefix]
         static bool Prefix(Enemy_AI __instance)
         {
+            if (__instance != null && __instance.transform != null)
+            {
+                _deathPosition = __instance.transform.position;
+                _deathRotation = __instance.transform.rotation;
+            }
+
             if (!RakeMultiplayerPlugin.Enabled.Value) return true;
             if (!RakeMultiplayerPlugin.isConnected) return true; // single-player
             return RakeMultiplayerPlugin.isServer;
@@ -735,17 +748,42 @@ namespace RakeMultiplayer.Patches
         static void Postfix(Enemy_AI __instance)
         {
             if (!RakeMultiplayerPlugin.Enabled.Value) return;
-            if (__instance == null) return;
+            if (ReferenceEquals(__instance, null)) return;
+
+            // A destroyed Unity object can still expose managed fields (Health), so a
+            // value <= 0 means "this hit killed it", even though the body is gone.
+            float health;
+            try { health = __instance.Health; }
+            catch { health = 0f; }
+
+            if (health <= 0f)
+            {
+                RakeMultiplayerPlugin.Log?.LogInfo("[Rake] The Rake is dead (health " + health + ")");
+
+                if (RakeMultiplayerPlugin.isConnected && RakeMultiplayerPlugin.isServer)
+                {
+                    SessionManager.Instance?.UpdateRakeHealth(0f);
+                    RakeNetworkManager.Instance?.BroadcastRakeDied(_deathPosition, _deathRotation);
+                }
+
+                // Vanilla already spawned the dead prefab when it exists. If the level
+                // has none, drop a copy of the body so there is always something to see.
+                if (__instance.deadPrefab == null && __instance.gameObject != null)
+                {
+                    RakeCorpse.Spawn(__instance.gameObject, null, _deathPosition, _deathRotation);
+                }
+
+                UI.RuntimeUIBuilder.ShowRakeDeath();
+                return;
+            }
 
             // A player-controlled Rake cannot attack for a moment after being hit.
             if (RakePlayerController.IsActive) RakePlayerController.NotifyDamageTaken(__instance.transform);
 
-            if (!RakeMultiplayerPlugin.isConnected) return;
-            if (!RakeMultiplayerPlugin.isServer) return;
-
-            if (__instance.Health <= 0f)
+            // Keep the health bar in sync for every damage source (host weapon, traps...).
+            if (RakeMultiplayerPlugin.isConnected && RakeMultiplayerPlugin.isServer)
             {
-                SessionManager.Instance?.UpdateRakeHealth(0f);
+                RakeNetworkManager.Instance?.BroadcastRakeHealth();
             }
         }
     }
@@ -826,6 +864,24 @@ namespace RakeMultiplayer.Patches
     /// on its own. In multiplayer the server's DayNightManager is authoritative, so we
     /// keep the timer text in sync with it and never allow a local timeout load.
     /// </summary>
+    /// <summary>
+    /// The campaign changes levels when the timer runs out (day/night transitions).
+    /// The vanilla flow waits several seconds before LoadLevel, which is exactly the
+    /// window where our animated loader belongs.
+    /// </summary>
+    [HarmonyPatch(typeof(GameTimer))]
+    [HarmonyPatch("loadLevel")]
+    public class GameTimerLoadLevelPatch
+    {
+        static void Prefix()
+        {
+            if (!RakeMultiplayerPlugin.Enabled.Value) return;
+
+            UI.MultiplayerMenu.CloseForLoad();
+            UI.LoadingScreen.Show("THE HUNT CONTINUES", "NEXT HUNT", "The night is changing", false);
+            RakeMultiplayerPlugin.Log?.LogInfo("[UI] Loading screen for the timer level change");
+        }
+    }
     [HarmonyPatch(typeof(GameTimer))]
     [HarmonyPatch("Update")]
     public class GameTimerMultiplayerPatch

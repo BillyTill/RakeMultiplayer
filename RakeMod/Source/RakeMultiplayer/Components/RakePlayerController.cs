@@ -75,6 +75,10 @@ namespace RakeMultiplayer
         private bool _hunterMovementWasEnabled;
         private bool _hunterFpsCameraWasEnabled;
         private bool _hunterInventoryWasEnabled;
+        private GameObject _hunterCanvas;
+        private bool _hunterCanvasWasActive;
+        private Light _hunterFlashlight;
+        private bool _hunterFlashlightWasEnabled;
         private bool _enemyWasEnabled;
         private bool _agentRotationWas = true;
         private bool _agentWasEnabled = true;
@@ -130,9 +134,10 @@ namespace RakeMultiplayer
             {
                 if (IsActive) return;
 
-                if (RakeMultiplayerPlugin.isConnected && !RakeMultiplayerPlugin.isServer)
+                if (RakeMultiplayerPlugin.isConnected &&
+                    LobbyState.RakeOwnerId != LobbyState.LocalPlayerId)
                 {
-                    DebugConsole.Print("rake play: only the host can control the Rake");
+                    DebugConsole.Print("rake play: you are not the Rake in this session");
                     return;
                 }
 
@@ -226,6 +231,7 @@ namespace RakeMultiplayer
             SetupCharacterController();
 
             _rakeAI.SetPlayerControlled(true);
+            if (!RakeMultiplayerPlugin.isServer) _rakeAI.SetLocalOwner(true);
 
             HideHunter();
 
@@ -300,6 +306,24 @@ namespace RakeMultiplayer
             {
                 _hunterFpsWasEnabled = fps.enabled;
                 fps.enabled = false;
+
+                // The hunter's flashlight and weapon must not keep glowing/floating
+                // around the level while its body is hidden.
+                fps.HidePlayerWeapon();
+
+                if (fps.flashlight != null)
+                {
+                    _hunterFlashlight = fps.flashlight;
+                    _hunterFlashlightWasEnabled = fps.flashlight.enabled;
+                    fps.flashlight.enabled = false;
+                }
+
+                if (fps.playerCanvas != null)
+                {
+                    _hunterCanvas = fps.playerCanvas;
+                    _hunterCanvasWasActive = fps.playerCanvas.activeSelf;
+                    fps.playerCanvas.SetActive(false);
+                }
             }
 
             var movement = _hunter.GetComponent<PlayerMovement>();
@@ -377,6 +401,18 @@ namespace RakeMultiplayer
 
             if (_hunterListener != null) _hunterListener.enabled = _hunterListenerWasEnabled;
 
+            if (_hunterFlashlight != null)
+            {
+                _hunterFlashlight.enabled = _hunterFlashlightWasEnabled;
+                _hunterFlashlight = null;
+            }
+
+            if (_hunterCanvas != null)
+            {
+                _hunterCanvas.SetActive(_hunterCanvasWasActive);
+                _hunterCanvas = null;
+            }
+
             if (_hunter != null)
             {
                 var fps = _hunter.GetComponent<FPSController>();
@@ -396,7 +432,11 @@ namespace RakeMultiplayer
 
             if (_enemyAI != null) _enemyAI.enabled = _enemyWasEnabled;
             if (_animator != null) _animator.applyRootMotion = _rootMotionWas;
-            if (_rakeAI != null) _rakeAI.SetPlayerControlled(false);
+            if (_rakeAI != null)
+            {
+                if (!RakeMultiplayerPlugin.isServer) _rakeAI.SetLocalOwner(false);
+                _rakeAI.SetPlayerControlled(false);
+            }
             if (_rakeController != null)
             {
                 if (_rakeControllerAdded) UnityEngine.Object.Destroy(_rakeController);
@@ -782,15 +822,23 @@ namespace RakeMultiplayer
 
             NetworkedPlayer net = victim.GetComponent<NetworkedPlayer>();
             int victimId = net != null ? net.PlayerId : 0;
-            if (victimId > 0)
+
+            if (RakeMultiplayerPlugin.isServer)
             {
-                var grab = new RakeGrabPacket
+                if (victimId > 0)
                 {
-                    PlayerId = victimId,
-                    RakePosition = transform.position,
-                    FocusPosition = focus
-                };
-                RakeNetworkManager.Instance?.ServerBroadcast(grab.Serialize());
+                    var grab = new RakeGrabPacket
+                    {
+                        PlayerId = victimId,
+                        RakePosition = transform.position,
+                        FocusPosition = focus
+                    };
+                    RakeNetworkManager.Instance?.ServerBroadcast(grab.Serialize());
+                }
+            }
+            else
+            {
+                SendAttackRequest(0, victimId, victim.position, focus, 10, "RakeKick");
             }
 
             StartCoroutine(PlayerGrabRoutine(victim));
@@ -801,13 +849,12 @@ namespace RakeMultiplayer
             yield return new WaitForSeconds(1.2f);
 
             // Vanilla grab: kick sound, then the hit and the victim is released.
-            if (_audio != null && _enemyAI != null && _enemyAI.playerAttackKicks != null &&
-                _enemyAI.playerAttackKicks.Length > 0)
+            // A client owner only animates; the server lands the hit and broadcasts.
+            if (RakeMultiplayerPlugin.isServer)
             {
-                _audio.PlayOneShot(_enemyAI.playerAttackKicks[Random.Range(0, _enemyAI.playerAttackKicks.Length)]);
+                RakeNetworkManager.Instance?.BroadcastRakeSound(1, transform.position);
+                if (victim != null && _rakeAI != null) _rakeAI.AttackPlayer(victim, 10, "RakeKick");
             }
-
-            if (victim != null && _rakeAI != null) _rakeAI.AttackPlayer(victim, 10, "RakeKick");
 
             if (_animator != null)
             {
@@ -833,6 +880,11 @@ namespace RakeMultiplayer
                 _animator.SetBool("bAnimalKilling", true);
             }
 
+            if (!RakeMultiplayerPlugin.isServer)
+            {
+                SendAttackRequest(1, 0, animal.position, Vector3.zero, 250, "RakeAnimalKick");
+            }
+
             StartCoroutine(AnimalKillRoutine(animal));
         }
 
@@ -840,8 +892,11 @@ namespace RakeMultiplayer
         {
             yield return new WaitForSeconds(1.8f);
 
-            Animal_AI ai = animal != null ? animal.GetComponent<Animal_AI>() : null;
-            if (ai != null) ai.TakeDamage(250, "RakeAnimalKick");
+            if (RakeMultiplayerPlugin.isServer)
+            {
+                Animal_AI ai = animal != null ? animal.GetComponent<Animal_AI>() : null;
+                if (ai != null) ai.TakeDamage(250, "RakeAnimalKick");
+            }
             if (_animator != null) _animator.SetBool("bAnimalKilling", false);
 
             _actionLocked = false;
@@ -862,6 +917,11 @@ namespace RakeMultiplayer
                 _animator.SetBool("bCameraBreak", true);
             }
 
+            if (!RakeMultiplayerPlugin.isServer)
+            {
+                SendAttackRequest(2, 0, cameraTransform.position, Vector3.zero, 0, "CameraBreak");
+            }
+
             StartCoroutine(CameraBreakRoutine(cameraTransform));
         }
 
@@ -869,8 +929,11 @@ namespace RakeMultiplayer
         {
             yield return new WaitForSeconds(1.6f);
 
-            RecordCamera_obj cam = cameraTransform != null ? cameraTransform.GetComponent<RecordCamera_obj>() : null;
-            if (cam != null) cam.SetUnsetupState();
+            if (RakeMultiplayerPlugin.isServer)
+            {
+                RecordCamera_obj cam = cameraTransform != null ? cameraTransform.GetComponent<RecordCamera_obj>() : null;
+                if (cam != null) cam.SetUnsetupState();
+            }
             if (_animator != null) _animator.SetBool("bCameraBreak", false);
 
             _actionLocked = false;
@@ -1101,6 +1164,28 @@ namespace RakeMultiplayer
                                                DamageAttackLockout + " s");
         }
 
+        /// <summary>A client-owned Rake asks the server to land an attack.</summary>
+        private void SendAttackRequest(byte kind, int targetPlayerId, Vector3 targetPosition,
+                                        Vector3 focusPosition, int amount, string damageType)
+        {
+            var manager = RakeNetworkManager.Instance;
+            if (manager == null) return;
+
+            var packet = new RakeAttackRequestPacket
+            {
+                Kind = kind,
+                TargetPlayerId = targetPlayerId,
+                Amount = amount,
+                DamageType = damageType ?? string.Empty,
+                RakePosition = transform.position,
+                FocusPosition = focusPosition,
+                TargetPosition = targetPosition
+            };
+
+            manager.ClientSend(packet.Serialize());
+            RakeMultiplayerPlugin.Log?.LogInfo("[RakePlay] sent attack request kind=" + kind +
+                                               " target=" + targetPlayerId);
+        }
         private void FaceInstant(Vector3 worldPosition)
         {
             Vector3 dir = worldPosition - transform.position;
@@ -1113,6 +1198,13 @@ namespace RakeMultiplayer
 
         private void PlayAttackRoar()
         {
+            var manager = RakeNetworkManager.Instance;
+            if (manager != null && RakeMultiplayerPlugin.isConnected)
+            {
+                manager.BroadcastRakeSound(0, transform.position);
+                return;
+            }
+
             if (_audio != null && _enemyAI != null && _enemyAI.playerAttackRoars != null &&
                 _enemyAI.playerAttackRoars.Length > 0)
             {

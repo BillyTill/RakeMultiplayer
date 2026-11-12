@@ -59,6 +59,11 @@ namespace RakeMultiplayer.Networking
                     PacketType.DoorAction => new DoorActionPacket(),
                     PacketType.LobbyRole => new LobbyRolePacket(),
                     PacketType.RakeGrab => new RakeGrabPacket(),
+                    PacketType.RakeOwner => new RakeOwnerPacket(),
+                    PacketType.RakeRoleRequest => new RakeRoleRequestPacket(),
+                    PacketType.RakeAttackRequest => new RakeAttackRequestPacket(),
+                    PacketType.RakeSound => new RakeSoundPacket(),
+                    PacketType.RakeDied => new RakeDiedPacket(),
                     _ => throw new InvalidOperationException($"Unknown packet type: {type} (byte value: {(byte)type})")
                 };
                 packet.Read(reader);

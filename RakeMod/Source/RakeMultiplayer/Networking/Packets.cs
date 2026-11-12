@@ -262,6 +262,102 @@ namespace RakeMultiplayer.Networking
     }
 
 
+
+    /// <summary>Server -> all: which peer drives the Rake (0 = AI, 1 = host, N = client id).</summary>
+    public class RakeOwnerPacket : NetworkPacket
+    {
+        public override PacketType Type => PacketType.RakeOwner;
+        public int OwnerId;
+
+        public override void Write(BinaryWriter writer) { writer.Write(OwnerId); }
+        public override void Read(BinaryReader reader) { OwnerId = reader.ReadInt32(); }
+    }
+
+    /// <summary>Client -> server: take or release the Rake slot.</summary>
+    public class RakeRoleRequestPacket : NetworkPacket
+    {
+        public override PacketType Type => PacketType.RakeRoleRequest;
+        public bool TakeRole;
+
+        public override void Write(BinaryWriter writer) { writer.Write(TakeRole); }
+        public override void Read(BinaryReader reader) { TakeRole = reader.ReadBoolean(); }
+    }
+
+    /// <summary>A client-owned Rake attacks: the server validates it and applies the effect.</summary>
+    public class RakeAttackRequestPacket : NetworkPacket
+    {
+        public override PacketType Type => PacketType.RakeAttackRequest;
+
+        public byte Kind; // 0 player, 1 animal, 2 camera
+        public int TargetPlayerId;
+        public int Amount;
+        public string DamageType;
+        public Vector3 RakePosition;
+        public Vector3 FocusPosition;
+        public Vector3 TargetPosition;
+
+        public override void Write(BinaryWriter writer)
+        {
+            writer.Write(Kind);
+            writer.Write(TargetPlayerId);
+            writer.Write(Amount);
+            writer.Write(DamageType ?? string.Empty);
+            writer.Write(RakePosition.x); writer.Write(RakePosition.y); writer.Write(RakePosition.z);
+            writer.Write(FocusPosition.x); writer.Write(FocusPosition.y); writer.Write(FocusPosition.z);
+            writer.Write(TargetPosition.x); writer.Write(TargetPosition.y); writer.Write(TargetPosition.z);
+        }
+
+        public override void Read(BinaryReader reader)
+        {
+            Kind = reader.ReadByte();
+            TargetPlayerId = reader.ReadInt32();
+            Amount = reader.ReadInt32();
+            DamageType = reader.ReadString();
+            RakePosition = new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
+            FocusPosition = new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
+            TargetPosition = new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
+        }
+    }
+
+    /// <summary>All peers: play a Rake attack sound at a position (0 roar, 1 kick).</summary>
+    public class RakeSoundPacket : NetworkPacket
+    {
+        public override PacketType Type => PacketType.RakeSound;
+        public byte Sound;
+        public Vector3 Position;
+
+        public override void Write(BinaryWriter writer)
+        {
+            writer.Write(Sound);
+            writer.Write(Position.x); writer.Write(Position.y); writer.Write(Position.z);
+        }
+
+        public override void Read(BinaryReader reader)
+        {
+            Sound = reader.ReadByte();
+            Position = new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
+        }
+    }
+
+    /// <summary>Server -> all: the Rake died here, spawn the corpse on every peer.</summary>
+    public class RakeDiedPacket : NetworkPacket
+    {
+        public override PacketType Type => PacketType.RakeDied;
+        public Vector3 Position;
+        public Quaternion Rotation;
+
+        public override void Write(BinaryWriter writer)
+        {
+            writer.Write(Position.x); writer.Write(Position.y); writer.Write(Position.z);
+            writer.Write(Rotation.x); writer.Write(Rotation.y); writer.Write(Rotation.z); writer.Write(Rotation.w);
+        }
+
+        public override void Read(BinaryReader reader)
+        {
+            Position = new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
+            Rotation = new Quaternion(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
+        }
+    }
     public class PlayerConnectedPacket : NetworkPacket
     {
         public override PacketType Type => PacketType.PlayerConnected;
@@ -321,6 +417,7 @@ namespace RakeMultiplayer.Networking
         public int Amount;
         public string DamageType;
         public Vector3 ShooterPosition; // Position of shooter for AI reaction (danger state)
+        public Vector3 Direction;        // Aim direction, used to validate client hits
 
         public override void Write(BinaryWriter writer)
         {
@@ -331,6 +428,9 @@ namespace RakeMultiplayer.Networking
             writer.Write(ShooterPosition.x);
             writer.Write(ShooterPosition.y);
             writer.Write(ShooterPosition.z);
+            writer.Write(Direction.x);
+            writer.Write(Direction.y);
+            writer.Write(Direction.z);
         }
 
         public override void Read(BinaryReader reader)
@@ -340,6 +440,7 @@ namespace RakeMultiplayer.Networking
             Amount = reader.ReadInt32();
             DamageType = reader.ReadString();
             ShooterPosition = new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
+            Direction = new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
         }
     }
 

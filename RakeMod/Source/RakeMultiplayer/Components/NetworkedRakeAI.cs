@@ -155,6 +155,8 @@ namespace RakeMultiplayer
 
         private bool _initialized = false;
         private bool _playerControlled;
+        private bool _localOwner;
+        private bool _remoteOwner;
         private bool _daySpawnChecked;
         private float _lastDayWarp;
         private bool _loggedHealthWarning = false;
@@ -239,6 +241,17 @@ namespace RakeMultiplayer
             {
                 if (_clientFrozeSimulation) RestoreServerSimulation();
 
+                if (_remoteOwner)
+                {
+                    // A client drives the Rake: mirror its snapshots, never run the AI.
+                    float t = 1f - Mathf.Exp(-interpolationSpeed * Time.deltaTime);
+                    if (hasTargetPosition) transform.position = Vector3.Lerp(transform.position, targetPosition, t);
+                    if (hasTargetRotation) transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, t);
+                    UpdateClientAnimation();
+                    UpdateClientAudio();
+                    return;
+                }
+
                 UpdateDaySpawn();
 
                 if (!RakeMultiplayerPlugin.isConnected) return;
@@ -281,8 +294,22 @@ namespace RakeMultiplayer
                     EnforceClientAuthority();
                 }
 
-                // Client: interpolate to target values
                 if (!RakeMultiplayerPlugin.isConnected) return;
+
+                if (_localOwner)
+                {
+                    // This client owns the Rake: publish the local body instead of
+                    // interpolating towards the server's copy.
+                    sendTimer += Time.deltaTime;
+                    if (sendTimer >= syncRate)
+                    {
+                        SendRakeState();
+                        sendTimer = 0f;
+                    }
+                    return;
+                }
+
+                // Client: interpolate to target values
 
                 float t = 1f - Mathf.Exp(-interpolationSpeed * Time.deltaTime);
                 if (hasTargetPosition)
@@ -301,6 +328,69 @@ namespace RakeMultiplayer
 
         /// <summary>True while a human is driving the Rake instead of the AI.</summary>
         public bool IsPlayerControlled { get { return _playerControlled; } }
+
+        /// <summary>This peer drives the Rake and publishes its state to the server.</summary>
+        public bool IsLocalOwner { get { return _localOwner; } }
+
+        public float CurrentHealth { get { return GetCurrentHealth(); } }
+
+        public float MaxHealth
+        {
+            get
+            {
+                float max = GetMaxHealth();
+                float hp = GetCurrentHealth();
+                if (max <= 0f || max < hp) max = Mathf.Max(hp, 2500f);
+                return max;
+            }
+        }
+
+        public void SetLocalOwner(bool value)
+        {
+            if (_localOwner == value) return;
+            _localOwner = value;
+            if (value)
+            {
+                hasTargetPosition = false;
+                hasTargetRotation = false;
+                hasAnimState = false;
+            }
+            RakeMultiplayerPlugin.Log?.LogInfo("[RakeControl] local owner=" + value);
+        }
+
+        /// <summary>Server: the Rake is driven by a client, so mirror its snapshots.</summary>
+        public void SetRemoteOwner(bool value)
+        {
+            if (_remoteOwner == value) return;
+            _remoteOwner = value;
+            if (value)
+            {
+                sendTimer = 0f;
+                hasTargetPosition = false;
+                hasTargetRotation = false;
+            }
+            RakeMultiplayerPlugin.Log?.LogInfo("[RakeControl] remote owner=" + value);
+        }
+
+        /// <summary>Server: apply a snapshot from the owning client.</summary>
+        public void ApplyOwnerSnapshot(Vector3 position, Quaternion rotation, byte animFlags,
+                                       byte walkType, float animSpeed)
+        {
+            if (!hasTargetPosition || Vector3.Distance(transform.position, position) > snapDistance)
+            {
+                transform.position = position;
+                transform.rotation = rotation;
+            }
+
+            targetPosition = position;
+            targetRotation = rotation;
+            hasTargetPosition = true;
+            hasTargetRotation = true;
+            targetAnimFlags = animFlags;
+            targetWalkType = walkType;
+            targetAnimSpeed = animSpeed;
+            hasAnimState = true;
+        }
 
         public void SetPlayerControlled(bool value)
         {
@@ -1588,11 +1678,12 @@ namespace RakeMultiplayer
 
             var data = packet.Serialize();
 
-            // Broadcast to all clients
+            // Server broadcasts; a client owner sends its state up to the server.
             var manager = RakeNetworkManager.Instance;
             if (manager != null)
             {
-                manager.ServerBroadcast(data);
+                if (RakeMultiplayerPlugin.isServer) manager.ServerBroadcast(data);
+                else if (_localOwner) manager.ClientSend(data);
             }
 
             lastSentPosition = currentPos;
@@ -1655,6 +1746,7 @@ namespace RakeMultiplayer
                                   byte animFlags, byte walkType, float animSpeed)
         {
             if (RakeMultiplayerPlugin.isServer) return; // Don't apply on server
+            if (_localOwner) return; // our own body is authoritative on this peer
 
             // Set interpolation targets instead of direct assignment
             if (!hasTargetPosition || Vector3.Distance(transform.position, position) > snapDistance)

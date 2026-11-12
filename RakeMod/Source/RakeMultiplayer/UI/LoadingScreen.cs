@@ -145,6 +145,9 @@ namespace RakeMultiplayer.UI
 
         private void ShowInternal(string title, string subtitle, string status, bool indeterminate)
         {
+            // A level is about to load: the menu must never stay over the loader.
+            UI.MultiplayerMenu.CloseForLoad();
+
             _title.text = string.IsNullOrEmpty(title) ? "LOADING" : title.ToUpperInvariant();
             _subtitle.text = string.IsNullOrEmpty(subtitle) ? "" : subtitle.ToUpperInvariant();
             _statusBase = string.IsNullOrEmpty(status) ? "" : status;

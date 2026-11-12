@@ -68,14 +68,8 @@ namespace RakeMultiplayer
                 manager.PrepareForSceneLoad();
                 RegisterSceneObjects(manager);
 
-                if (RakeMultiplayerPlugin.isServer && LobbyState.HostIsRake)
-                {
-                    RakePlayerController.SetEnabled(true);
-                }
-                else if (RakePlayerController.IsActive)
-                {
-                    RakePlayerController.SetEnabled(false);
-                }
+                // Any player may own the Rake: host, client or the AI.
+                RakeControlSync.Apply("scene loaded");
 
                 // Restore persisted cameras/traps for the new scene
                 if (RakeMultiplayerPlugin.isServer)
@@ -86,6 +80,7 @@ namespace RakeMultiplayer
                 if (RakeMultiplayerPlugin.isServer)
                 {
                     manager.UpdateHostPosition(__instance.transform.position);
+                    manager.BroadcastRakeHealth();
                 }
 
                 // Recreate remote player proxies for the new scene

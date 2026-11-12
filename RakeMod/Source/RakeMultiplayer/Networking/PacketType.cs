@@ -47,5 +47,10 @@ namespace RakeMultiplayer.Networking
         DoorAction = 38,
         LobbyRole = 39,
         RakeGrab = 40,
+        RakeOwner = 41,
+        RakeRoleRequest = 42,
+        RakeAttackRequest = 43,
+        RakeSound = 44,
+        RakeDied = 45,
     }
 }

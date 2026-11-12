@@ -114,3 +114,6 @@ RakePlayerSkin.png
 # Project files that must be in the repository
 !RakeMod/Source/RakeMultiplayer/RakeMultiplayer.csproj
 !RakeMod/BepInEx.zip
+
+# Release checksum generated next to the installer
+RakeMultiplayerSetup.exe.sha256

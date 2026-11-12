@@ -47,6 +47,16 @@ namespace RakeMultiplayer.UI
         private Text _rakeRoleButtonText;
         private Text _lobbyHintText;
         private Button _rakeRoleButton;
+        private Button _startGameButton;
+        private Text _waitingText;
+        private GameObject _rakeHpPanel;
+        private Image _rakeHpFill;
+        private Text _rakeHpLabel;
+        private Text _deathText;
+        private float _deathTimer;
+
+        /// <summary>The one UI builder that lives for the whole session.</summary>
+        public static RuntimeUIBuilder Instance { get; private set; }
 
         private Transform _playerListContainer;
 
@@ -61,9 +71,12 @@ namespace RakeMultiplayer.UI
         public void Initialize(MultiplayerMenu menu)
         {
             _menu = menu;
+            Instance = this;
             _networkManager = UnityEngine.Object.FindObjectOfType<RakeNetworkManager>();
             BuildUI();
             BuildHUD();
+            BuildRakeHealthBar();
+            BuildDeathBanner();
             BuildMapUI();
             RakeMultiplayerPlugin.Log?.LogInfo("[UI] RuntimeUIBuilder initialized. Canvas created.");
             menu.OnUIBuilt(this);
@@ -211,8 +224,11 @@ namespace RakeMultiplayer.UI
             _rakeRoleButtonText = _rakeRoleButton.GetComponentInChildren<Text>();
 
             // ---- actions ----
-            CreateButton(_lobbyPanel.transform, "StartGameBtn", "START GAME", new Vector2(220, 48), new Vector2(-118, -168), OnStartGameClicked);
+            _startGameButton = CreateButton(_lobbyPanel.transform, "StartGameBtn", "START GAME", new Vector2(220, 48), new Vector2(-118, -168), OnStartGameClicked);
             CreateButton(_lobbyPanel.transform, "LeaveLobbyBtn", "LEAVE LOBBY", new Vector2(220, 48), new Vector2(118, -168), OnLeaveLobbyClicked, ColPanelLight);
+            _waitingText = CreateText(_lobbyPanel.transform, "WaitingText", "WAITING FOR THE HOST...", 12,
+                new Vector2(-118, -168), ColMuted, TextAnchor.MiddleCenter, 220f);
+            _waitingText.gameObject.SetActive(false);
             CreateButton(_lobbyPanel.transform, "CopyIPBtn", "COPY MY IP", new Vector2(460, 38), new Vector2(0, -222), OnCopyIPClicked, ColPanelLight);
 
             _lobbyHintText = CreateText(_lobbyPanel.transform, "LobbyHint",
@@ -498,31 +514,147 @@ namespace RakeMultiplayer.UI
 
         public Canvas Canvas { get { return _canvas; } }
 
-        public void SetLobbyRole(bool isHost, bool hostIsRake)
+        public void SetLobbyRole(bool isHost, int rakeOwnerId, bool localIsOwner)
         {
+            if (_startGameButton != null) _startGameButton.gameObject.SetActive(isHost);
+            if (_waitingText != null) _waitingText.gameObject.SetActive(!isHost);
+
             if (_rakeRoleButton != null)
             {
-                _rakeRoleButton.gameObject.SetActive(isHost);
+                // Any player may claim the single Rake slot.
+                _rakeRoleButton.gameObject.SetActive(true);
                 if (_rakeRoleButtonText != null)
                 {
-                    _rakeRoleButtonText.text = hostIsRake ? "RETURN TO HUNTERS" : "BECOME THE RAKE";
+                    _rakeRoleButtonText.text = localIsOwner ? "RETURN TO HUNTERS" : "BECOME THE RAKE";
                 }
             }
 
             if (_rakeSlotText != null)
             {
-                _rakeSlotText.text = hostIsRake ? "HOST" : "-";
-                _rakeSlotText.color = hostIsRake ? ColAccent : ColMuted;
+                if (rakeOwnerId <= 0)
+                {
+                    _rakeSlotText.text = "-";
+                    _rakeSlotText.color = ColMuted;
+                }
+                else if (rakeOwnerId == 1)
+                {
+                    _rakeSlotText.text = "HOST";
+                    _rakeSlotText.color = ColAccent;
+                }
+                else
+                {
+                    _rakeSlotText.text = "PLAYER " + rakeOwnerId;
+                    _rakeSlotText.color = ColAccent;
+                }
             }
 
             if (_lobbyHintText != null)
             {
-                _lobbyHintText.text = isHost
-                    ? (hostIsRake
-                        ? "You are the Rake. No attacks during the day - hunt at night."
-                        : "Only one Rake per session. Press BECOME THE RAKE to play as it.")
-                    : "Only one Rake per session. It cannot attack during the day.";
+                if (localIsOwner)
+                {
+                    _lobbyHintText.text = "You are the Rake. No attacks during the day - hunt at night.";
+                }
+                else if (rakeOwnerId > 0)
+                {
+                    _lobbyHintText.text = "The Rake slot is taken. Press BECOME THE RAKE to take it over.";
+                }
+                else
+                {
+                    _lobbyHintText.text = "Only one Rake per session. Press BECOME THE RAKE to play as it.";
+                }
             }
+        }
+
+        /// <summary>Big red announcement when the Rake dies.</summary>
+        public void ShowRakeDeathBanner()
+        {
+            if (_deathText == null) return;
+            _deathText.gameObject.SetActive(true);
+            _deathTimer = 6f;
+        }
+
+        public void UpdateRakeHealth(float health, float max)
+        {
+            if (_rakeHpPanel == null || _rakeHpFill == null) return;
+
+            if (max <= 0f || health <= 0f)
+            {
+                _rakeHpPanel.SetActive(false);
+                return;
+            }
+
+            _rakeHpPanel.SetActive(true);
+            float ratio = Mathf.Clamp01(health / max);
+            var rt = _rakeHpFill.rectTransform;
+            rt.sizeDelta = new Vector2(460f * ratio, 0f);
+
+            _rakeHpFill.color = ratio > 0.5f
+                ? ColAccent
+                : (ratio > 0.2f ? new Color(0.85f, 0.45f, 0.12f, 1f) : new Color(0.90f, 0.20f, 0.15f, 1f));
+
+            if (_rakeHpLabel != null)
+            {
+                _rakeHpLabel.text = "THE RAKE   " + Mathf.CeilToInt(health) + " / " + Mathf.CeilToInt(max);
+            }
+        }
+
+        public void HideRakeHealth()
+        {
+            if (_rakeHpPanel != null) _rakeHpPanel.SetActive(false);
+        }
+
+        private void BuildRakeHealthBar()
+        {
+            if (_canvas == null) return;
+
+            _rakeHpPanel = CreatePanel(_canvas.transform, "RakeHealthPanel", new Vector2(460, 40),
+                new Vector2(0f, -122f), new Vector2(0.5f, 1f), new Vector2(0.5f, 1f));
+            _rakeHpPanel.GetComponent<Image>().color = new Color(0f, 0f, 0f, 0f);
+
+            _rakeHpLabel = CreateText(_rakeHpPanel.transform, "RakeName", "THE RAKE", 12,
+                new Vector2(0f, 10f), ColAccent, TextAnchor.MiddleCenter, 460f);
+
+            var track = CreatePanel(_rakeHpPanel.transform, "RakeHpTrack", new Vector2(460, 10),
+                new Vector2(0f, -8f), new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f));
+            track.GetComponent<Image>().color = new Color(0.10f, 0.09f, 0.10f, 0.95f);
+
+            var fillObj = new GameObject("RakeHpFill", typeof(RectTransform), typeof(Image));
+            fillObj.transform.SetParent(track.transform, false);
+            var frt = fillObj.GetComponent<RectTransform>();
+            frt.anchorMin = new Vector2(0f, 0f);
+            frt.anchorMax = new Vector2(0f, 1f);
+            frt.pivot = new Vector2(0f, 0.5f);
+            frt.anchoredPosition = Vector2.zero;
+            frt.sizeDelta = new Vector2(460f, 0f);
+            _rakeHpFill = fillObj.GetComponent<Image>();
+            _rakeHpFill.color = ColAccent;
+
+            _rakeHpPanel.SetActive(false);
+        }
+
+        private void BuildDeathBanner()
+        {
+            if (_canvas == null) return;
+
+            _deathText = CreateText(_canvas.transform, "RakeDeathBanner", "THE RAKE IS DEAD", 46,
+                new Vector2(0f, 120f), new Color(0.90f, 0.15f, 0.12f, 1f), TextAnchor.MiddleCenter, 1200f);
+            _deathText.fontStyle = FontStyle.Bold;
+            _deathText.gameObject.SetActive(false);
+        }
+
+        private void Update()
+        {
+            if (_deathTimer <= 0f) return;
+
+            _deathTimer -= Time.unscaledDeltaTime;
+            if (_deathTimer > 0f) return;
+
+            if (_deathText != null) _deathText.gameObject.SetActive(false);
+        }
+
+        public static void ShowRakeDeath()
+        {
+            if (Instance != null) Instance.ShowRakeDeathBanner();
         }
 
         public void SetHUDVisible(bool visible)

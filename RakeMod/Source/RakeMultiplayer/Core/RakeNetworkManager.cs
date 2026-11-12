@@ -375,7 +375,7 @@ namespace RakeMultiplayer
                     IsYou = false
                 };
                 _server.Send(connectionId, hostPacket.Serialize());
-            _server.Send(connectionId, new LobbyRolePacket { HostIsRake = LobbyState.HostIsRake }.Serialize());
+            _server.Send(connectionId, new RakeOwnerPacket { OwnerId = LobbyState.RakeOwnerId }.Serialize());
                 RakeMultiplayerPlugin.Log?.LogInfo($"[Net] Sent Host info to C{connectionId}: pos={hostPos}");
 
                 // 1. Send existing CLIENTS to the NEW client (use assignedPlayerId = existingId + 1)
@@ -487,6 +487,18 @@ namespace RakeMultiplayer
                     case PacketType.FireVisuals:
                         HandleServerFireVisuals(connectionId, (FireVisualsPacket)packet);
                         break;
+                    case PacketType.RakeState:
+                        HandleServerRakeState(connectionId, (RakeStatePacket)packet);
+                        break;
+                    case PacketType.RakeRoleRequest:
+                        HandleServerRakeRoleRequest(connectionId, (RakeRoleRequestPacket)packet);
+                        break;
+                    case PacketType.RakeAttackRequest:
+                        HandleServerRakeAttackRequest(connectionId, (RakeAttackRequestPacket)packet);
+                        break;
+                    case PacketType.RakeSound:
+                        HandleServerRakeSound(connectionId, (RakeSoundPacket)packet);
+                        break;
                     case PacketType.ItemPickup:
                         HandleServerItemPickup(connectionId, (ItemPickupPacket)packet, data);
                         break;
@@ -583,6 +595,16 @@ namespace RakeMultiplayer
                 return;
             }
 
+            // A client's misses must not damage the Rake (or trigger its attack lockout):
+            // validate aim direction, range and line of sight first.
+            if (!ValidateClientShot(packet, _cachedEnemyAI))
+            {
+                RakeMultiplayerPlugin.Log?.LogInfo("[3.4] Client shot missed the Rake: " +
+                                                   "from " + packet.ShooterPosition.ToString("F1") +
+                                                   " dir " + packet.Direction.ToString("F2"));
+                return;
+            }
+
             // Apply damage via reflection (TakeDamage method or health field)
             float newHealth = ApplyDamageToEnemy(_cachedEnemyAI, packet.Amount, packet.DamageType, packet.ShooterPosition);
 
@@ -624,8 +646,100 @@ namespace RakeMultiplayer
             ServerBroadcast(appliedPacket.Serialize());
         }
 
+        /// <summary>
+        /// Server-side hit validation for a client's shot. The client sends its aim
+        /// direction; the hit is accepted only when the Rake is in front of the muzzle,
+        /// within weapon range, and not behind a wall.
+        /// </summary>
+        private static bool ValidateClientShot(DamageRequestPacket packet, Enemy_AI enemy)
+        {
+            if (enemy == null) return false;
+
+            Vector3 origin = packet.ShooterPosition;
+            Vector3 target = enemy.transform.position + Vector3.up * 1.2f;
+            Vector3 toTarget = target - origin;
+            float distance = toTarget.magnitude;
+
+            bool sniper = string.Equals(packet.DamageType, "SniperShot",
+                                        System.StringComparison.OrdinalIgnoreCase);
+
+            float maxRange = sniper ? 600f : 300f;
+            float maxAngle = sniper ? 3.5f : 8f;
+
+            if (distance < 0.5f || distance > maxRange) return false;
+
+            Vector3 aim = packet.Direction;
+            if (aim.sqrMagnitude < 0.001f) aim = toTarget;
+            aim.Normalize();
+
+            // Sanity angle, then a real capsule test against the body: aiming at the
+            // head or legs of a distant Rake must still count, while a clear miss must not.
+            if (Vector3.Angle(aim, toTarget) > 25f) return false;
+            if (!RayHitsRake(origin, aim, enemy.transform.position)) return false;
+
+            // A solid object between the muzzle and the Rake blocks the shot.
+            RaycastHit hit;
+            if (Physics.Linecast(origin, target, out hit))
+            {
+                if (hit.collider == null) return false;
+                if (!hit.collider.transform.IsChildOf(enemy.transform)) return false;
+            }
+
+            return true;
+        }
+        /// <summary>Does the shot ray pass through the Rake's body capsule?</summary>
+        private static bool RayHitsRake(Vector3 origin, Vector3 direction, Vector3 basePosition)
+        {
+            Vector3 a = basePosition + Vector3.up * 0.25f;
+            Vector3 b = basePosition + Vector3.up * 2.2f;
+            Vector3 ab = b - a;
+            Vector3 w0 = origin - a;
+
+            float aa = Vector3.Dot(direction, direction);
+            float bb = Vector3.Dot(direction, ab);
+            float cc = Vector3.Dot(ab, ab);
+            float dd = Vector3.Dot(direction, w0);
+            float ee = Vector3.Dot(ab, w0);
+
+            float denom = aa * cc - bb * bb;
+            float s, t;
+
+            if (Mathf.Abs(denom) < 0.0001f)
+            {
+                s = 0f;
+                t = cc > 0.0001f ? Mathf.Clamp01(ee / cc) : 0f;
+            }
+            else
+            {
+                s = (bb * ee - cc * dd) / denom;
+                t = (aa * ee - bb * dd) / denom;
+            }
+
+            if (s < 0f)
+            {
+                s = 0f;
+                t = cc > 0.0001f ? Mathf.Clamp01(ee / cc) : 0f;
+            }
+            if (t < 0f)
+            {
+                t = 0f;
+                s = aa > 0.0001f ? Mathf.Max(0f, -dd / aa) : 0f;
+            }
+            else if (t > 1f)
+            {
+                t = 1f;
+                s = aa > 0.0001f ? Mathf.Max(0f, (bb - dd) / aa) : 0f;
+            }
+
+            Vector3 pointRay = origin + direction * s;
+            Vector3 pointBody = a + ab * Mathf.Clamp01(t);
+
+            return Vector3.Distance(pointRay, pointBody) <= 0.7f;
+        }
         private float ApplyDamageToEnemy(Enemy_AI enemyAI, int amount, string damageType, Vector3 shooterPosition)
         {
+            if (enemyAI == null) return 0f;
+
             try
             {
                 // Calculate damage reduction if NetworkedRakeAI is present
@@ -1339,6 +1453,15 @@ namespace RakeMultiplayer
                     case PacketType.RakeGrab:
                         HandleClientRakeGrab((RakeGrabPacket)packet);
                         break;
+                    case PacketType.RakeOwner:
+                        HandleClientRakeOwner((RakeOwnerPacket)packet);
+                        break;
+                    case PacketType.RakeSound:
+                        HandleClientRakeSound((RakeSoundPacket)packet);
+                        break;
+                    case PacketType.RakeDied:
+                        HandleClientRakeDied((RakeDiedPacket)packet);
+                        break;
                     case PacketType.FireVisuals:
                         HandleClientFireVisuals((FireVisualsPacket)packet);
                         break;
@@ -1401,6 +1524,308 @@ namespace RakeMultiplayer
             }
         }
 
+        // ===================== Rake ownership (any player can be the Rake) =====================
+
+        public void SetRakeOwner(int ownerId)
+        {
+            if (!RakeMultiplayerPlugin.isServer) return;
+
+            int clamped = Mathf.Max(0, ownerId);
+            if (LobbyState.RakeOwnerId == clamped) return;
+
+            LobbyState.RakeOwnerId = clamped;
+            RakeMultiplayerPlugin.Log?.LogInfo("[Lobby] Rake owner set to P" + clamped);
+            ServerBroadcast(new RakeOwnerPacket { OwnerId = clamped }.Serialize());
+            RakeControlSync.Apply("host changed the Rake owner");
+        }
+
+        private void HandleServerRakeRoleRequest(int connectionId, RakeRoleRequestPacket packet)
+        {
+            int playerId = connectionId + 1;
+            if (packet.TakeRole) SetRakeOwner(playerId);
+            else if (LobbyState.RakeOwnerId == playerId) SetRakeOwner(0);
+        }
+
+        private void HandleClientRakeOwner(RakeOwnerPacket packet)
+        {
+            int previous = LobbyState.RakeOwnerId;
+            LobbyState.RakeOwnerId = packet.OwnerId;
+
+            if (previous != packet.OwnerId)
+            {
+                RakeMultiplayerPlugin.Log?.LogInfo("[Lobby] Rake owner is now P" + packet.OwnerId +
+                                                   " (local P" + LobbyState.LocalPlayerId + ")");
+            }
+
+            RakeControlSync.Apply("owner packet");
+        }
+
+        /// <summary>Server: the owning client published its Rake body. Mirror it and relay.</summary>
+        private void HandleServerRakeState(int connectionId, RakeStatePacket packet)
+        {
+            if (connectionId + 1 != LobbyState.RakeOwnerId) return;
+
+            var rake = _cachedRake != null ? _cachedRake : UnityEngine.Object.FindObjectOfType<NetworkedRakeAI>();
+            if (rake == null) return;
+
+            rake.ApplyOwnerSnapshot(packet.Position, packet.Rotation,
+                                    packet.AnimFlags, packet.WalkType, packet.AnimSpeed);
+
+            byte[] data = packet.Serialize();
+            foreach (var connId in _connectedClients)
+            {
+                if (connId == connectionId) continue;
+                _server.Send(connId, data);
+            }
+        }
+
+        /// <summary>Server: validate and land an attack from the owning client.</summary>
+        private void HandleServerRakeAttackRequest(int connectionId, RakeAttackRequestPacket packet)
+        {
+            if (connectionId + 1 != LobbyState.RakeOwnerId)
+            {
+                RakeMultiplayerPlugin.Log?.LogWarning("[RakePlay] attack request from a non-owner ignored (C" +
+                                                      connectionId + ")");
+                return;
+            }
+
+            var rake = RakeHighlight.FindRake();
+            if (rake == null) return;
+            Vector3 rakePos = rake.position;
+
+            if (packet.Kind == 0)
+            {
+                Transform target = FindPlayerTransform(packet.TargetPlayerId);
+                if (target == null) return;
+                if (Vector3.Distance(target.position, rakePos) > 6f)
+                {
+                    RakeMultiplayerPlugin.Log?.LogWarning("[RakePlay] rejected grab: target out of reach");
+                    return;
+                }
+
+                Vector3 focus = packet.FocusPosition != Vector3.zero
+                    ? packet.FocusPosition
+                    : rakePos + Vector3.up * 1.6f;
+
+                ServerBroadcast(new RakeGrabPacket
+                {
+                    PlayerId = packet.TargetPlayerId,
+                    RakePosition = rakePos,
+                    FocusPosition = focus
+                }.Serialize());
+
+                BroadcastRakeSound(0, rakePos);
+                StartCoroutine(ServerRakePlayerHit(packet.TargetPlayerId,
+                                                  packet.Amount > 0 ? packet.Amount : 10,
+                                                  string.IsNullOrEmpty(packet.DamageType) ? "RakeKick" : packet.DamageType,
+                                                  rakePos));
+            }
+            else if (packet.Kind == 1)
+            {
+                Animal_AI animal = FindAnimalNear(packet.TargetPosition, 3.5f);
+                if (animal == null) return;
+                StartCoroutine(ServerRakeAnimalKill(animal, rakePos));
+            }
+            else
+            {
+                RecordCamera_obj cam = FindCameraNear(packet.TargetPosition, 3.5f);
+                if (cam == null) return;
+                StartCoroutine(ServerRakeCameraBreak(cam, rakePos));
+            }
+        }
+
+        private IEnumerator ServerRakePlayerHit(int targetId, int amount, string damageType, Vector3 rakePos)
+        {
+            yield return new WaitForSeconds(1.2f);
+
+            Transform target = FindPlayerTransform(targetId);
+            if (target == null) yield break;
+            if (Vector3.Distance(target.position, rakePos) > 8f) yield break;
+
+            var rakeAI = _cachedRake != null ? _cachedRake : UnityEngine.Object.FindObjectOfType<NetworkedRakeAI>();
+            if (rakeAI == null) yield break;
+
+            rakeAI.AttackPlayer(target, amount, damageType);
+            BroadcastRakeSound(1, rakeAI.transform.position);
+        }
+
+        private IEnumerator ServerRakeAnimalKill(Animal_AI animal, Vector3 rakePos)
+        {
+            yield return new WaitForSeconds(1.8f);
+
+            if (animal == null || !animal.isAlive) yield break;
+            if (Vector3.Distance(animal.transform.position, rakePos) > 8f) yield break;
+
+            animal.TakeDamage(250, "RakeAnimalKick");
+        }
+
+        private IEnumerator ServerRakeCameraBreak(RecordCamera_obj cam, Vector3 rakePos)
+        {
+            yield return new WaitForSeconds(1.6f);
+
+            if (cam == null) yield break;
+            if (Vector3.Distance(cam.transform.position, rakePos) > 8f) yield break;
+
+            cam.SetUnsetupState();
+        }
+
+        private static Transform FindPlayerTransform(int playerId)
+        {
+            var spawner = PlayerSpawner.Instance;
+            if (spawner == null) return null;
+
+            if (spawner.LocalPlayer != null && spawner.LocalPlayer.PlayerId == playerId)
+            {
+                return spawner.LocalPlayer.transform;
+            }
+
+            NetworkedPlayer remote;
+            if (spawner.TryGetRemotePlayer(playerId, out remote) && remote != null)
+            {
+                return remote.transform;
+            }
+
+            return null;
+        }
+
+        private static Animal_AI FindAnimalNear(Vector3 position, float radius)
+        {
+            Animal_AI best = null;
+            float bestDistance = radius;
+
+            var animals = UnityEngine.Object.FindObjectsOfType<Animal_AI>();
+            for (int i = 0; i < animals.Length; i++)
+            {
+                var animal = animals[i];
+                if (animal == null || !animal.isAlive) continue;
+                float d = Vector3.Distance(animal.transform.position, position);
+                if (d >= bestDistance) continue;
+                bestDistance = d;
+                best = animal;
+            }
+
+            return best;
+        }
+
+        private static RecordCamera_obj FindCameraNear(Vector3 position, float radius)
+        {
+            RecordCamera_obj best = null;
+            float bestDistance = radius;
+
+            var cameras = UnityEngine.Object.FindObjectsOfType<RecordCamera_obj>();
+            for (int i = 0; i < cameras.Length; i++)
+            {
+                var cam = cameras[i];
+                if (cam == null || cam.cameraState != RecordCamera_obj.Camera_state.Setup) continue;
+                float d = Vector3.Distance(cam.transform.position, position);
+                if (d >= bestDistance) continue;
+                bestDistance = d;
+                best = cam;
+            }
+
+            return best;
+        }
+
+        // ============================ Rake sounds / death ============================
+
+        /// <summary>Server: play locally and relay. Client: ask the server to relay.</summary>
+        public void BroadcastRakeSound(byte sound, Vector3 position)
+        {
+            var packet = new RakeSoundPacket { Sound = sound, Position = position };
+            byte[] data = packet.Serialize();
+
+            if (RakeMultiplayerPlugin.isServer)
+            {
+                PlayRakeSoundLocal(sound, position);
+                ServerBroadcast(data);
+            }
+            else if (RakeMultiplayerPlugin.isConnected)
+            {
+                ClientSend(data);
+            }
+            else
+            {
+                PlayRakeSoundLocal(sound, position);
+            }
+        }
+
+        private void HandleServerRakeSound(int connectionId, RakeSoundPacket packet)
+        {
+            if (connectionId + 1 != LobbyState.RakeOwnerId) return;
+            PlayRakeSoundLocal(packet.Sound, packet.Position);
+            ServerBroadcast(packet.Serialize());
+        }
+
+        private void HandleClientRakeSound(RakeSoundPacket packet)
+        {
+            PlayRakeSoundLocal(packet.Sound, packet.Position);
+        }
+
+        /// <summary>Play a Rake attack clip in 3D at the given position on this peer.</summary>
+        public static void PlayRakeSoundLocal(byte sound, Vector3 position)
+        {
+            AudioClip clip = null;
+
+            var rake = RakeHighlight.FindRake();
+            var enemy = rake != null ? rake.GetComponent<Enemy_AI>() : null;
+            if (enemy != null)
+            {
+                AudioClip[] clips = sound == 1 ? enemy.playerAttackKicks : enemy.playerAttackRoars;
+                if (clips != null && clips.Length > 0)
+                {
+                    clip = clips[UnityEngine.Random.Range(0, clips.Length)];
+                }
+            }
+
+            if (clip == null) return;
+            PlayerAudio.PlayAt(clip, position, 1f);
+        }
+
+        public void BroadcastRakeDied(Vector3 position, Quaternion rotation)
+        {
+            if (!RakeMultiplayerPlugin.isServer) return;
+
+            RakeMultiplayerPlugin.Log?.LogInfo("[Rake] The Rake was killed at " + position.ToString("F1"));
+            ServerBroadcast(new RakeDiedPacket { Position = position, Rotation = rotation }.Serialize());
+            LobbyState.RakeOwnerId = 0;
+        }
+
+        private void HandleClientRakeDied(RakeDiedPacket packet)
+        {
+            RakeMultiplayerPlugin.Log?.LogInfo("[Rake] The Rake is dead (corpse at " +
+                                               packet.Position.ToString("F1") + ")");
+
+            var rake = RakeHighlight.FindRake();
+            if (rake != null)
+            {
+                var enemy = rake.GetComponent<Enemy_AI>();
+                RakeCorpse.Spawn(rake.gameObject,
+                                 enemy != null ? enemy.deadPrefab : null,
+                                 packet.Position, packet.Rotation);
+
+                if (RakePlayerController.IsActive) RakePlayerController.SetEnabled(false);
+                UnityEngine.Object.Destroy(rake.gameObject);
+            }
+
+            LobbyState.RakeOwnerId = 0;
+            UI.RuntimeUIBuilder.ShowRakeDeath();
+        }
+
+        /// <summary>Server: push the Rake health to every peer (bar sync + scene reloads).</summary>
+        public void BroadcastRakeHealth()
+        {
+            if (!RakeMultiplayerPlugin.isServer) return;
+
+            float health = 0f;
+            var rake = RakeHighlight.FindRake();
+            if (rake != null)
+            {
+                var ai = rake.GetComponent<NetworkedRakeAI>();
+                if (ai != null) health = ai.CurrentHealth;
+            }
+
+            ServerBroadcast(new DamageAppliedPacket { TargetId = 0, NewHealth = health }.Serialize());
+        }
         private void HandleClientStartGame(StartGamePacket packet)
         {
             if (_clientSceneLoading) return;
@@ -1718,6 +2143,12 @@ namespace RakeMultiplayer
             {
                 // Only update health (position/state handled by RakeStatePacket)
                 _cachedRake.ApplyHealth(packet.NewHealth);
+
+                // A client that owns the Rake must also feel the post-damage attack lockout.
+                if (_cachedRake.IsLocalOwner)
+                {
+                    RakePlayerController.NotifyDamageTaken(_cachedRake.transform);
+                }
             }
         }
 

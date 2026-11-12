@@ -137,8 +137,40 @@ namespace RakeMultiplayer.UI
 
             UpdateConnectionStatus();
             UpdateHUD();
+            UpdateRakeHealthBar();
         }
 
+        private NetworkedRakeAI _rakeHealthTarget;
+        private float _rakeHealthScan;
+
+        /// <summary>Boss-style Rake health bar, identical on host and clients.</summary>
+        private void UpdateRakeHealthBar()
+        {
+            if (_uiBuilder == null) return;
+
+            _rakeHealthScan -= Time.deltaTime;
+            if (_rakeHealthScan <= 0f || _rakeHealthTarget == null)
+            {
+                _rakeHealthScan = 0.5f;
+                var rake = RakeHighlight.FindRake();
+                _rakeHealthTarget = rake != null ? rake.GetComponent<NetworkedRakeAI>() : null;
+            }
+
+            if (_rakeHealthTarget == null)
+            {
+                _uiBuilder.HideRakeHealth();
+                return;
+            }
+
+            float health = _rakeHealthTarget.CurrentHealth;
+            if (health <= 0f)
+            {
+                _uiBuilder.HideRakeHealth();
+                return;
+            }
+
+            _uiBuilder.UpdateRakeHealth(health, _rakeHealthTarget.MaxHealth);
+        }
         private void UpdateHUD()
         {
             if (_uiBuilder == null) return;
@@ -488,9 +520,10 @@ namespace RakeMultiplayer.UI
             int max = RakeMultiplayerPlugin.MaxPlayers.Value;
 
             StringBuilder sb = new StringBuilder();
-            int firstHunter = LobbyState.HostIsRake ? 2 : 1;
+            int firstHunter = LobbyState.RakeOwnerId == 1 ? 2 : 1;
             for (int i = firstHunter; i <= count; i++)
             {
+                if (i == LobbyState.RakeOwnerId) continue;
                 if (sb.Length > 0) sb.Append((char)10);
                 sb.Append(i == 1 ? "1. HOST" : (i + ". PLAYER " + i));
             }
@@ -500,23 +533,41 @@ namespace RakeMultiplayer.UI
             if (_uiBuilder.PlayerCountText != null)
                 _uiBuilder.PlayerCountText.text = "Players: " + count + "/" + max;
 
-            _uiBuilder.SetLobbyRole(RakeMultiplayerPlugin.isServer, LobbyState.HostIsRake);
+            _uiBuilder.SetLobbyRole(RakeMultiplayerPlugin.isServer, LobbyState.RakeOwnerId,
+                LobbyState.LocalIsRakeOwner);
         }
 
         public void OnToggleRakeRole()
         {
-            if (!RakeMultiplayerPlugin.isServer) return;
+            if (_networkManager == null) EnsureNetworkManager();
 
-            LobbyState.HostIsRake = !LobbyState.HostIsRake;
-            RakeMultiplayerPlugin.Log?.LogInfo("[Lobby] Host rake role: " + LobbyState.HostIsRake);
-
-            if (_networkManager != null)
+            if (RakeMultiplayerPlugin.isServer)
             {
-                var packet = new LobbyRolePacket { HostIsRake = LobbyState.HostIsRake };
-                _networkManager.ServerBroadcast(packet.Serialize());
+                // Host: take the slot if free, otherwise give it back (next click a client can take it).
+                int target = LobbyState.RakeOwnerId == 1 ? 0 : 1;
+                _networkManager?.SetRakeOwner(target);
+                UpdatePlayerList();
+                return;
             }
 
-            UpdatePlayerList();
+            // Client: ask the server for the single Rake slot.
+            var request = new RakeRoleRequestPacket
+            {
+                TakeRole = !LobbyState.LocalIsRakeOwner
+            };
+            _networkManager?.ClientSend(request.Serialize());
+            RakeMultiplayerPlugin.Log?.LogInfo("[Lobby] Requested Rake role: " + request.TakeRole);
+        }
+
+        /// <summary>Close the F1 menu (used when a level starts loading).</summary>
+        public static void CloseForLoad()
+        {
+            var menu = FindObjectOfType<MultiplayerMenu>();
+            if (menu == null) return;
+
+            menu._menuVisible = false;
+            if (menu._mainContainer != null) menu._mainContainer.SetActive(false);
+            menu.HideAllPanels();
         }
 
         private string GetLocalIPAddress()

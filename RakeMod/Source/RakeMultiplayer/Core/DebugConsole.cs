@@ -448,6 +448,29 @@ namespace RakeMultiplayer
                 Patches.CoroutineHelper.DelayedCall(5.5f, RakeMultiplayer.UI.LoadingScreen.Hide);
                 return "loading: preview shown for 6 s";
             });
+            Register("host", "host", "Start hosting (same as HOST GAME in the menu)", args =>
+            {
+                var menu = UnityEngine.Object.FindObjectOfType<RakeMultiplayer.UI.MultiplayerMenu>();
+                if (menu == null) return "host: menu not found";
+                menu.OnHostGame();
+                return "host: started";
+            });
+
+            Register("role", "role", "Take/leave the Rake slot in the lobby", args =>
+            {
+                var menu = UnityEngine.Object.FindObjectOfType<RakeMultiplayer.UI.MultiplayerMenu>();
+                if (menu == null) return "role: menu not found";
+                menu.OnToggleRakeRole();
+                return "role: owner=P" + LobbyState.RakeOwnerId;
+            });
+
+            Register("start", "start", "Start the match (host only)", args =>
+            {
+                var menu = UnityEngine.Object.FindObjectOfType<RakeMultiplayer.UI.MultiplayerMenu>();
+                if (menu == null) return "start: menu not found";
+                menu.OnStartGame();
+                return "start: requested";
+            });
             Register("cams", "cams", "Open/close the camera monitor from anywhere (same as Tab)", args =>
             {
                 if (RakePlayerController.IsActive) return "cams: not while playing the Rake";
