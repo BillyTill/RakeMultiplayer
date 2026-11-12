@@ -155,6 +155,7 @@ namespace RakeMultiplayer
 
         private bool _initialized = false;
         private bool _playerControlled;
+        private bool _daySpawnChecked;
         private bool _loggedHealthWarning = false;
         private bool _loggedMaxHealthWarning = false;
 
@@ -236,6 +237,8 @@ namespace RakeMultiplayer
             if (RakeMultiplayerPlugin.isServer)
             {
                 if (_clientFrozeSimulation) RestoreServerSimulation();
+
+                UpdateDaySpawn();
 
                 if (!RakeMultiplayerPlugin.isConnected) return;
 
@@ -328,6 +331,94 @@ namespace RakeMultiplayer
             if (victim == null) return false;
             DealRakeDamage(victim);
             return true;
+        }
+
+        /// <summary>
+        /// During the day the level keeps the Rake on a staging platform under the map.
+        /// Move it to the forest instead, once per day phase.
+        /// </summary>
+        private void UpdateDaySpawn()
+        {
+            DayNightManager dayNight = DayNightManager.Instance;
+            if (dayNight == null) return;
+
+            if (dayNight.CurrentPhase == Phase.Night)
+            {
+                _daySpawnChecked = false;
+                return;
+            }
+
+            if (_daySpawnChecked) return;
+            _daySpawnChecked = true;
+            MoveToForestSpawn();
+        }
+
+        private void MoveToForestSpawn()
+        {
+            Vector3 target;
+            if (!TryFindForestSpawn(out target))
+            {
+                RakeMultiplayerPlugin.Log?.LogWarning("[AI] Day spawn: no forest point found");
+                return;
+            }
+
+            NavMeshHit hit;
+            if (NavMesh.SamplePosition(target, out hit, 12f, NavMesh.AllAreas))
+            {
+                target = hit.position;
+            }
+            else
+            {
+                RakeMultiplayerPlugin.Log?.LogWarning("[AI] Day spawn: point is off the NavMesh: " + target.ToString("F1"));
+                return;
+            }
+
+            transform.position = target;
+            targetPosition = target;
+            hasTargetPosition = true;
+
+            var agent = GetEnemyAgent();
+            if (agent != null && agent.enabled) agent.Warp(target);
+
+            RakeMultiplayerPlugin.Log?.LogInfo("[AI] Day spawn: Rake moved to the forest at " + target.ToString("F1"));
+        }
+
+        private bool TryFindForestSpawn(out Vector3 position)
+        {
+            string[] names = { "foresttrigger", "mestorake", "rake place", "rakeplace", "rakespawn", "rake spawn" };
+            Transform[] all = UnityEngine.Object.FindObjectsOfType<Transform>();
+
+            for (int n = 0; n < names.Length; n++)
+            {
+                for (int i = 0; i < all.Length; i++)
+                {
+                    if (all[i] == null) continue;
+                    string name = all[i].gameObject.name.ToLowerInvariant();
+                    if (name.Contains(names[n]))
+                    {
+                        position = all[i].position;
+                        return true;
+                    }
+                }
+            }
+
+            MapSettings settings = MapSettings.Current;
+            if (settings != null && settings.hasCave)
+            {
+                position = settings.cavePosition;
+                return true;
+            }
+
+            // Last resort: sample the surface above the staging platform.
+            NavMeshHit hit;
+            if (NavMesh.SamplePosition(transform.position + Vector3.up * 80f, out hit, 150f, NavMesh.AllAreas))
+            {
+                position = hit.position;
+                return true;
+            }
+
+            position = transform.position;
+            return false;
         }
 
         private void FindCaveTransform()

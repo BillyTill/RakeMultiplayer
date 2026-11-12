@@ -7,21 +7,23 @@ namespace RakeMultiplayer
     /// <summary>
     /// "Play as the Rake" mode (host or single-player).
     ///
-    /// Third-person camera, WASD movement with a silent crouch and a run, and automatic
-    /// attacks on whatever stands in front of the model. Attacks are only allowed at
-    /// night: during the day the Rake spawns as a threat that cannot hit anything yet.
+    /// Third/first-person camera, WASD movement with a silent crouch and a run, and
+    /// automatic attacks on whatever stands in front of the model. Attacks are only
+    /// allowed at night: during the day the Rake spawns as a threat that cannot hit
+    /// anything yet.
     ///
-    /// The Rake player also gets a "sense": identical edge-of-screen markers for animals,
-    /// players and traps within 100 m, so it cannot tell a trap from prey.
+    /// The Rake player also gets a "sense": a large ring in the middle of the screen,
+    /// top = forward, bottom = backward, with identical arrows for animals, players and
+    /// traps within 100 m, so it cannot tell a trap from prey.
     /// </summary>
     public class RakePlayerController : MonoBehaviour
     {
         public static bool IsActive { get; private set; }
         public static Transform LocalHunter { get; private set; }
 
-        private const float WalkSpeed = 2.2f;
-        private const float RunSpeed = 5.0f;
-        private const float StealthSpeed = 1.25f;
+        private const float WalkSpeed = 9.0f;
+        private const float RunSpeed = 20.0f;
+        private const float StealthSpeed = 5.0f;
 
         private const float AttackRange = 3.4f;
         private const float AttackCone = 70f;
@@ -45,6 +47,10 @@ namespace RakeMultiplayer
         private float _yaw;
         private float _pitch;
         private float _distance = 4.6f;
+        private bool _firstPerson;
+
+        private readonly List<Renderer> _rakeRenderers = new List<Renderer>();
+        private bool _rakeVisible = true;
 
         private Transform _hunter;
         private CharacterController _hunterController;
@@ -65,14 +71,15 @@ namespace RakeMultiplayer
         private float _animalCooldown;
         private float _cameraCooldown;
         private float _attackAnimation;
-        private string _lastAction = "—";
+        private string _lastAction = "-";
 
         private float _scanTimer;
         private readonly List<NetworkedPlayer> _players = new List<NetworkedPlayer>();
         private readonly List<Animal_AI> _animals = new List<Animal_AI>();
         private readonly List<Trap_proj> _traps = new List<Trap_proj>();
 
-        private static Texture2D _pixel;
+        private static Texture2D _ring;
+        private static Texture2D _arrow;
         private static GUIStyle _hud;
         private static GUIStyle _small;
 
@@ -113,7 +120,7 @@ namespace RakeMultiplayer
 
                 _instance = controller;
                 IsActive = true;
-                DebugConsole.Print("rake play ON: WASD move, Shift run, Ctrl sneak (silent), mouse look. " +
+                DebugConsole.Print("rake play ON: WASD move, Shift run, Ctrl sneak, V view. " +
                                    "Auto-attack in front of the Rake; attacks only work at night.");
             }
             else
@@ -145,6 +152,14 @@ namespace RakeMultiplayer
             if (_agent == null) _agent = rake.GetComponentInChildren<NavMeshAgent>();
 
             if (_rakeAI == null || _animator == null) return false;
+
+            _rakeRenderers.Clear();
+            Renderer[] rakeRenderers = rake.GetComponentsInChildren<Renderer>(true);
+            for (int i = 0; i < rakeRenderers.Length; i++)
+            {
+                if (rakeRenderers[i] != null) _rakeRenderers.Add(rakeRenderers[i]);
+            }
+            _rakeVisible = true;
 
             Camera source = Camera.main;
             if (source == null)
@@ -254,6 +269,8 @@ namespace RakeMultiplayer
 
         private void End()
         {
+            SetRakeVisible(true);
+
             if (_camera != null) UnityEngine.Object.Destroy(_camera.gameObject);
             _camera = null;
 
@@ -324,6 +341,8 @@ namespace RakeMultiplayer
 
             if (!DebugConsole.ConsoleOpen)
             {
+                if (Input.GetKeyDown(KeyCode.V)) _firstPerson = !_firstPerson;
+
                 ReadLook();
                 ReadMovement(dt);
             }
@@ -387,9 +406,17 @@ namespace RakeMultiplayer
                 {
                     _rake.position += direction * speed * dt;
                 }
+            }
 
+            if (_firstPerson)
+            {
+                // In first person the body follows the view, not the movement direction.
+                _rake.rotation = Quaternion.Euler(0f, _yaw, 0f);
+            }
+            else if (moving)
+            {
                 Quaternion look = Quaternion.LookRotation(direction);
-                _rake.rotation = Quaternion.Slerp(_rake.rotation, look, dt * 10f);
+                _rake.rotation = Quaternion.Slerp(_rake.rotation, look, dt * 16f);
             }
 
             // Running/walking is audible; the sneak must stay silent.
@@ -398,7 +425,7 @@ namespace RakeMultiplayer
                 _stepTimer -= dt;
                 if (_stepTimer <= 0f)
                 {
-                    _stepTimer = run ? 0.34f : 0.52f;
+                    _stepTimer = run ? 0.24f : 0.36f;
                     if (_audio != null && _enemyAI != null && _enemyAI.walkSound != null)
                     {
                         _audio.PlayOneShot(_enemyAI.walkSound, 0.8f);
@@ -431,12 +458,34 @@ namespace RakeMultiplayer
             }
         }
 
+        private void SetRakeVisible(bool visible)
+        {
+            if (_rakeVisible == visible) return;
+            _rakeVisible = visible;
+
+            for (int i = 0; i < _rakeRenderers.Count; i++)
+            {
+                if (_rakeRenderers[i] != null) _rakeRenderers[i].enabled = visible;
+            }
+        }
+
         private void UpdateCamera(float dt)
         {
             if (_camera == null) return;
 
-            Vector3 pivot = _rake.position + Vector3.up * 1.65f;
             Quaternion rotation = Quaternion.Euler(_pitch, _yaw, 0f);
+
+            if (_firstPerson)
+            {
+                SetRakeVisible(false);
+                _camera.transform.position = _rake.position + Vector3.up * 1.72f;
+                _camera.transform.rotation = rotation;
+                return;
+            }
+
+            SetRakeVisible(true);
+
+            Vector3 pivot = _rake.position + Vector3.up * 1.65f;
             Vector3 position = pivot - rotation * Vector3.forward * _distance;
 
             // Do not let the camera sink into the ground.
@@ -544,21 +593,21 @@ namespace RakeMultiplayer
                 NetworkedPlayer player = best.GetComponent<NetworkedPlayer>();
                 if (player != null && _rakeAI != null) _rakeAI.AttackPlayer(best);
                 _playerCooldown = PlayerCooldown;
-                _lastAction = "игрок";
+                _lastAction = "player";
             }
             else if (bestType == 1)
             {
                 Animal_AI animal = best.GetComponent<Animal_AI>();
                 if (animal != null) animal.TakeDamage(250, "RakeAnimalKick");
                 _animalCooldown = AnimalCooldown;
-                _lastAction = "животное";
+                _lastAction = "animal";
             }
             else
             {
                 RecordCamera_obj camera = best.GetComponent<RecordCamera_obj>();
                 if (camera != null) camera.SetUnsetupState();
                 _cameraCooldown = CameraCooldown;
-                _lastAction = "камера";
+                _lastAction = "camera";
             }
 
             _attackAnimation = 1.1f;
@@ -601,34 +650,55 @@ namespace RakeMultiplayer
             _hud.normal.textColor = night ? new Color(1f, 0.45f, 0.15f) : new Color(0.65f, 0.75f, 1f);
 
             GUI.depth = -900;
-            GUI.Label(new Rect(16f, 12f, 520f, 22f), "RAKE MODE  " + (night ? "НОЧЬ — атака доступна" : "ДЕНЬ — атака заблокирована"), _hud);
+            GUI.Label(new Rect(16f, 12f, 560f, 22f),
+                "RAKE MODE  " + (night ? "NIGHT - attacks enabled" : "DAY - attacks disabled"), _hud);
 
             _small.normal.textColor = Color.white;
-            GUI.Label(new Rect(16f, 36f, 560f, 20f),
-                "WASD — движение, Shift — бег, Ctrl — красться (без звука), мышь — камера", _small);
-            GUI.Label(new Rect(16f, 56f, 560f, 20f),
-                "Кулдауны: игрок " + Mathf.CeilToInt(_playerCooldown) + "с / животное " +
-                Mathf.CeilToInt(_animalCooldown) + "с / камера " + Mathf.CeilToInt(_cameraCooldown) +
-                "с   последняя цель: " + _lastAction, _small);
+            GUI.Label(new Rect(16f, 36f, 620f, 20f),
+                "WASD move, Shift run, Ctrl sneak (silent), V view (" + (_firstPerson ? "1st" : "3rd") + "), mouse look", _small);
+            GUI.Label(new Rect(16f, 56f, 620f, 20f),
+                "Cooldowns: player " + Mathf.CeilToInt(_playerCooldown) + "s / animal " +
+                Mathf.CeilToInt(_animalCooldown) + "s / camera " + Mathf.CeilToInt(_cameraCooldown) +
+                "s   last: " + _lastAction, _small);
 
             DrawSense();
         }
 
         /// <summary>
-        /// Edge-of-screen markers for animals, players and traps within 100 m. The marker is
-        /// identical for every type on purpose: the Rake player cannot tell a trap from prey.
+        /// WoT-style sense: a ring in the middle of the screen (top = forward, bottom =
+        /// backward) with an arrow on the ring for every target within 100 m. The arrow
+        /// is identical for players, animals and traps on purpose.
         /// </summary>
         private void DrawSense()
         {
             if (_camera == null) return;
 
-            DrawSenseList(_players.Count, i => _players[i] != null ? _players[i].transform.position + Vector3.up : Vector3.zero);
-            DrawSenseList(_animals.Count, i => _animals[i] != null ? _animals[i].transform.position + Vector3.up * 0.8f : Vector3.zero);
-            DrawSenseList(_traps.Count, i => _traps[i] != null ? _traps[i].transform.position + Vector3.up * 0.4f : Vector3.zero);
+            float radius = Mathf.Min(Screen.width, Screen.height) * 0.24f;
+            Vector2 center = new Vector2(Screen.width * 0.5f, Screen.height * 0.5f);
+
+            Color oldColor = GUI.color;
+            Matrix4x4 oldMatrix = GUI.matrix;
+
+            GUI.color = new Color(1f, 1f, 1f, 0.28f);
+            GUI.DrawTexture(new Rect(center.x - radius, center.y - radius, radius * 2f, radius * 2f), Ring);
+
+            DrawSenseList(_players.Count, i => _players[i] != null ? _players[i].transform.position : Vector3.zero, center, radius);
+            DrawSenseList(_animals.Count, i => _animals[i] != null ? _animals[i].transform.position : Vector3.zero, center, radius);
+            DrawSenseList(_traps.Count, i => _traps[i] != null ? _traps[i].transform.position : Vector3.zero, center, radius);
+
+            GUI.matrix = oldMatrix;
+            GUI.color = oldColor;
         }
 
-        private void DrawSenseList(int count, System.Func<int, Vector3> position)
+        private void DrawSenseList(int count, System.Func<int, Vector3> position, Vector2 center, float radius)
         {
+            Vector3 forward = _rake.forward;
+            forward.y = 0f;
+            if (forward.sqrMagnitude < 0.001f) forward = Vector3.forward;
+            forward.Normalize();
+
+            Vector3 right = Vector3.Cross(Vector3.up, forward);
+
             for (int i = 0; i < count; i++)
             {
                 Vector3 world = position(i);
@@ -636,79 +706,83 @@ namespace RakeMultiplayer
 
                 Vector3 delta = world - _rake.position;
                 delta.y = 0f;
-                if (delta.sqrMagnitude > SenseRange * SenseRange) continue;
+                if (delta.sqrMagnitude < 0.01f || delta.sqrMagnitude > SenseRange * SenseRange) continue;
 
-                DrawMarker(world);
+                delta.Normalize();
+
+                // 0 = straight ahead, positive = to the right (clockwise on the ring).
+                float angle = Mathf.Atan2(Vector3.Dot(delta, right), Vector3.Dot(delta, forward));
+
+                Vector2 outward = new Vector2(Mathf.Sin(angle), -Mathf.Cos(angle));
+                Vector2 point = center + outward * radius;
+
+                float degrees = Mathf.Atan2(outward.x, -outward.y) * Mathf.Rad2Deg;
+
+                Matrix4x4 oldMatrix = GUI.matrix;
+                GUI.color = new Color(1f, 0.92f, 0.85f, 0.95f);
+                GUIUtility.RotateAroundPivot(degrees, point);
+                GUI.DrawTexture(new Rect(point.x - 9f, point.y - 12f, 18f, 20f), Arrow);
+                GUI.matrix = oldMatrix;
             }
         }
 
-        private void DrawMarker(Vector3 world)
-        {
-            Vector3 screen = _camera.WorldToScreenPoint(world);
-            bool behind = screen.z <= 0.05f;
-
-            Vector2 point = new Vector2(screen.x, Screen.height - screen.y);
-            if (behind)
-            {
-                point = new Vector2(Screen.width - point.x, Screen.height - point.y);
-            }
-
-            Vector2 center = new Vector2(Screen.width * 0.5f, Screen.height * 0.5f);
-            Vector2 direction = point - center;
-            if (behind) direction = -direction;
-
-            float margin = 46f;
-            float maxX = Screen.width * 0.5f - margin;
-            float maxY = Screen.height * 0.5f - margin;
-
-            bool onScreen = !behind &&
-                            point.x > margin && point.x < Screen.width - margin &&
-                            point.y > margin && point.y < Screen.height - margin;
-
-            Vector2 drawAt;
-            if (onScreen)
-            {
-                drawAt = point;
-            }
-            else
-            {
-                float scaleX = maxX / Mathf.Max(Mathf.Abs(direction.x), 0.001f);
-                float scaleY = maxY / Mathf.Max(Mathf.Abs(direction.y), 0.001f);
-                float scale = Mathf.Min(scaleX, scaleY);
-                drawAt = center + direction * scale;
-            }
-
-            Color old = GUI.color;
-            GUI.color = new Color(1f, 1f, 1f, 0.9f);
-
-            float size = onScreen ? 6f : 9f;
-            GUI.DrawTexture(new Rect(drawAt.x - size * 0.5f, drawAt.y - size * 0.5f, size, size), Pixel);
-
-            if (!onScreen)
-            {
-                Vector2 outward = direction.normalized;
-                float length = 14f;
-                float endX = drawAt.x + outward.x * length;
-                float endY = drawAt.y + outward.y * length;
-                GUI.DrawTexture(new Rect(Mathf.Min(drawAt.x, endX), Mathf.Min(drawAt.y, endY),
-                    Mathf.Max(Mathf.Abs(endX - drawAt.x), 1f), Mathf.Max(Mathf.Abs(endY - drawAt.y), 1f)), Pixel);
-            }
-
-            GUI.color = old;
-        }
-
-        private static Texture2D Pixel
+        private static Texture2D Ring
         {
             get
             {
-                if (_pixel == null)
+                if (_ring == null)
                 {
-                    _pixel = new Texture2D(1, 1);
-                    _pixel.SetPixel(0, 0, Color.white);
-                    _pixel.Apply();
-                    _pixel.hideFlags = HideFlags.HideAndDontSave;
+                    const int size = 256;
+                    _ring = new Texture2D(size, size);
+                    float center = (size - 1) * 0.5f;
+                    float outer = center - 1f;
+                    float inner = outer - 3f;
+
+                    for (int y = 0; y < size; y++)
+                    {
+                        for (int x = 0; x < size; x++)
+                        {
+                            float dx = x - center;
+                            float dy = y - center;
+                            float d = Mathf.Sqrt(dx * dx + dy * dy);
+                            float alpha = (d <= outer && d >= inner) ? 0.6f : 0f;
+                            _ring.SetPixel(x, y, new Color(1f, 1f, 1f, alpha));
+                        }
+                    }
+
+                    _ring.Apply();
+                    _ring.hideFlags = HideFlags.HideAndDontSave;
                 }
-                return _pixel;
+                return _ring;
+            }
+        }
+
+        private static Texture2D Arrow
+        {
+            get
+            {
+                if (_arrow == null)
+                {
+                    const int size = 32;
+                    _arrow = new Texture2D(size, size);
+
+                    for (int y = 0; y < size; y++)
+                    {
+                        float t = y / (float)(size - 1);
+                        float half = 2f + (1f - t) * 11f; // wide base, narrow tip at the top
+
+                        for (int x = 0; x < size; x++)
+                        {
+                            bool inside = y >= 3 && y <= 29 &&
+                                          Mathf.Abs(x - (size - 1) * 0.5f) <= half;
+                            _arrow.SetPixel(x, y, inside ? Color.white : new Color(1f, 1f, 1f, 0f));
+                        }
+                    }
+
+                    _arrow.Apply();
+                    _arrow.hideFlags = HideFlags.HideAndDontSave;
+                }
+                return _arrow;
             }
         }
     }
