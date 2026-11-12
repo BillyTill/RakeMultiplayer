@@ -26,6 +26,9 @@ namespace RakeMultiplayer
             RakeMultiplayerPlugin.Log?.LogInfo(
                 $"[GameEntry] Local player started in scene '{Application.loadedLevelName}' - (re)binding multiplayer");
 
+            AudioDiagnostics.EnsureListener();
+            AudioDiagnostics.LogState();
+
             // Persistent managers (idempotent - found if they already survived the load)
             EnsurePersistentObject<MultiplayerSceneManager>("MultiplayerSceneManager");
             EnsurePersistentObject<RakeNetworkManager>("RakeNetworkManager");

@@ -339,6 +339,9 @@ namespace RakeMultiplayer
                 return "preview clip = " + args[0];
             });
 
+            Register("audio", "audio", "Show audio state (listener volume, weapon sound sources)", args =>
+                AudioDiagnostics.Describe());
+
             Register("rake hit", "rake hit [damage]",
                 "Simulate a Rake hit on the local player (default 0 = all effects, no health loss)", args =>
             {
