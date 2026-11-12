@@ -362,7 +362,7 @@ namespace RakeMultiplayer
             if (Time.time - _lastDayWarp < 10f) return;
             _lastDayWarp = Time.time;
 
-            if (NearestPlayerDistance(transform.position) > 400f) MoveToForestSpawn();
+            if (NearestPlayerDistance(transform.position) > 1200f) MoveToForestSpawn();
         }
 
         private float NearestPlayerDistance(Vector3 position)
@@ -417,11 +417,34 @@ namespace RakeMultiplayer
             targetPosition = target;
             hasTargetPosition = true;
 
+            // Detach the agent, move the transform, then re-attach: Warp alone can fail
+            // and the agent would snap the body back to its old position next frame.
             var agent = GetEnemyAgent();
-            if (agent != null && agent.enabled) agent.Warp(target);
+            if (agent != null)
+            {
+                bool wasEnabled = agent.enabled;
+                if (wasEnabled) agent.enabled = false;
+
+                transform.position = target;
+
+                if (wasEnabled)
+                {
+                    agent.enabled = true;
+                    if (!agent.Warp(target))
+                    {
+                        RakeMultiplayerPlugin.Log?.LogWarning("[AI] Day spawn: agent.Warp failed at " +
+                                                           target.ToString("F1") + " (isOnNavMesh=" + agent.isOnNavMesh + ")");
+                    }
+                }
+            }
+            else
+            {
+                transform.position = target;
+            }
 
             RakeMultiplayerPlugin.Log?.LogInfo("[AI] Day spawn: Rake moved to the forest at " +
-                                               target.ToString("F1") + " (source: " + source + ")");
+                                               target.ToString("F1") + " (source: " + source + 
+                                               ", now " + transform.position.ToString("F1") + ")");
         }
 
         private bool TryFindForestSpawn(out Vector3 position, out string source)
