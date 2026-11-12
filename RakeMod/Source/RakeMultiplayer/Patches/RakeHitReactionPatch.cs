@@ -14,7 +14,7 @@ namespace RakeMultiplayer.Patches
     /// Postfix: spawns a physics ragdoll of the body, throws it away from the Rake and keeps
     /// the camera attached to its head for a moment, then restores first person.
     /// </summary>
-    [HarmonyPatch(typeof(FPSController), "TakeDamage")]
+    [HarmonyPatch(typeof(FPSController), "TakeDamage", new Type[] { typeof(int), typeof(string) })]
     internal static class RakeHitReactionPatch
     {
         private const float DedupWindow = 0.35f;
