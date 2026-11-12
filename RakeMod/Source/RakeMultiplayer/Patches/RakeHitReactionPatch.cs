@@ -60,6 +60,10 @@ namespace RakeMultiplayer.Patches
                 if (PlayerRagdoll.Trigger(away))
                 {
                     RakeMultiplayerPlugin.Log?.LogInfo("[Ragdoll] Reaction triggered by " + damageType);
+
+                    // Everyone else must see the body fly too, whichever damage path
+                    // produced this hit.
+                    PlayerRagdoll.ShareLocal(away);
                 }
             }
             catch (Exception ex)

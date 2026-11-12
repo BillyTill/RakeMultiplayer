@@ -43,5 +43,6 @@ namespace RakeMultiplayer.Networking
         ItemState = 34,
         PlayerDamaged = 35,
         PlayerRagdoll = 36,
+        PlayerRagdollRequest = 37,
     }
 }

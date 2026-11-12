@@ -32,6 +32,11 @@ namespace RakeMultiplayer
 
         // Only the local (victim) ragdoll is tracked here; remote ones are independent.
         private static PlayerRagdoll _localInstance;
+
+        // Remote ragdolls in flight, keyed by player id, so duplicate packets from the
+        // Rake AI and the damage patch do not stack several bodies on top of each other.
+        private static readonly Dictionary<int, PlayerRagdoll> _remoteInstances =
+            new Dictionary<int, PlayerRagdoll>();
         private static PhysicMaterial _friction;
 
         public static bool IsActive { get { return _localInstance != null; } }
@@ -50,6 +55,7 @@ namespace RakeMultiplayer
         private Transform _pelvis;
         private Transform _head;
         private Rigidbody[] _bodies;
+        private int _playerId;
 
         private Camera _camera;
         private Camera _originalCamera;
@@ -81,7 +87,7 @@ namespace RakeMultiplayer
 
             NetworkedPlayer remote;
             if (!spawner.TryGetRemotePlayer(playerId, out remote) || remote == null) return false;
-            return TriggerRemote(remote.transform, direction);
+            return TriggerRemote(playerId, remote.transform, direction);
         }
 
         /// <summary>
@@ -136,9 +142,10 @@ namespace RakeMultiplayer
         }
 
         /// <summary>Another player got hit: show their body flying (no camera).</summary>
-        public static bool TriggerRemote(Transform remotePlayer, Vector3 awayFromHit)
+        public static bool TriggerRemote(int playerId, Transform remotePlayer, Vector3 awayFromHit)
         {
             if (remotePlayer == null) return false;
+            if (playerId > 0 && _remoteInstances.ContainsKey(playerId)) return false;
             if (!RemotePlayerModelData.EnsureLoaded()) return false;
 
             var go = new GameObject("RakeRemoteRagdoll");
@@ -149,8 +156,41 @@ namespace RakeMultiplayer
                 return false;
             }
 
+            ragdoll._playerId = playerId;
+            if (playerId > 0) _remoteInstances[playerId] = ragdoll;
+
             ragdoll.Launch(awayFromHit);
             return true;
+        }
+
+        /// <summary>
+        /// Tell every other peer that the local player just got hit. Called right after the
+        /// local ragdoll starts, so the reaction is visible to everyone no matter which
+        /// damage path triggered it (Rake AI, vanilla AI or the debug console).
+        /// </summary>
+        public static void ShareLocal(Vector3 direction)
+        {
+            var spawner = PlayerSpawner.Instance;
+            var local = spawner != null ? spawner.LocalPlayer : null;
+            if (local == null || local.PlayerId <= 0) return;
+
+            if (RakeMultiplayerPlugin.isServer)
+            {
+                BroadcastOnly(local.PlayerId, direction);
+                return;
+            }
+
+            if (!RakeMultiplayerPlugin.isConnected) return;
+
+            var manager = RakeNetworkManager.Instance;
+            if (manager == null) return;
+
+            var packet = new PlayerRagdollRequestPacket
+            {
+                PlayerId = local.PlayerId,
+                Direction = direction
+            };
+            manager.SendToServer(packet.Serialize());
         }
 
         // ---------------------------------------------------------------- build
@@ -616,6 +656,15 @@ namespace RakeMultiplayer
         private void OnDestroy()
         {
             if (_localInstance == this) _localInstance = null;
+
+            if (_playerId > 0)
+            {
+                PlayerRagdoll active;
+                if (_remoteInstances.TryGetValue(_playerId, out active) && active == this)
+                {
+                    _remoteInstances.Remove(_playerId);
+                }
+            }
         }
     }
 }

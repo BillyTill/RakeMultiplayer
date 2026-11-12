@@ -477,6 +477,9 @@ namespace RakeMultiplayer
                     case PacketType.DamageRequest:
                         HandleServerDamageRequest(connectionId, (DamageRequestPacket)packet, data);
                         break;
+                    case PacketType.PlayerRagdollRequest:
+                        HandleServerPlayerRagdollRequest(connectionId, (PlayerRagdollRequestPacket)packet);
+                        break;
                     case PacketType.ItemPickup:
                         HandleServerItemPickup(connectionId, (ItemPickupPacket)packet, data);
                         break;
@@ -545,6 +548,21 @@ namespace RakeMultiplayer
                 remote.ApplyRotation(packet.Rotation);
                 remote.ApplyAnimation(packet.AnimState);
             }
+        }
+
+        /// <summary>
+        /// Server: a client says its player just got hit. Validate the sender and broadcast
+        /// the ragdoll so every peer sees the victim body fly.
+        /// </summary>
+        private void HandleServerPlayerRagdollRequest(int connectionId, PlayerRagdollRequestPacket packet)
+        {
+            int playerId = connectionId + 1;
+            if (packet.PlayerId > 0) playerId = packet.PlayerId;
+
+            RakeMultiplayerPlugin.Log?.LogInfo("[Ragdoll] Server got request from C" + connectionId +
+                                               " for player " + playerId);
+
+            PlayerRagdoll.TriggerNetworked(playerId, packet.Direction);
         }
 
         public void HandleServerDamageRequest(int connectionId, DamageRequestPacket packet, byte[] rawData)
@@ -1568,7 +1586,9 @@ namespace RakeMultiplayer
         /// <summary>Server told us to show the hit-reaction ragdoll for a player.</summary>
         private void HandleClientPlayerRagdoll(PlayerRagdollPacket packet)
         {
-            PlayerRagdoll.ApplyFor(packet.PlayerId, packet.Direction);
+            bool shown = PlayerRagdoll.ApplyFor(packet.PlayerId, packet.Direction);
+            RakeMultiplayerPlugin.Log?.LogInfo("[Ragdoll] Client received ragdoll for player " +
+                                               packet.PlayerId + " (shown=" + shown + ")");
         }
 
         private void HandleClientPlayerDamaged(PlayerDamagedPacket packet)
@@ -1599,7 +1619,7 @@ namespace RakeMultiplayer
             Vector3 away = victim.transform.position - packet.SourcePosition;
             away.y = 0f;
 
-            if (PlayerRagdoll.TriggerRemote(victim.transform, away))
+            if (PlayerRagdoll.TriggerRemote(packet.PlayerId, victim.transform, away))
             {
                 RakeMultiplayerPlugin.Log?.LogInfo("[Ragdoll] Showing remote hit for player " + packet.PlayerId);
             }

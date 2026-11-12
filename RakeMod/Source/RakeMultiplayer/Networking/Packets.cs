@@ -147,6 +147,32 @@ namespace RakeMultiplayer.Networking
     }
 
 
+    /// <summary>
+    /// Client -> server: the sending player just got hit, show the ragdoll to everyone.
+    /// The server re-broadcasts it as a PlayerRagdollPacket.
+    /// </summary>
+    public class PlayerRagdollRequestPacket : NetworkPacket
+    {
+        public override PacketType Type => PacketType.PlayerRagdollRequest;
+
+        public int PlayerId;
+        public Vector3 Direction;
+
+        public override void Write(BinaryWriter writer)
+        {
+            writer.Write(PlayerId);
+            writer.Write(Direction.x);
+            writer.Write(Direction.y);
+            writer.Write(Direction.z);
+        }
+
+        public override void Read(BinaryReader reader)
+        {
+            PlayerId = reader.ReadInt32();
+            Direction = new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
+        }
+    }
+
     public class PlayerConnectedPacket : NetworkPacket
     {
         public override PacketType Type => PacketType.PlayerConnected;
