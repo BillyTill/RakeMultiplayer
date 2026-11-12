@@ -733,9 +733,9 @@ namespace RakeMultiplayer.UI
             if (_claw != null) return _claw;
             _claw = MakeSprite(64, p =>
             {
-                p.Line(14f, 12f, 36f, 50f, 5f);
-                p.Line(26f, 10f, 48f, 48f, 5f);
-                p.Line(38f, 8f, 60f, 46f, 5f);
+                p.Line(9f, 15f, 31f, 53f, 5f);
+                p.Line(21f, 13f, 43f, 51f, 5f);
+                p.Line(33f, 11f, 55f, 49f, 5f);
             });
             return _claw;
         }
@@ -772,67 +772,32 @@ namespace RakeMultiplayer.UI
             {
                 for (int k = 0; k < 2; k++)
                 {
-                    float x = 20f + k * 14f;
+                    float x = 25f + k * 14f;
                     p.Line(x, 46f, x + 12f, 32f, 5f);
                     p.Line(x + 12f, 32f, x, 18f, 5f);
                 }
-                p.Line(8f, 42f, 16f, 42f, 3f);
-                p.Line(8f, 22f, 16f, 22f, 3f);
+                p.Line(13f, 42f, 21f, 42f, 3f);
+                p.Line(13f, 22f, 21f, 22f, 3f);
             });
             return _leap;
         }
 
         private static Sprite MakeSprite(int size, Action<Painter> draw)
         {
-            const int ss = 2;
-            var painter = new Painter(size * ss, size * ss);
+            // Draw exactly at the requested size: the painter uses the same logical
+            // coordinates the shapes are authored in (no hidden 2x canvas), otherwise
+            // every sprite lands half-size in the bottom-left corner.
+            var painter = new Painter(size, size);
             draw(painter);
 
             var tex = new Texture2D(size, size, TextureFormat.ARGB32, false);
             tex.filterMode = FilterMode.Bilinear;
             tex.wrapMode = TextureWrapMode.Clamp;
-
-            var pixels = new Color32[size * size];
-            for (int y = 0; y < size; y++)
-            {
-                for (int x = 0; x < size; x++)
-                {
-                    float a = 0f, r = 0f, g = 0f, b = 0f;
-                    for (int sy = 0; sy < ss; sy++)
-                    {
-                        for (int sx = 0; sx < ss; sx++)
-                        {
-                            Color32 c = painter.Get(x * ss + sx, y * ss + sy);
-                            float ca = c.a / 255f;
-                            a += ca;
-                            r += c.r / 255f * ca;
-                            g += c.g / 255f * ca;
-                            b += c.b / 255f * ca;
-                        }
-                    }
-
-                    int samples = ss * ss;
-                    if (a <= 0.0001f)
-                    {
-                        pixels[y * size + x] = new Color32(0, 0, 0, 0);
-                    }
-                    else
-                    {
-                        float inv = 1f / a;
-                        pixels[y * size + x] = new Color32(
-                            (byte)(Mathf.Clamp01(r * inv) * 255f),
-                            (byte)(Mathf.Clamp01(g * inv) * 255f),
-                            (byte)(Mathf.Clamp01(b * inv) * 255f),
-                            (byte)(Mathf.Clamp01(a / samples) * 255f));
-                    }
-                }
-            }
-
-            tex.SetPixels32(pixels);
+            tex.SetPixels32(painter.Pixels);
             tex.Apply(false, true);
+
             return Sprite.Create(tex, new Rect(0f, 0f, size, size), new Vector2(0.5f, 0.5f), 100f);
         }
-
         /// <summary>Tiny white painter for procedural HUD icons (texture Y points up).</summary>
         private sealed class Painter
         {
@@ -846,6 +811,8 @@ namespace RakeMultiplayer.UI
                 _h = h;
                 _pixels = new Color32[w * h];
             }
+
+            public Color32[] Pixels { get { return _pixels; } }
 
             public Color32 Get(int x, int y)
             {
