@@ -101,6 +101,7 @@ RakeMod/Source/RakeMultiplayer/obj/
 !RakeMod/RakeMultiplayer.csproj
 !RakeMod/Plugins/Telepathy.dll
 !RakeMod/Plugins/UnityEngine.CoreModule.dll
+!RakeMod/Installer/build.ps1
 
 # Reference directories (not part of mod source)
 RakeMod/Mirror_Source/
