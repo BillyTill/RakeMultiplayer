@@ -66,6 +66,7 @@ namespace RakeMultiplayer
         private bool _loggedBounds;
         private bool _manualClip;
         private bool _weaponVisible = true;
+        private int _lastFootstep = -1;
 
         /// <summary>
         /// Create the body under <paramref name="parent"/>, tracking <paramref name="tracked"/>
@@ -167,6 +168,7 @@ namespace RakeMultiplayer
             UpdateSpeed();
             UpdateClip();
             ApplyPose();
+            UpdateFootsteps();
             UpdateWeaponVisibility();
 
             if (!_loggedBounds && _renderer != null)
@@ -255,6 +257,30 @@ namespace RakeMultiplayer
         private bool HasWeapon()
         {
             return (AnimState() & 16) != 0;
+        }
+
+        /// <summary>
+        /// Two footfalls per locomotion cycle, played at the remote body position.
+        /// The clone has no working AudioSource of its own (they are all disabled).
+        /// </summary>
+        private void UpdateFootsteps()
+        {
+            if (_tracked == null || _clip == null || _clip.Length < 0.1f) return;
+
+            if (!IsLocomotion(_clipName) || _speed < 0.4f)
+            {
+                _lastFootstep = -1;
+                return;
+            }
+
+            float phase = Mathf.Repeat(_time, _clip.Length) / _clip.Length;
+            int step = Mathf.FloorToInt(phase * 2f);
+
+            if (_lastFootstep < 0) { _lastFootstep = step; return; }
+            if (step == _lastFootstep) return;
+
+            _lastFootstep = step;
+            PlayerAudio.PlayFootstep(_tracked);
         }
 
         private void UpdateWeaponVisibility()

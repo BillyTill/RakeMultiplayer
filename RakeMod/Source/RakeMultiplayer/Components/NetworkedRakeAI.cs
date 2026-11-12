@@ -82,6 +82,13 @@ namespace RakeMultiplayer
         private byte lastSentWalkType = 1;
         private float lastSentAnimSpeed;
 
+        // Client-side audio mirror (the host plays the vanilla sounds)
+        private float _clientStepTimer;
+        private float _clientVocalTimer;
+        private Vector3 _clientAudioPosition;
+        private bool _clientAudioValid;
+        private RakeState _clientAudioState = RakeState.Idle;
+
         // Server-authoritative Rake hit
         private const float AttackInterval = 1.4f;
         private const int AttackDamage = 10;
@@ -280,6 +287,7 @@ namespace RakeMultiplayer
                 }
 
                 UpdateClientAnimation();
+                UpdateClientAudio();
             }
         }
 
@@ -705,6 +713,9 @@ namespace RakeMultiplayer
             };
             RakeNetworkManager.Instance?.ServerBroadcast(packet.Serialize());
 
+            // The victim plays its own pain sound; the host needs the clone's one.
+            PlayerAudio.PlayPain(victim);
+
             // Ragdoll on the host and on every client
             PlayerRagdoll.TriggerNetworked(net.PlayerId, away);
 
@@ -928,6 +939,72 @@ namespace RakeMultiplayer
         /// moves, the agent owns the rotation and the Rake should look where it walks.
         /// Overriding it made the model face sideways relative to its movement.
         /// </summary>
+        /// <summary>
+        /// Clients never run Enemy_AI, so none of the Rake sounds (footsteps, chase
+        /// vocals, attack roars) are triggered there. Mirror them from the movement and
+        /// the synced state, through the Rake's own 3D AudioSource.
+        /// </summary>
+        private void UpdateClientAudio()
+        {
+            var src = audioSource != null ? audioSource : (enemyAI != null ? enemyAI.audioSource : null);
+            if (src == null) return;
+
+            float dt = Time.deltaTime;
+            Vector3 pos = transform.position;
+
+            float speed = 0f;
+            if (_clientAudioValid && dt > 0.0001f)
+            {
+                speed = (pos - _clientAudioPosition).magnitude / dt;
+            }
+            _clientAudioPosition = pos;
+            _clientAudioValid = true;
+
+            if (speed > 0.35f)
+            {
+                _clientStepTimer -= dt;
+                if (_clientStepTimer <= 0f)
+                {
+                    _clientStepTimer = speed > 3.5f ? 0.34f : 0.52f;
+                    if (enemyAI != null && enemyAI.walkSound != null)
+                    {
+                        src.PlayOneShot(enemyAI.walkSound, 0.8f);
+                    }
+                }
+            }
+            else
+            {
+                _clientStepTimer = 0f;
+            }
+
+            if (currentState != _clientAudioState)
+            {
+                _clientAudioState = currentState;
+                _clientVocalTimer = 0f;
+            }
+
+            _clientVocalTimer -= dt;
+            if (_clientVocalTimer > 0f) return;
+
+            if (currentState == RakeState.Chase)
+            {
+                _clientVocalTimer = UnityEngine.Random.Range(4f, 7f);
+                PlayChaseVocalization();
+            }
+            else if (currentState == RakeState.Attack)
+            {
+                _clientVocalTimer = 2.5f;
+                if (enemyAI != null && enemyAI.playerAttackRoars != null && enemyAI.playerAttackRoars.Length > 0)
+                {
+                    src.PlayOneShot(enemyAI.playerAttackRoars[UnityEngine.Random.Range(0, enemyAI.playerAttackRoars.Length)]);
+                }
+            }
+            else
+            {
+                _clientVocalTimer = 1f;
+            }
+        }
+
         private void FaceTarget(Vector3 direction, float speed)
         {
             if (direction.sqrMagnitude < 0.0001f) return;

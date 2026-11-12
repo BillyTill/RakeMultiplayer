@@ -1626,6 +1626,8 @@ namespace RakeMultiplayer
             Vector3 away = victim.transform.position - packet.SourcePosition;
             away.y = 0f;
 
+            PlayerAudio.PlayPain(victim.transform);
+
             if (PlayerRagdoll.TriggerRemote(packet.PlayerId, victim.transform, away))
             {
                 RakeMultiplayerPlugin.Log?.LogInfo("[Ragdoll] Showing remote hit for player " + packet.PlayerId);
@@ -2121,11 +2123,9 @@ namespace RakeMultiplayer
                         if (fireSoundField != null && sfxField != null)
                         {
                             var fireSound = fireSoundField.GetValue(rifle) as AudioClip;
-                            var sfx = sfxField.GetValue(rifle) as AudioSource;
-                            if (fireSound != null && sfx != null)
-                            {
-                                sfx.PlayOneShot(fireSound);
-                            }
+                            // The clone AudioSources are disabled, so play a temporary 3D
+                            // source at the shooter instead of on its weapon.
+                            PlayerAudio.PlayAt(fireSound, shooter.transform.position + Vector3.up * 1.4f, 1f);
                         }
                     }
                 }
@@ -2156,11 +2156,7 @@ namespace RakeMultiplayer
                         if (fireSoundField != null && sfxField != null)
                         {
                             var fireSound = fireSoundField.GetValue(sniper) as AudioClip;
-                            var sfx = sfxField.GetValue(sniper) as AudioSource;
-                            if (fireSound != null && sfx != null)
-                            {
-                                sfx.PlayOneShot(fireSound);
-                            }
+                            PlayerAudio.PlayAt(fireSound, shooter.transform.position + Vector3.up * 1.4f, 1f);
                         }
                     }
                 }
