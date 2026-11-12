@@ -41,5 +41,6 @@ namespace RakeMultiplayer.Networking
         PlayerTeleport = 32,
         LevelChange = 33,
         ItemState = 34,
+        PlayerDamaged = 35,
     }
 }

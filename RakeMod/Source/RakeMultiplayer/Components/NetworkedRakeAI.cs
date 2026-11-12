@@ -71,6 +71,12 @@ namespace RakeMultiplayer
         // Smoothed animator speed (clients only) so state flapping does not jerk the walk blend
         private float targetSpeed;
 
+        // Server-authoritative Rake hit
+        private const float AttackInterval = 1.4f;
+        private const int AttackDamage = 10;
+        private const string AttackDamageType = "RakeAttack";
+        private float _attackCooldown;
+
         // AI State Machine
         public enum RakeState : byte
         {
@@ -632,12 +638,59 @@ namespace RakeMultiplayer
                 animator.SetBool("bAttack", true);
             }
 
+            // One hit per AttackInterval while the target stays in range
+            _attackCooldown -= Time.deltaTime;
+            if (_attackCooldown <= 0f)
+            {
+                _attackCooldown = AttackInterval;
+                DealRakeDamage(currentTarget);
+            }
+
             // Attack -> Chase: target escaped (moved out of range)
             if (Vector3.Distance(transform.position, currentTarget.position) > attackRange * 2f)
             {
                 TransitionToState(RakeState.Chase);
                 return;
             }
+        }
+
+        /// <summary>
+        /// Apply one Rake hit. The host damages its own player directly; for a client the
+        /// victim gets a PlayerDamaged packet and applies it locally, so the vanilla
+        /// damage effects and the ragdoll hit reaction run on every peer.
+        /// </summary>
+        private void DealRakeDamage(Transform victim)
+        {
+            if (victim == null) return;
+
+            var net = victim.GetComponent<NetworkedPlayer>();
+            if (net == null) return;
+
+            if (net.isLocalPlayer)
+            {
+                var fps = victim.GetComponent<FPSController>();
+                if (fps == null) return;
+
+                RakeMultiplayerPlugin.Log?.LogInfo("[AI] Rake hit the host for " + AttackDamage);
+                fps.TakeDamage(AttackDamage, AttackDamageType);
+                return;
+            }
+
+            if (net.PlayerId <= 0) return;
+
+            var packet = new PlayerDamagedPacket
+            {
+                PlayerId = net.PlayerId,
+                Amount = AttackDamage,
+                DamageType = AttackDamageType,
+                SourcePosition = transform.position
+            };
+
+            bool sent = RakeNetworkManager.Instance != null &&
+                        RakeNetworkManager.Instance.SendToPlayer(net.PlayerId, packet.Serialize());
+
+            RakeMultiplayerPlugin.Log?.LogInfo("[AI] Rake hit player " + net.PlayerId +
+                                              " for " + AttackDamage + " (sent=" + sent + ")");
         }
 
         private void UpdateBlocking()

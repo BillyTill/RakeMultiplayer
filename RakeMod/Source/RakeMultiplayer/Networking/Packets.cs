@@ -87,6 +87,39 @@ namespace RakeMultiplayer.Networking
     /// New player connected notification
     /// Server -> All
     /// </summary>
+    /// <summary>
+    /// A Rake hit on one specific player.
+    /// Server -> the victim client.
+    /// </summary>
+    public class PlayerDamagedPacket : NetworkPacket
+    {
+        public override PacketType Type => PacketType.PlayerDamaged;
+
+        public int PlayerId;
+        public int Amount;
+        public string DamageType;
+        public Vector3 SourcePosition;
+
+        public override void Write(BinaryWriter writer)
+        {
+            writer.Write(PlayerId);
+            writer.Write(Amount);
+            writer.Write(DamageType ?? string.Empty);
+            writer.Write(SourcePosition.x);
+            writer.Write(SourcePosition.y);
+            writer.Write(SourcePosition.z);
+        }
+
+        public override void Read(BinaryReader reader)
+        {
+            PlayerId = reader.ReadInt32();
+            Amount = reader.ReadInt32();
+            DamageType = reader.ReadString();
+            SourcePosition = new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
+        }
+    }
+
+
     public class PlayerConnectedPacket : NetworkPacket
     {
         public override PacketType Type => PacketType.PlayerConnected;

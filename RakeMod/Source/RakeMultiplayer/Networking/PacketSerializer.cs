@@ -53,6 +53,7 @@ namespace RakeMultiplayer.Networking
                     PacketType.PlayerTeleport => new PlayerTeleportPacket(),
                     PacketType.LevelChange => new LevelChangePacket(),
                     PacketType.ItemState => new ItemStatePacket(),
+                    PacketType.PlayerDamaged => new PlayerDamagedPacket(),
                     _ => throw new InvalidOperationException($"Unknown packet type: {type} (byte value: {(byte)type})")
                 };
                 packet.Read(reader);

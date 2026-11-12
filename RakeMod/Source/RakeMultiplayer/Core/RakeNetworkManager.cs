@@ -446,6 +446,22 @@ namespace RakeMultiplayer
             }
         }
 
+        /// <summary>
+        /// Server: send raw packet data to a single player.
+        /// Id scheme: host = 1, clients = connectionId + 1.
+        /// </summary>
+        public bool SendToPlayer(int playerId, byte[] data)
+        {
+            if (!RakeMultiplayerPlugin.isServer || _server == null) return false;
+            if (playerId <= 1) return false; // host is local, nothing to send
+
+            int connectionId = playerId - 1;
+            if (!_connectedClients.Contains(connectionId)) return false;
+
+            _server.Send(connectionId, data);
+            return true;
+        }
+
         private void OnServerDataReceived(int connectionId, byte[] data)
         {
             try
@@ -1283,6 +1299,9 @@ namespace RakeMultiplayer
                     case PacketType.DamageApplied:
                         HandleClientDamageApplied((DamageAppliedPacket)packet);
                         break;
+                    case PacketType.PlayerDamaged:
+                        HandleClientPlayerDamaged((PlayerDamagedPacket)packet);
+                        break;
                     case PacketType.FireVisuals:
                         HandleClientFireVisuals((FireVisualsPacket)packet);
                         break;
@@ -1532,6 +1551,29 @@ namespace RakeMultiplayer
             {
                 RakeMultiplayerPlugin.Log?.LogWarning("[3.4] NetworkedRakeAI not cached on client!");
             }
+        }
+
+        /// <summary>
+        /// Client: the server says the Rake hit us. Apply it to the local player so the
+        /// vanilla damage effects (pain sound, blood, death) and the ragdoll hit reaction
+        /// run exactly as they do on the host.
+        /// </summary>
+        private void HandleClientPlayerDamaged(PlayerDamagedPacket packet)
+        {
+            var spawner = PlayerSpawner.Instance;
+            var local = spawner != null ? spawner.LocalPlayer : null;
+            if (local == null) return;
+            if (local.PlayerId != packet.PlayerId) return;
+
+            var fps = local.GetComponent<FPSController>();
+            if (fps == null)
+            {
+                RakeMultiplayerPlugin.Log?.LogWarning("[AI] PlayerDamaged: no FPSController on the local player");
+                return;
+            }
+
+            RakeMultiplayerPlugin.Log?.LogInfo($"[AI] Rake hit us for {packet.Amount} ({packet.DamageType})");
+            fps.TakeDamage(packet.Amount, packet.DamageType);
         }
 
         private void HandleClientDamageApplied(DamageAppliedPacket packet)
