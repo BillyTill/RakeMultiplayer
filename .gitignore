@@ -109,3 +109,6 @@ RakeMultiplayer_Fixed/
 # Baked player model (derived from retail game assets - regenerate locally)
 *.bin
 RakePlayerSkin.png
+
+# AssetRipper export (local reference only - >100 MB files, not pushed)
+/1/
