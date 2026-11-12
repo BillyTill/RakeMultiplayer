@@ -163,6 +163,12 @@ namespace RakeMultiplayer
             menuObj.AddComponent<UI.MultiplayerMenu>();
             Log.LogInfo("[RakeMultiplayer] MultiplayerMenu created in plugin Awake");
 
+            // Tab anywhere -> vanilla camera monitor (works for every hunter).
+            var cameraViewObj = new UnityEngine.GameObject("RakeCameraView");
+            UnityEngine.Object.DontDestroyOnLoad(cameraViewObj);
+            cameraViewObj.AddComponent<CameraViewHotkey>();
+            Log.LogInfo("[RakeMultiplayer] Camera view hotkey created (Tab)");
+
             // InitializeNetworking() УБРАН — сеть только через UI
             // Если Enabled = false, сеть не стартует, но патчи применены (F1 работает)
 

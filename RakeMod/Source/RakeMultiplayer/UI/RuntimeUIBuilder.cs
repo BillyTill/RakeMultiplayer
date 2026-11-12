@@ -122,7 +122,7 @@ namespace RakeMultiplayer.UI
             CreateSeparator(_mainMenuPanel.transform, -132f, 440f);
 
             CreateText(_mainMenuPanel.transform, "Hint",
-                "F1 - menu   |   host: 1 Rake + up to 3 hunters", 12, new Vector2(0, -160), ColMuted, TextAnchor.MiddleCenter);
+                "F1 - menu   |   Tab - cameras   |   1 Rake + up to 3 hunters", 12, new Vector2(0, -160), ColMuted, TextAnchor.MiddleCenter);
             CreateText(_mainMenuPanel.transform, "Version", PluginInfo.NAME + "  v" + PluginInfo.VERSION, 11,
                 new Vector2(0, -186), new Color(0.35f, 0.33f, 0.30f, 1f), TextAnchor.MiddleCenter);
         }

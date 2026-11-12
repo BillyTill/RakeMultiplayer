@@ -39,6 +39,11 @@ namespace RakeMultiplayer
         private const float JumpHeight = 1.0f;
         private const float JumpCooldown = 50f;
 
+        private const float ClimbSpeed = 3.6f;
+        private const float ClimbProbeDistance = 1.15f;
+        private const float ClimbChestHeight = 1.25f;
+        private const float ClimbKneeHeight = 0.55f;
+
         private const float SenseRange = 100f;
 
         private static RakePlayerController _instance;
@@ -95,6 +100,11 @@ namespace RakeMultiplayer
         private float _jumpSpeed;
         private Vector3 _jumpDirection;
         private bool _jumpActive;
+
+        private bool _climbing;
+        private Vector3 _climbNormal = Vector3.forward;
+        private Vector3 _climbMove;
+        private float _mantleTimer;
 
         private float _scanTimer;
         private readonly List<NetworkedPlayer> _players = new List<NetworkedPlayer>();
@@ -473,7 +483,7 @@ namespace RakeMultiplayer
                 RefreshTargets();
             }
 
-            if (AttacksAllowed() && !DebugConsole.ConsoleOpen && !_jumpActive) TryAutoAttack();
+            if (AttacksAllowed() && !DebugConsole.ConsoleOpen && !_jumpActive && !_climbing) TryAutoAttack();
         }
 
         private void ReadLook()
@@ -509,30 +519,48 @@ namespace RakeMultiplayer
 
             // Mid-leap the body keeps the ballistic horizontal speed from the jump.
             if (_jumpActive) move = _jumpDirection * _jumpSpeed;
+            else if (_rakeController != null && _rakeController.enabled)
+            {
+                UpdateClimbing(dt, moving, direction);
+                if (_climbing) move = _climbMove;
+            }
 
             if (_rakeController != null && _rakeController.enabled)
             {
-                // CharacterController handles terrain, steps and obstacles; gravity is
-                // applied by hand because the Rake has no Rigidbody.
-                if (_rakeController.isGrounded)
+                if (_climbing)
                 {
-                    if (_verticalVelocity < 0f) _verticalVelocity = -2f;
+                    // On a wall the climb replaces gravity: the body is pinned to it.
+                    _verticalVelocity = 0f;
+                    _rakeController.Move(_climbMove * dt);
                 }
                 else
                 {
-                    _verticalVelocity += Physics.gravity.y * dt;
-                }
+                    // CharacterController handles terrain, steps and obstacles; gravity is
+                    // applied by hand because the Rake has no Rigidbody.
+                    if (_rakeController.isGrounded)
+                    {
+                        if (_verticalVelocity < 0f) _verticalVelocity = -2f;
+                    }
+                    else
+                    {
+                        _verticalVelocity += Physics.gravity.y * dt;
+                    }
 
-                move.y = _verticalVelocity;
-                _rakeController.Move(move * dt);
-                UpdateJump(dt);
+                    move.y = _verticalVelocity;
+                    _rakeController.Move(move * dt);
+                    UpdateJump(dt);
+                }
             }
             else if (moving)
             {
                 _rake.position += direction * speed * dt;
             }
 
-            if (_firstPerson)
+            if (_climbing)
+            {
+                // Already turned towards the wall by UpdateClimbing.
+            }
+            else if (_firstPerson)
             {
                 // In first person the body follows the view, not the movement direction.
                 _rake.rotation = Quaternion.Euler(0f, _yaw, 0f);
@@ -544,7 +572,7 @@ namespace RakeMultiplayer
             }
 
             // Running/walking is audible; the sneak must stay silent.
-            if (moving && !stealth)
+            if (moving && !stealth && !_climbing)
             {
                 _stepTimer -= dt;
                 if (_stepTimer <= 0f)
@@ -563,7 +591,14 @@ namespace RakeMultiplayer
 
             if (_animator != null)
             {
-                if (stealth)
+                if (_climbing)
+                {
+                    // No climb clip in the game: a walk cycle against the wall reads as climbing.
+                    _animator.SetBool("bCrouch", false);
+                    _animator.SetInteger("WalkType", 1);
+                    _animator.SetFloat("Speed", 1f);
+                }
+                else if (stealth)
                 {
                     // Vanilla sneak: crouched, WalkType 0, no footstep trigger.
                     _animator.SetBool("bCrouch", true);
@@ -845,6 +880,143 @@ namespace RakeMultiplayer
         /// on a 50 s cooldown. The body is ballistic for the whole flight; input does
         /// not steer it, so the leap is predictable for the hunters.
         /// </summary>
+        // -------------------------------------------------------------------- climbing
+
+        /// <summary>
+        /// Climb any vertical surface like a ladder: hold W against a wall to go up,
+        /// S to go down, A/D to slide sideways, Space to let go. The body is pinned to
+        /// the wall and gravity is suspended until it reaches the top or releases.
+        /// </summary>
+        private void UpdateClimbing(float dt, bool moving, Vector3 direction)
+        {
+            if (_climbing)
+            {
+                if (Input.GetKeyDown(KeyCode.Space) || !moving)
+                {
+                    StopClimbing(false);
+                    return;
+                }
+
+                bool down = Input.GetKey(KeyCode.S);
+                bool up = Input.GetKey(KeyCode.W);
+
+                RaycastHit wall;
+                if (FindWall(-_climbNormal, ClimbChestHeight, out wall))
+                {
+                    _climbNormal = wall.normal;
+                    _mantleTimer = 0f;
+                }
+                else if (up && FindWall(-_climbNormal, ClimbKneeHeight, out wall))
+                {
+                    // Only the lower part still touches the wall, and we are going up:
+                    // this is the top edge, pull the body over it.
+                    _climbNormal = wall.normal;
+                    _mantleTimer = 0.45f;
+                }
+                else
+                {
+                    StopClimbing(false);
+                    return;
+                }
+
+                if (down && _rakeController != null && _rakeController.isGrounded)
+                {
+                    StopClimbing(false);
+                    return;
+                }
+
+                Vector3 face = -_climbNormal;
+                face.y = 0f;
+                if (face.sqrMagnitude > 0.001f) _rake.rotation = Quaternion.LookRotation(face);
+
+                if (_mantleTimer > 0f)
+                {
+                    _mantleTimer -= dt;
+                    _climbMove = _rake.forward * 3.4f + Vector3.up * 1.1f;
+                    return;
+                }
+
+                float climb = (Input.GetKey(KeyCode.W) ? 1f : 0f) - (Input.GetKey(KeyCode.S) ? 1f : 0f);
+                _climbMove = Vector3.up * (climb * ClimbSpeed) - _climbNormal * 1.4f;
+
+                float side = (Input.GetKey(KeyCode.D) ? 1f : 0f) - (Input.GetKey(KeyCode.A) ? 1f : 0f);
+                if (side != 0f) _climbMove += _rake.right * (side * 2.8f);
+                return;
+            }
+
+            if (!moving || _jumpActive) return;
+            if (_rakeController == null || !_rakeController.isGrounded) return;
+
+            RaycastHit hit;
+            if (!FindWall(direction, ClimbChestHeight, out hit)) return;
+
+            Vector3 toWall = hit.point - _rake.position;
+            toWall.y = 0f;
+            if (toWall.sqrMagnitude < 0.001f) return;
+
+            Vector3 into = toWall.normalized;
+            if (Vector3.Dot(direction, into) < 0.4f && Vector3.Dot(_rake.forward, into) < 0.4f) return;
+
+            _climbing = true;
+            _mantleTimer = 0f;
+            _climbNormal = hit.normal;
+            _climbMove = Vector3.zero;
+            _verticalVelocity = 0f;
+
+            RakeMultiplayerPlugin.Log?.LogInfo("[RakePlay] climbing wall: " + hit.collider.name);
+        }
+
+        private void StopClimbing(bool reachedTop)
+        {
+            if (!_climbing) return;
+
+            _climbing = false;
+            _mantleTimer = 0f;
+            _climbMove = Vector3.zero;
+            _verticalVelocity = reachedTop ? 2f : 0f;
+
+            if (_animator != null) _animator.SetFloat("Speed", 0f);
+
+            RakeMultiplayerPlugin.Log?.LogInfo("[RakePlay] climb finished" +
+                                               (reachedTop ? " (over the top)" : ""));
+        }
+
+        /// <summary>Nearest non-character vertical surface in front of the body.</summary>
+        private bool FindWall(Vector3 direction, float height, out RaycastHit wall)
+        {
+            wall = new RaycastHit();
+            if (_rake == null) return false;
+
+            direction.y = 0f;
+            if (direction.sqrMagnitude < 0.001f) return false;
+            direction.Normalize();
+
+            Vector3 origin = _rake.position + Vector3.up * height;
+            RaycastHit[] hits = Physics.RaycastAll(origin, direction, ClimbProbeDistance);
+
+            float bestDistance = float.MaxValue;
+            bool found = false;
+
+            for (int i = 0; i < hits.Length; i++)
+            {
+                RaycastHit hit = hits[i];
+                Collider col = hit.collider;
+                if (col == null || col.isTrigger) continue;
+                if (col.transform.IsChildOf(_rake)) continue;
+                if (col.GetComponentInParent<NetworkedPlayer>() != null) continue;
+                if (col.GetComponentInParent<Animal_AI>() != null) continue;
+
+                // Floors, roofs and gentle slopes are not climbable.
+                if (Mathf.Abs(hit.normal.y) > 0.45f) continue;
+
+                if (hit.distance >= bestDistance) continue;
+                bestDistance = hit.distance;
+                wall = hit;
+                found = true;
+            }
+
+            return found;
+        }
         private void TryJump()
         {
             if (_jumpActive || _jumpCooldown > 0f) return;
@@ -972,11 +1144,11 @@ namespace RakeMultiplayer
 
             _small.normal.textColor = Color.white;
             GUI.Label(new Rect(16f, 36f, 620f, 20f),
-                "WASD move, Shift run, Ctrl sneak (silent), Space leap, V view (" + (_firstPerson ? "1st" : "3rd") + "), mouse look", _small);
+                "WASD move, Shift run, Ctrl sneak (silent), Space leap, W at a wall - climb, V view (" + (_firstPerson ? "1st" : "3rd") + "), mouse look", _small);
             GUI.Label(new Rect(16f, 56f, 620f, 20f),
                 "Cooldowns: player " + Mathf.CeilToInt(_playerCooldown) + "s / animal " +
                 Mathf.CeilToInt(_animalCooldown) + "s / camera " + Mathf.CeilToInt(_cameraCooldown) +
-                "s / leap " + Mathf.CeilToInt(_jumpCooldown) + "s   last: " + _lastAction, _small);
+                "s / leap " + Mathf.CeilToInt(_jumpCooldown) + "s   last: " + _lastAction + (_climbing ? "   [CLIMBING]" : ""), _small);
 
             DrawSense();
         }

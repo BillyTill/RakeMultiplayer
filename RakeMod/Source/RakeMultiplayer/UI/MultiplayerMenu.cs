@@ -22,6 +22,17 @@ namespace RakeMultiplayer.UI
         private float _connectionTimer = 0f;
         private bool _lastIsServer = false;
         private bool _lastIsConnected = false;
+        private string _lastSceneName;
+
+        /// <summary>True while the F1 menu (or any of its panels) is on screen.</summary>
+        public static bool IsOpen
+        {
+            get
+            {
+                var menu = FindObjectOfType<MultiplayerMenu>();
+                return menu != null && menu._menuVisible;
+            }
+        }
 
         private void Awake()
         {
@@ -49,6 +60,17 @@ namespace RakeMultiplayer.UI
 
         private void Update()
         {
+            // A freshly loaded match closes the menu that started it.
+            string sceneName = UnityEngine.Application.loadedLevelName;
+            if (sceneName != _lastSceneName)
+            {
+                _lastSceneName = sceneName;
+                if (_menuVisible && !string.IsNullOrEmpty(sceneName) && sceneName.StartsWith("level"))
+                {
+                    ToggleMenu();
+                }
+            }
+
             if (Input.GetKeyDown(KeyCode.F1))
             {
                 ToggleMenu();
@@ -85,6 +107,7 @@ namespace RakeMultiplayer.UI
                 if (RakeMultiplayerPlugin.isConnected)
                 {
                     _waitingForConnection = false;
+                    LoadingScreen.Hide();
                     
                     // Восстановить кнопку
                     if (_uiBuilder != null && _uiBuilder.ConnectButton != null)
@@ -99,6 +122,7 @@ namespace RakeMultiplayer.UI
                 else if (_connectionTimer > 5.0f) // Таймаут 5 секунд
                 {
                     _waitingForConnection = false;
+                    LoadingScreen.Hide();
                     RakeMultiplayerPlugin.Log?.LogError("[Menu] Connection timed out!");
                     
                     // Восстановить кнопку с ошибкой
@@ -300,8 +324,24 @@ namespace RakeMultiplayer.UI
                 if (_mainContainer != null) _mainContainer.SetActive(false);
                 HideAllPanels();
 
-                UnityEngine.Application.LoadLevel(1); // Хост грузит СРАЗУ
+                StartCoroutine(HostStartGameRoutine());
             }
+        }
+
+        private System.Collections.IEnumerator HostStartGameRoutine()
+        {
+            LoadingScreen.Show("THE HUNT BEGINS", "HOST", "Preparing the forest", false);
+            LoadingScreen.SetProgress(0.2f);
+            yield return null;
+            yield return new WaitForSeconds(1.05f);
+
+            LoadingScreen.SetStatus("Loading the level");
+            LoadingScreen.SetProgress(1f);
+            yield return new WaitForSeconds(0.35f);
+
+            UnityEngine.Application.LoadLevel(1);
+            LoadingScreen.SetProgress(1f);
+            LoadingScreen.Hide();
         }
         
         private bool _startGameSent = false;
@@ -313,6 +353,7 @@ namespace RakeMultiplayer.UI
             {
                 _networkManager.Disconnect();
             }
+            LoadingScreen.Hide();
             _startGameSent = false; // Allow starting a new game
             LobbyState.HostIsRake = false;
             ShowMainMenu();
@@ -358,6 +399,8 @@ namespace RakeMultiplayer.UI
             // UI feedback: disable button, show connecting
             _waitingForConnection = true;
             _connectionTimer = 0f;
+
+            LoadingScreen.Show("CONTACTING THE HOST", "ONLINE", "Handshaking with the host", true);
             
             if (_uiBuilder != null && _uiBuilder.ConnectButton != null)
             {

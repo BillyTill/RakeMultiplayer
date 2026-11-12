@@ -1408,6 +1408,22 @@ namespace RakeMultiplayer
 
             RakeMultiplayerPlugin.Log?.LogInfo($"[Net] Received StartGame packet! Loading level index: {packet.SceneName}");
 
+            // The level arrives in a moment; show the styled loader instead of
+            // freezing on the lobby for the whole synchronous LoadLevel.
+            UI.LoadingScreen.Show("ENTERING THE FOREST", "CLIENT", "The host has started the hunt", false);
+            StartCoroutine(ClientStartGameRoutine(packet));
+        }
+
+        private IEnumerator ClientStartGameRoutine(StartGamePacket packet)
+        {
+            UI.LoadingScreen.SetProgress(0.2f);
+            yield return null;
+            yield return new WaitForSeconds(1.05f);
+
+            UI.LoadingScreen.SetStatus("Loading the level");
+            UI.LoadingScreen.SetProgress(1f);
+            yield return new WaitForSeconds(0.35f);
+
             IsApplyingNetworkLevelChange = true;
             try
             {
@@ -1428,6 +1444,9 @@ namespace RakeMultiplayer
                 // Allow the next match to be started (and do not latch on load failure)
                 _clientSceneLoading = false;
             }
+
+            UI.LoadingScreen.SetProgress(1f);
+            UI.LoadingScreen.Hide();
         }
 
         /// <summary>

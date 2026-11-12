@@ -419,6 +419,40 @@ namespace RakeMultiplayer
             });
 
 
+            Register("loading", "loading [connect|off]", "Preview the styled loading screen (6 s)", args =>
+            {
+                if (args.Length > 0 && args[0].Equals("off", StringComparison.OrdinalIgnoreCase))
+                {
+                    RakeMultiplayer.UI.LoadingScreen.Hide();
+                    return "loading: hidden";
+                }
+
+                bool connect = args.Length > 0 && args[0].Equals("connect", StringComparison.OrdinalIgnoreCase);
+
+                if (connect)
+                {
+                    RakeMultiplayer.UI.LoadingScreen.Show("CONTACTING THE HOST", "ONLINE",
+                        "Handshaking with the host", true);
+                }
+                else
+                {
+                    RakeMultiplayer.UI.LoadingScreen.Show("THE HUNT BEGINS", "HOST",
+                        "Preparing the forest", false);
+                    RakeMultiplayer.UI.LoadingScreen.SetProgress(0.45f);
+                    Patches.CoroutineHelper.DelayedCall(2.0f, () =>
+                        RakeMultiplayer.UI.LoadingScreen.SetStatus("Loading the level"));
+                    Patches.CoroutineHelper.DelayedCall(2.8f, () =>
+                        RakeMultiplayer.UI.LoadingScreen.SetProgress(1f));
+                }
+
+                Patches.CoroutineHelper.DelayedCall(5.5f, RakeMultiplayer.UI.LoadingScreen.Hide);
+                return "loading: preview shown for 6 s";
+            });
+            Register("cams", "cams", "Open/close the camera monitor from anywhere (same as Tab)", args =>
+            {
+                if (RakePlayerController.IsActive) return "cams: not while playing the Rake";
+                return CameraViewHotkey.Toggle();
+            });
             Register("rake play", "rake play [on|off]",
                 "Play as the Rake (host/single-player): third-person, sneak/run, auto-attack at night", args =>
             {
