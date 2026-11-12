@@ -22,6 +22,10 @@ namespace RakeMultiplayer
         private Animator _cachedAnimator;
         private WeaponManager _weaponManager;
 
+        // Cached reflection lookup of the weapon classes' public bool bSight flag
+        private static readonly Dictionary<Type, System.Reflection.FieldInfo> _sightFields =
+            new Dictionary<Type, System.Reflection.FieldInfo>();
+
         // Sync timer
         private float sendTimer;
 
@@ -229,6 +233,14 @@ namespace RakeMultiplayer
             Quaternion currentRot = transform.rotation;
             byte currentAnimState = GetCurrentAnimState();
 
+            if (currentAnimState != lastSentAnimState)
+            {
+                var wmLog = GetWeaponManager();
+                RakeMultiplayerPlugin.Log?.LogInfo("[Anim] state=" + currentAnimState +
+                    " weaponID=" + (wmLog != null ? wmLog.currentWeaponID : -1) +
+                    " sight=" + (wmLog != null && ReadSight(wmLog.weaponSelect)));
+            }
+
             // Delta compression check
             bool posChanged = Vector3.Distance(currentPos, lastSentPosition) > 0.01f;
             bool rotChanged = Quaternion.Angle(currentRot, lastSentRotation) > 0.5f;
@@ -268,19 +280,72 @@ namespace RakeMultiplayer
 
         private byte GetCurrentAnimState()
         {
-            // Bitmask: bit0=running, bit1=crouching, bit2=aiming, bit3=grounded
+            // Bitmask: bit0=running, bit1=crouching, bit2=aiming, bit3=grounded,
+            //          bit4=weapon out
             byte state = 0;
             if (_cachedAnimator != null)
             {
                 if (_cachedAnimator.GetBool("Run")) state |= 1 << 0;
                 if (_cachedAnimator.GetBool("Crouch")) state |= 1 << 1;
-                if (_cachedAnimator.GetBool("Aim")) state |= 1 << 2;
                 if (_cachedAnimator.GetBool("Grounded")) state |= 1 << 3;
             }
 
-            // bit4 = a weapon is out; the third-person body only shows the gun then
-            if (_weaponManager != null && _weaponManager.currentWeaponID > 0) state |= 1 << 4;
+            var wm = GetWeaponManager();
+            if (wm != null)
+            {
+                // currentWeaponID is 0 while the weapon is holstered
+                if (wm.currentWeaponID > 0) state |= 1 << 4;
+
+                // aiming is the sight key (Fire2 / right mouse) handled by the weapon script
+                if (ReadSight(wm.weaponSelect)) state |= 1 << 2;
+            }
+
             return state;
+        }
+
+        private WeaponManager GetWeaponManager()
+        {
+            if (_weaponManager != null) return _weaponManager;
+
+            // The weapon hierarchy can still be inactive during Awake, so resolve lazily
+            // and include inactive children.
+            _weaponManager = WeaponManager.instance;
+            if (_weaponManager == null) _weaponManager = GetComponentInChildren<WeaponManager>();
+            return _weaponManager;
+        }
+
+        /// <summary>
+        /// Read the sight/aim flag from the currently selected weapon. Every weapon class
+        /// (Rifle_weapon, ...) declares its own public bool bSight, so it is looked up by
+        /// name once per type instead of depending on a concrete class.
+        /// </summary>
+        private static bool ReadSight(Transform weaponSelect)
+        {
+            if (weaponSelect == null) return false;
+
+            var components = weaponSelect.GetComponents<MonoBehaviour>();
+            for (int i = 0; i < components.Length; i++)
+            {
+                var component = components[i];
+                if (component == null) continue;
+
+                Type type = component.GetType();
+                System.Reflection.FieldInfo field;
+                if (!_sightFields.TryGetValue(type, out field))
+                {
+                    field = type.GetField("bSight",
+                        System.Reflection.BindingFlags.Public |
+                        System.Reflection.BindingFlags.NonPublic |
+                        System.Reflection.BindingFlags.Instance);
+                    _sightFields[type] = field;
+                }
+
+                if (field != null && field.FieldType == typeof(bool))
+                {
+                    return (bool)field.GetValue(component);
+                }
+            }
+            return false;
         }
 
         public void ApplyPosition(Vector3 position)
