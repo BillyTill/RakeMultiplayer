@@ -32,6 +32,13 @@ namespace RakeMultiplayer
         private const float AnimalCooldown = 10f;
         private const float CameraCooldown = 50f;
 
+        /// <summary>After taking damage every attack cooldown is raised to at least this.</summary>
+        private const float DamageAttackLockout = 10f;
+
+        private const float JumpDistance = 10f;
+        private const float JumpHeight = 1.0f;
+        private const float JumpCooldown = 50f;
+
         private const float SenseRange = 100f;
 
         private static RakePlayerController _instance;
@@ -82,6 +89,12 @@ namespace RakeMultiplayer
         private float _attackAnimation;
         private bool _actionLocked;
         private string _lastAction = "-";
+
+        private float _jumpCooldown;
+        private float _jumpElapsed;
+        private float _jumpSpeed;
+        private Vector3 _jumpDirection;
+        private bool _jumpActive;
 
         private float _scanTimer;
         private readonly List<NetworkedPlayer> _players = new List<NetworkedPlayer>();
@@ -426,6 +439,7 @@ namespace RakeMultiplayer
             _playerCooldown = Mathf.Max(0f, _playerCooldown - dt);
             _animalCooldown = Mathf.Max(0f, _animalCooldown - dt);
             _cameraCooldown = Mathf.Max(0f, _cameraCooldown - dt);
+            _jumpCooldown = Mathf.Max(0f, _jumpCooldown - dt);
             _attackAnimation = Mathf.Max(0f, _attackAnimation - dt);
 
             if (!DebugConsole.ConsoleOpen && !_actionLocked)
@@ -459,7 +473,7 @@ namespace RakeMultiplayer
                 RefreshTargets();
             }
 
-            if (AttacksAllowed() && !DebugConsole.ConsoleOpen) TryAutoAttack();
+            if (AttacksAllowed() && !DebugConsole.ConsoleOpen && !_jumpActive) TryAutoAttack();
         }
 
         private void ReadLook()
@@ -477,6 +491,8 @@ namespace RakeMultiplayer
 
             float speed = stealth ? StealthSpeed : (run ? RunSpeed : WalkSpeed);
 
+            if (Input.GetKeyDown(KeyCode.Space)) TryJump();
+
             Vector3 input = Vector3.zero;
             if (Input.GetKey(KeyCode.W)) input += Vector3.forward;
             if (Input.GetKey(KeyCode.S)) input += Vector3.back;
@@ -490,6 +506,9 @@ namespace RakeMultiplayer
             if (moving) direction.Normalize();
 
             Vector3 move = moving ? direction * speed : Vector3.zero;
+
+            // Mid-leap the body keeps the ballistic horizontal speed from the jump.
+            if (_jumpActive) move = _jumpDirection * _jumpSpeed;
 
             if (_rakeController != null && _rakeController.enabled)
             {
@@ -506,6 +525,7 @@ namespace RakeMultiplayer
 
                 move.y = _verticalVelocity;
                 _rakeController.Move(move * dt);
+                UpdateJump(dt);
             }
             else if (moving)
             {
@@ -818,6 +838,89 @@ namespace RakeMultiplayer
             _actionLocked = false;
         }
 
+        // -------------------------------------------------------------------- jump
+
+        /// <summary>
+        /// A short forward leap: about 10 m along the view direction with a 1 m arc,
+        /// on a 50 s cooldown. The body is ballistic for the whole flight; input does
+        /// not steer it, so the leap is predictable for the hunters.
+        /// </summary>
+        private void TryJump()
+        {
+            if (_jumpActive || _jumpCooldown > 0f) return;
+            if (_rakeController != null && !_rakeController.isGrounded) return;
+
+            float gravity = Mathf.Abs(Physics.gravity.y);
+            if (gravity < 0.01f) gravity = 9.81f;
+
+            _jumpActive = true;
+            _jumpCooldown = JumpCooldown;
+            _jumpElapsed = 0f;
+
+            _jumpDirection = Quaternion.Euler(0f, _yaw, 0f) * Vector3.forward;
+            _jumpDirection.y = 0f;
+            if (_jumpDirection.sqrMagnitude < 0.001f) _jumpDirection = _rake.forward;
+            _jumpDirection.y = 0f;
+            _jumpDirection.Normalize();
+
+            // Up to JumpHeight, then back down: airtime sets the horizontal speed
+            // that carries the body the requested distance.
+            float airtime = 2f * Mathf.Sqrt(2f * JumpHeight / gravity);
+            _jumpSpeed = JumpDistance / Mathf.Max(airtime, 0.1f);
+
+            _verticalVelocity = Mathf.Sqrt(2f * gravity * JumpHeight);
+
+            _rake.rotation = Quaternion.LookRotation(_jumpDirection);
+            if (_animator != null)
+            {
+                _animator.SetBool("bCrouch", false);
+                _animator.SetFloat("Speed", 0f);
+            }
+
+            RakeMultiplayerPlugin.Log?.LogInfo("[RakePlay] jumped forward " + JumpDistance +
+                                               " m (speed " + _jumpSpeed.ToString("F1") + " m/s)");
+        }
+
+        private void UpdateJump(float dt)
+        {
+            if (!_jumpActive) return;
+
+            _jumpElapsed += dt;
+            bool grounded = _rakeController == null || _rakeController.isGrounded;
+            if ((grounded && _jumpElapsed > 0.15f) || _jumpElapsed > 2f)
+            {
+                _jumpActive = false;
+                if (_rakeController != null && _rakeController.isGrounded && _verticalVelocity < 0f)
+                {
+                    _verticalVelocity = -2f;
+                }
+            }
+        }
+
+        // ----------------------------------------------------------------- combat lock
+
+        /// <summary>
+        /// Called when the Rake takes a hit: attacks are locked for
+        /// <see cref="DamageAttackLockout"/> seconds, but never shortened if the current
+        /// cooldown is already longer.
+        /// </summary>
+        public static void NotifyDamageTaken(Transform rake)
+        {
+            if (_instance == null) return;
+            if (rake != null && _instance._rake != rake) return;
+            _instance.ApplyDamageLockout();
+        }
+
+        private void ApplyDamageLockout()
+        {
+            if (_playerCooldown < DamageAttackLockout) _playerCooldown = DamageAttackLockout;
+            if (_animalCooldown < DamageAttackLockout) _animalCooldown = DamageAttackLockout;
+            if (_cameraCooldown < DamageAttackLockout) _cameraCooldown = DamageAttackLockout;
+
+            RakeMultiplayerPlugin.Log?.LogInfo("[RakePlay] Rake hit: attack locked for " +
+                                               DamageAttackLockout + " s");
+        }
+
         private void FaceInstant(Vector3 worldPosition)
         {
             Vector3 dir = worldPosition - transform.position;
@@ -869,11 +972,11 @@ namespace RakeMultiplayer
 
             _small.normal.textColor = Color.white;
             GUI.Label(new Rect(16f, 36f, 620f, 20f),
-                "WASD move, Shift run, Ctrl sneak (silent), V view (" + (_firstPerson ? "1st" : "3rd") + "), mouse look", _small);
+                "WASD move, Shift run, Ctrl sneak (silent), Space leap, V view (" + (_firstPerson ? "1st" : "3rd") + "), mouse look", _small);
             GUI.Label(new Rect(16f, 56f, 620f, 20f),
                 "Cooldowns: player " + Mathf.CeilToInt(_playerCooldown) + "s / animal " +
                 Mathf.CeilToInt(_animalCooldown) + "s / camera " + Mathf.CeilToInt(_cameraCooldown) +
-                "s   last: " + _lastAction, _small);
+                "s / leap " + Mathf.CeilToInt(_jumpCooldown) + "s   last: " + _lastAction, _small);
 
             DrawSense();
         }

@@ -48,8 +48,10 @@ namespace RakeMultiplayer
         {
             "Bip01 Pelvis", "Bip01 Spine", "Bip01 Spine1", "Bip01 Spine2",
             "Bip01 Neck", "Bip01 Head",
-            "Bip01 L UpperArm", "Bip01 L Forearm", "Bip01 L Hand",
-            "Bip01 R UpperArm", "Bip01 R Forearm", "Bip01 R Hand",
+            // Hands are skinned to the forearms but are not simulated: two fewer
+            // rigidbodies/joints keeps the physics cost down with no visible loss.
+            "Bip01 L UpperArm", "Bip01 L Forearm",
+            "Bip01 R UpperArm", "Bip01 R Forearm",
             "Bip01 L Thigh", "Bip01 L Calf", "Bip01 L Foot",
             "Bip01 R Thigh", "Bip01 R Calf", "Bip01 R Foot",
         };
@@ -270,6 +272,9 @@ namespace RakeMultiplayer
             smr.rootBone = rootBone >= 0 && rootBone < _nodes.Length ? _nodes[rootBone] : bones[0];
             smr.sharedMaterial = RemotePlayerModelData.Material;
             smr.updateWhenOffscreen = true;
+            // No shadow pass: an 18-bone skinned caster doubles the ragdoll
+            // rendering cost for a body that lives four seconds.
+            smr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
 
             // The victim's camera sits inside this body: hide it locally so its
             // backfaces/shadows do not break the scene lighting from the inside.
@@ -283,10 +288,13 @@ namespace RakeMultiplayer
 
             if (!AddPhysics()) return false;
 
+            IgnorePlayerCollisions(player);
+
             if (local)
             {
-                AttachHeadCamera();
+                // Disable the old camera first so the head camera can copy its settings.
                 DisablePlayerCameras(player);
+                AttachHeadCamera();
                 PlayerInputLock.SetRagdoll(true);
                 if (_controller != null) _controller.enabled = false;
             }
@@ -298,6 +306,31 @@ namespace RakeMultiplayer
             return true;
         }
 
+        /// <summary>
+        /// The ragdoll is born inside the player's own colliders (and the remote clone's
+        /// CharacterController). Letting them push each other produced a burst of contacts
+        /// and visible jitter, so the two sets never interact.
+        /// </summary>
+        private void IgnorePlayerCollisions(Transform player)
+        {
+            if (player == null) return;
+
+            Collider[] ragdollColliders = GetComponentsInChildren<Collider>(true);
+            Collider[] playerColliders = player.GetComponentsInChildren<Collider>(true);
+
+            for (int i = 0; i < ragdollColliders.Length; i++)
+            {
+                Collider a = ragdollColliders[i];
+                if (a == null) continue;
+
+                for (int j = 0; j < playerColliders.Length; j++)
+                {
+                    Collider b = playerColliders[j];
+                    if (b == null || b == a) continue;
+                    Physics.IgnoreCollision(a, b, true);
+                }
+            }
+        }
         private void ApplyIdlePose()
         {
             var clip = RemotePlayerModelData.GetClip("Idle");
@@ -454,8 +487,17 @@ namespace RakeMultiplayer
                 rb.mass = MassFor(bone.name) * MassScale;
                 rb.drag = 0.1f;
                 rb.angularDrag = 2.0f;
-                rb.interpolation = RigidbodyInterpolation.Interpolate;
-                rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
+
+                // Continuous collision against the level is the expensive mode, so
+                // only the pelvis uses it (a fast limb can still poke through a
+                // wall, which is unnoticeable in a four second reaction).
+                bool core = bone.name.Contains("Pelvis") || bone.name.Contains("Head");
+                rb.interpolation = core ? RigidbodyInterpolation.Interpolate : RigidbodyInterpolation.None;
+                rb.collisionDetectionMode = bone.name.Contains("Pelvis")
+                    ? CollisionDetectionMode.Continuous
+                    : CollisionDetectionMode.Discrete;
+                rb.solverIterationCount = core ? 6 : 4;
+                rb.maxDepenetrationVelocity = 3f;
                 rigidbodies[bone] = rb;
 
                 var collider = bone.gameObject.AddComponent<CapsuleCollider>();
@@ -599,7 +641,7 @@ namespace RakeMultiplayer
 
             Vector3 velocity = dir * LaunchSpeed + Vector3.up * LaunchLift;
 
-            var bodies = GetComponentsInChildren<Rigidbody>();
+            var bodies = _bodies != null ? _bodies : GetComponentsInChildren<Rigidbody>();
             for (int i = 0; i < bodies.Length; i++)
             {
                 bodies[i].AddForce(velocity, ForceMode.VelocityChange);

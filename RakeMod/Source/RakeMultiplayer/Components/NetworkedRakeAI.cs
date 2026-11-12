@@ -1506,6 +1506,9 @@ namespace RakeMultiplayer
             lastDamageDirection = hitDirection;
             lastDamageTime = Time.time;
 
+            // Player-controlled Rake: getting hit pushes the attack cooldown to 10 s.
+            if (_playerControlled) RakePlayerController.NotifyDamageTaken(transform);
+
             // Apply damage reduction if blocking
             if (isBlocking && WasHitFromFront())
             {

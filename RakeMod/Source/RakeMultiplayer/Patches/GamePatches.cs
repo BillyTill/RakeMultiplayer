@@ -735,9 +735,13 @@ namespace RakeMultiplayer.Patches
         static void Postfix(Enemy_AI __instance)
         {
             if (!RakeMultiplayerPlugin.Enabled.Value) return;
+            if (__instance == null) return;
+
+            // A player-controlled Rake cannot attack for a moment after being hit.
+            if (RakePlayerController.IsActive) RakePlayerController.NotifyDamageTaken(__instance.transform);
+
             if (!RakeMultiplayerPlugin.isConnected) return;
             if (!RakeMultiplayerPlugin.isServer) return;
-            if (__instance == null) return;
 
             if (__instance.Health <= 0f)
             {
