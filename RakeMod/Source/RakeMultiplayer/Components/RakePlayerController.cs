@@ -80,6 +80,7 @@ namespace RakeMultiplayer
         private float _animalCooldown;
         private float _cameraCooldown;
         private float _attackAnimation;
+        private bool _actionLocked;
         private string _lastAction = "-";
 
         private float _scanTimer;
@@ -427,12 +428,16 @@ namespace RakeMultiplayer
             _cameraCooldown = Mathf.Max(0f, _cameraCooldown - dt);
             _attackAnimation = Mathf.Max(0f, _attackAnimation - dt);
 
-            if (!DebugConsole.ConsoleOpen)
+            if (!DebugConsole.ConsoleOpen && !_actionLocked)
             {
                 if (Input.GetKeyDown(KeyCode.V)) _firstPerson = !_firstPerson;
 
                 ReadLook();
                 ReadMovement(dt);
+            }
+            else if (_actionLocked && _animator != null)
+            {
+                _animator.SetFloat("Speed", 0f);
             }
 
             if (_hunter == null)
@@ -687,40 +692,134 @@ namespace RakeMultiplayer
 
             if (best == null) return;
 
-            if (bestType == 0)
+            if (bestType == 0) StartPlayerGrab(best);
+            else if (bestType == 1) StartAnimalKill(best);
+            else StartCameraBreak(best);
+        }
+
+        // --- scripted attack sequences: the Rake stops, the victim stops, the camera
+        // turns to the Rake, then the attack animation plays and the hit lands. ---
+
+        private void StartPlayerGrab(Transform victim)
+        {
+            if (_actionLocked || victim == null) return;
+
+            _actionLocked = true;
+            _playerCooldown = PlayerCooldown;
+            _lastAction = "player";
+
+            FaceInstant(victim.position);
+            PlayAttackRoar();
+
+            if (_animator != null)
             {
-                NetworkedPlayer player = best.GetComponent<NetworkedPlayer>();
-                if (player != null && _rakeAI != null) _rakeAI.AttackPlayer(best);
-                _playerCooldown = PlayerCooldown;
-                _lastAction = "player";
-            }
-            else if (bestType == 1)
-            {
-                Animal_AI animal = best.GetComponent<Animal_AI>();
-                if (animal != null) animal.TakeDamage(250, "RakeAnimalKick");
-                _animalCooldown = AnimalCooldown;
-                _lastAction = "animal";
-            }
-            else
-            {
-                RecordCamera_obj camera = best.GetComponent<RecordCamera_obj>();
-                if (camera != null) camera.SetUnsetupState();
-                _cameraCooldown = CameraCooldown;
-                _lastAction = "camera";
+                _animator.SetFloat("Speed", 0f);
+                _animator.SetBool("bCrouch", false);
+                _animator.SetBool("bPlayerAttack", true);
             }
 
-            _attackAnimation = 1.1f;
-            if (_animator != null) _animator.SetBool("bAttack", true);
+            NetworkedPlayer net = victim.GetComponent<NetworkedPlayer>();
+            int victimId = net != null ? net.PlayerId : 0;
+            if (victimId > 0)
+            {
+                var grab = new RakeGrabPacket
+                {
+                    PlayerId = victimId,
+                    RakePosition = transform.position
+                };
+                RakeNetworkManager.Instance?.ServerBroadcast(grab.Serialize());
+            }
 
+            StartCoroutine(PlayerGrabRoutine(victim));
+        }
+
+        private System.Collections.IEnumerator PlayerGrabRoutine(Transform victim)
+        {
+            yield return new WaitForSeconds(1.2f);
+
+            if (victim != null && _rakeAI != null) _rakeAI.AttackPlayer(victim);
+            if (_animator != null) _animator.SetBool("bPlayerAttack", false);
+
+            _actionLocked = false;
+        }
+
+        private void StartAnimalKill(Transform animal)
+        {
+            if (_actionLocked || animal == null) return;
+
+            _actionLocked = true;
+            _animalCooldown = AnimalCooldown;
+            _lastAction = "animal";
+
+            FaceInstant(animal.position);
+            if (_animator != null)
+            {
+                _animator.SetFloat("Speed", 0f);
+                _animator.SetBool("bAnimalKilling", true);
+            }
+
+            StartCoroutine(AnimalKillRoutine(animal));
+        }
+
+        private System.Collections.IEnumerator AnimalKillRoutine(Transform animal)
+        {
+            yield return new WaitForSeconds(1.8f);
+
+            Animal_AI ai = animal != null ? animal.GetComponent<Animal_AI>() : null;
+            if (ai != null) ai.TakeDamage(250, "RakeAnimalKick");
+            if (_animator != null) _animator.SetBool("bAnimalKilling", false);
+
+            _actionLocked = false;
+        }
+
+        private void StartCameraBreak(Transform cameraTransform)
+        {
+            if (_actionLocked || cameraTransform == null) return;
+
+            _actionLocked = true;
+            _cameraCooldown = CameraCooldown;
+            _lastAction = "camera";
+
+            FaceInstant(cameraTransform.position);
+            if (_animator != null)
+            {
+                _animator.SetFloat("Speed", 0f);
+                _animator.SetBool("bCameraBreak", true);
+            }
+
+            StartCoroutine(CameraBreakRoutine(cameraTransform));
+        }
+
+        private System.Collections.IEnumerator CameraBreakRoutine(Transform cameraTransform)
+        {
+            yield return new WaitForSeconds(1.6f);
+
+            RecordCamera_obj cam = cameraTransform != null ? cameraTransform.GetComponent<RecordCamera_obj>() : null;
+            if (cam != null) cam.SetUnsetupState();
+            if (_animator != null) _animator.SetBool("bCameraBreak", false);
+
+            _actionLocked = false;
+        }
+
+        private void FaceInstant(Vector3 worldPosition)
+        {
+            Vector3 dir = worldPosition - transform.position;
+            dir.y = 0f;
+            if (dir.sqrMagnitude > 0.001f)
+            {
+                transform.rotation = Quaternion.LookRotation(dir);
+                _yaw = transform.eulerAngles.y; // keep the camera behind the Rake
+            }
+        }
+
+        private void PlayAttackRoar()
+        {
             if (_audio != null && _enemyAI != null && _enemyAI.playerAttackRoars != null &&
                 _enemyAI.playerAttackRoars.Length > 0)
             {
                 _audio.PlayOneShot(_enemyAI.playerAttackRoars[Random.Range(0, _enemyAI.playerAttackRoars.Length)]);
             }
-
-            RakeMultiplayerPlugin.Log?.LogInfo("[RakePlay] attacked " + best.name + " (" + _lastAction + ")");
         }
-
         private bool InFront(Vector3 targetPosition, out float distance)
         {
             Vector3 to = targetPosition - _rake.position;

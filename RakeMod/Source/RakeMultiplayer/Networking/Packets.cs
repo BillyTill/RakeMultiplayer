@@ -230,6 +230,33 @@ namespace RakeMultiplayer.Networking
     }
 
 
+    /// <summary>
+    /// The Rake grabbed a player: freeze them and turn their camera to the Rake.
+    /// Server -> all.
+    /// </summary>
+    public class RakeGrabPacket : NetworkPacket
+    {
+        public override PacketType Type => PacketType.RakeGrab;
+
+        public int PlayerId;
+        public Vector3 RakePosition;
+
+        public override void Write(BinaryWriter writer)
+        {
+            writer.Write(PlayerId);
+            writer.Write(RakePosition.x);
+            writer.Write(RakePosition.y);
+            writer.Write(RakePosition.z);
+        }
+
+        public override void Read(BinaryReader reader)
+        {
+            PlayerId = reader.ReadInt32();
+            RakePosition = new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
+        }
+    }
+
+
     public class PlayerConnectedPacket : NetworkPacket
     {
         public override PacketType Type => PacketType.PlayerConnected;

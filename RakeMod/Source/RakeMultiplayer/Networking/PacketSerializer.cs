@@ -58,6 +58,7 @@ namespace RakeMultiplayer.Networking
                     PacketType.PlayerRagdollRequest => new PlayerRagdollRequestPacket(),
                     PacketType.DoorAction => new DoorActionPacket(),
                     PacketType.LobbyRole => new LobbyRolePacket(),
+                    PacketType.RakeGrab => new RakeGrabPacket(),
                     _ => throw new InvalidOperationException($"Unknown packet type: {type} (byte value: {(byte)type})")
                 };
                 packet.Read(reader);

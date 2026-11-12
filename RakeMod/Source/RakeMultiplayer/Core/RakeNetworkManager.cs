@@ -1336,6 +1336,9 @@ namespace RakeMultiplayer
                     case PacketType.LobbyRole:
                         LobbyState.HostIsRake = ((LobbyRolePacket)packet).HostIsRake;
                         break;
+                    case PacketType.RakeGrab:
+                        HandleClientRakeGrab((RakeGrabPacket)packet);
+                        break;
                     case PacketType.FireVisuals:
                         HandleClientFireVisuals((FireVisualsPacket)packet);
                         break;
@@ -1598,6 +1601,48 @@ namespace RakeMultiplayer
         /// ragdoll hit reaction); everyone else just sees the victim's body fly.
         /// </summary>
         /// <summary>Server told us to show the hit-reaction ragdoll for a player.</summary>
+        private void HandleClientRakeGrab(RakeGrabPacket packet)
+        {
+            var spawner = PlayerSpawner.Instance;
+            var local = spawner != null ? spawner.LocalPlayer : null;
+            if (local == null || local.PlayerId != packet.PlayerId) return;
+
+            StartCoroutine(RakeGrabRoutine(packet.RakePosition));
+        }
+
+        private System.Collections.IEnumerator RakeGrabRoutine(Vector3 rakePosition)
+        {
+            var spawner = PlayerSpawner.Instance;
+            var local = spawner != null ? spawner.LocalPlayer : null;
+            if (local == null) yield break;
+
+            var movement = local.GetComponent<PlayerMovement>();
+            var look = local.GetComponentInChildren<CameraMouseLook>();
+            var fps = local.GetComponent<FPSController>();
+
+            if (movement != null) movement.FreezePlayer();
+            if (look != null) look.bControl = false;
+            if (fps != null) fps.HidePlayerWeapon();
+
+            float end = Time.time + 1.3f;
+            while (Time.time < end)
+            {
+                if (look != null && look.camera != null)
+                {
+                    look.camera.LookAt(rakePosition + Vector3.up * 1.6f);
+                }
+                yield return null;
+            }
+
+            // The damage packet normally starts the ragdoll; if it did not, release input.
+            yield return new WaitForSeconds(0.5f);
+            if (!PlayerRagdoll.IsActive)
+            {
+                if (movement != null) movement.UnFreezePlayer();
+                if (look != null) look.bControl = true;
+            }
+        }
+
         private void HandleClientPlayerRagdoll(PlayerRagdollPacket packet)
         {
             bool shown = PlayerRagdoll.ApplyFor(packet.PlayerId, packet.Direction);
