@@ -5,10 +5,10 @@ namespace RakeMultiplayer
     /// <summary>
     /// Visible third-person representation for a remote player.
     ///
-    /// The game ships only a first-person player prefab (camera + hands + weapons),
-    /// so a remote clone renders nothing useful (or worse, duplicated first-person hands).
-    /// This component hides every renderer on the remote clone and builds a simple
-    /// coloured humanoid proxy so players can actually see each other.
+    /// The game ships only a first-person player prefab (camera + hands + weapons), so a
+    /// remote clone renders nothing useful. This component hides every renderer on the
+    /// clone and attaches the real baked player body (mesh + skeleton + animations).
+    /// If the baked model cannot be loaded it falls back to a simple coloured proxy.
     /// </summary>
     public class RemotePlayerVisual : MonoBehaviour
     {
@@ -21,16 +21,17 @@ namespace RakeMultiplayer
         };
 
         private Transform _bodyRoot;
+        private RemotePlayerModel _model;
         private int _playerId;
 
         /// <summary>
-        /// Build (or rebuild) the proxy for a remote player clone.
+        /// Build (or rebuild) the visual for a remote player clone.
         /// </summary>
         public static RemotePlayerVisual Attach(GameObject playerObject, int playerId)
         {
             if (playerObject == null) return null;
 
-            // Remove a previous proxy (e.g. re-spawn after scene reload)
+            // Remove a previous visual (e.g. re-spawn after scene reload)
             var existing = playerObject.GetComponentInChildren<RemotePlayerVisual>();
             if (existing != null)
             {
@@ -45,7 +46,7 @@ namespace RakeMultiplayer
             var visual = go.AddComponent<RemotePlayerVisual>();
             visual._playerId = playerId;
 
-            // The player root is usually at eye height, so the proxy must be lowered
+            // The player root is usually at eye height, so the visual must be lowered
             // until its feet touch the ground.
             visual.Build(playerId, ComputeFootOffset(playerObject));
             return visual;
@@ -127,13 +128,28 @@ namespace RakeMultiplayer
 
         private void Build(int playerId, float footOffset)
         {
+            // Feet are modelled at local y = 0, so shift the whole visual to the ground
+            transform.localPosition = new Vector3(0f, footOffset, 0f);
+            transform.localRotation = Quaternion.identity;
+
+            // Prefer the real baked player body (mesh + skeleton + animations)
+            _model = RemotePlayerModel.Attach(transform, transform.parent);
+            if (_model != null)
+            {
+                RakeMultiplayerPlugin.Log?.LogInfo($"[Visual] Built real body for P{playerId}");
+                return;
+            }
+
+            RakeMultiplayerPlugin.Log?.LogWarning($"[Visual] Baked body unavailable, using primitive proxy for P{playerId}");
+            BuildPrimitiveProxy(playerId);
+        }
+
+        private void BuildPrimitiveProxy(int playerId)
+        {
             Color color = Palette[Mathf.Abs(playerId - 1) % Palette.Length];
             Color dark = Color.Lerp(color, Color.black, 0.35f);
 
             _bodyRoot = transform;
-            // Feet are modeled at local y = 0, so shift the whole proxy to the ground
-            _bodyRoot.localPosition = new Vector3(0f, footOffset, 0f);
-            _bodyRoot.localRotation = Quaternion.identity;
 
             // Torso
             AddPrimitive(PrimitiveType.Capsule, "Torso", new Vector3(0f, 0.90f, 0f),
@@ -205,8 +221,8 @@ namespace RakeMultiplayer
 
         private void LateUpdate()
         {
-            // Keep the proxy's feet on the ground even if the player root sits at eye
-            // height, and on stairs/slopes. The proxy has no colliders of its own.
+            // Keep the visual's feet on the ground even if the player root sits at eye
+            // height, and on stairs/slopes. The visual has no colliders of its own.
             var root = transform.parent;
             if (root == null) return;
 
@@ -221,7 +237,7 @@ namespace RakeMultiplayer
             }
         }
 
-        /// <summary>Update the proxy colour (kept for future team colours).</summary>
+        /// <summary>Update the visual colour / identity (kept for future team colours).</summary>
         public void SetPlayerId(int playerId)
         {
             if (_playerId == playerId) return;

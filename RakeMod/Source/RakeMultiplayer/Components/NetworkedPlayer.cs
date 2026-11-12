@@ -296,6 +296,14 @@ namespace RakeMultiplayer
             }
         }
 
+        /// <summary>
+        /// Last animation bitmask for this player: bit0 running, bit1 crouching,
+        /// bit2 aiming, bit3 grounded. Used by the third-person body to pick a clip.
+        /// </summary>
+        public byte CurrentAnimState
+        {
+            get { return isLocalPlayer ? lastSentAnimState : targetAnimState; }
+        }
         public void ApplyAnimation(byte animState)
         {
             if (!isLocalPlayer)

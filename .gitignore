@@ -105,3 +105,6 @@ RakeMod/Source/RakeMultiplayer/obj/
 # Reference directories (not part of mod source)
 RakeMod/Mirror_Source/
 RakeMultiplayer_Fixed/
+# Baked player model (derived from retail game assets - regenerate locally)
+*.bin
+RakePlayerSkin.png
