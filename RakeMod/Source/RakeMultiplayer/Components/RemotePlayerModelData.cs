@@ -130,7 +130,7 @@ namespace RakeMultiplayer
             }
         }
 
-        private static string Locate(string fileName)
+        internal static string Locate(string fileName)
         {
             var candidates = new List<string>();
 
@@ -331,7 +331,7 @@ namespace RakeMultiplayer
         /// supports skinning. Falls back to the shader used by an existing skinned
         /// renderer (the local player hands), which is always available.
         /// </summary>
-        private static Shader FindSkinShader()
+        internal static Shader FindSkinShader()
         {
             string[] candidates =
             {

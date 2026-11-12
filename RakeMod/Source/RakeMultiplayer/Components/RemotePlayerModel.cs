@@ -14,6 +14,13 @@ namespace RakeMultiplayer
         private const string ClipIdle = "Idle";
         private const string ClipWalk = "Walk";
         private const string ClipRun = "Run";
+        private const string ClipAim = "RifleHold";
+
+        // Reference speeds come from the root motion that was baked into the clips
+        // (Walk 1.56 m per 0.99 s cycle, Run 3.34 m per 0.59 s cycle); playing at
+        // speed / reference keeps the feet from sliding.
+        private const float WalkReferenceSpeed = 1.58f;
+        private const float RunReferenceSpeed = 5.66f;
 
         private Transform[] _nodes;
         private Transform _tracked;
@@ -113,6 +120,10 @@ namespace RakeMultiplayer
             _renderer.receiveShadows = true;
             _renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.On;
 
+            // The body prefab carries the shotgun as a plain mesh parented to the right
+            // hand bone; add it as static geometry on the same node.
+            RemotePlayerWeaponData.Attach(_nodes);
+
             // ---- tracking / state ----
             _tracked = tracked != null ? tracked : transform.root;
             _lastPosition = _tracked.position;
@@ -175,21 +186,17 @@ namespace RakeMultiplayer
 
             bool moving = _speed > 0.25f;
             bool running = moving && IsRunning();
+            bool aiming = IsAiming();
 
             string wanted;
-            if (!moving) wanted = ClipIdle;
+            if (!moving && aiming && RemotePlayerModelData.GetClip(ClipAim) != null) wanted = ClipAim;
+            else if (!moving) wanted = ClipIdle;
             else wanted = running ? ClipRun : ClipWalk;
 
             SetClip(wanted);
 
-            // Reference speeds come from the root motion that was baked into the clips
-            // (Walk 1.56 m per 0.99 s cycle, Run 3.34 m per 0.59 s cycle); playing at
-            // speed / reference keeps the feet from sliding.
-            float reference = 1f;
-            if (_clipName == ClipWalk) reference = 1.58f;
-            else if (_clipName == ClipRun) reference = 5.66f;
-
-            if (reference > 0.01f) _rate = Mathf.Clamp(_speed / reference, 0.55f, 1.9f);
+            if (_clipName == ClipWalk) _rate = Mathf.Clamp(_speed / WalkReferenceSpeed, 0.55f, 1.9f);
+            else if (_clipName == ClipRun) _rate = Mathf.Clamp(_speed / RunReferenceSpeed, 0.55f, 1.9f);
             else _rate = 1f;
 
             _time += Time.deltaTime * _rate;
@@ -206,6 +213,15 @@ namespace RakeMultiplayer
 
             // bit0 of the animation bitmask is "running"
             return (_networked.CurrentAnimState & 1) != 0;
+        }
+
+        private bool IsAiming()
+        {
+            if (_networked == null && _tracked != null) _networked = _tracked.GetComponent<NetworkedPlayer>();
+            if (_networked == null) return false;
+
+            // bit2 of the animation bitmask is "aiming"
+            return (_networked.CurrentAnimState & 4) != 0;
         }
 
         private static bool IsLocomotion(string clip)

@@ -45,6 +45,8 @@ namespace RakeBake
             { "RakeAttack_TPS", "Attack" },
             { "Walk Left",      "WalkLeft" },
             { "Walk Right",     "WalkRight" },
+            { "Take 001_15",    "RifleHold" },
+            { "Take 001_1",     "Take1" },
         };
 
         static StringBuilder _log;
@@ -240,6 +242,8 @@ namespace RakeBake
 
             // ---------- write ----------
             WriteBin(mesh, sk, smrNode, animNodes, clipData);
+
+            RifleBake.Run(sk);
         }
 
         class BakedClip

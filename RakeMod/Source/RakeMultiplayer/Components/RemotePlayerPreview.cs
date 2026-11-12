@@ -10,7 +10,7 @@ namespace RakeMultiplayer
     /// </summary>
     public static class RemotePlayerPreview
     {
-        private static readonly string[] ClipNames = { "Idle", "Walk", "Run", "Attack" };
+        private static readonly string[] ClipNames = { "Idle", "Walk", "Run", "Attack", "RifleHold" };
 
         private static GameObject _root;
         private static RemotePlayerModel _model;
