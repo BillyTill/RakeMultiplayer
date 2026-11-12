@@ -285,6 +285,15 @@ namespace RakeMultiplayer
 
         private void UpdateWeaponVisibility()
         {
+            // bit6: this player is the Rake right now, hide the hunter body.
+            bool rakeMode = _networked != null && (_networked.CurrentAnimState & (1 << 6)) != 0;
+            if (_renderer != null) _renderer.enabled = !rakeMode;
+            if (rakeMode)
+            {
+                if (_weapon != null) _weapon.enabled = false;
+                return;
+            }
+
             if (_weapon == null) return;
 
             // The debug preview always shows the weapon so it can be inspected.

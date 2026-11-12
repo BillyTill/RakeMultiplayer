@@ -419,6 +419,20 @@ namespace RakeMultiplayer
             });
 
 
+            Register("rake play", "rake play [on|off]",
+                "Play as the Rake (host/single-player): third-person, sneak/run, auto-attack at night", args =>
+            {
+                bool want = !RakePlayerController.IsActive;
+                if (args.Length > 0)
+                {
+                    if (args[0].Equals("on", StringComparison.OrdinalIgnoreCase)) want = true;
+                    else if (args[0].Equals("off", StringComparison.OrdinalIgnoreCase)) want = false;
+                }
+
+                RakePlayerController.SetEnabled(want);
+                return RakePlayerController.IsActive ? "rake play: ON" : "rake play: OFF";
+            });
+
             Register("rake info", "rake info",
                 "Log the Rake transform, animator and NavMeshAgent state", args =>
             {

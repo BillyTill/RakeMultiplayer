@@ -302,6 +302,9 @@ namespace RakeMultiplayer
             var fps = GetComponent<FPSController>();
             if (fps != null && fps.flashlight != null && fps.flashlight.enabled) state |= 1 << 5;
 
+            // The hunter is hidden while its owner plays as the Rake.
+            if (isLocalPlayer && RakePlayerController.IsActive) state |= 1 << 6;
+
             return state;
         }
 

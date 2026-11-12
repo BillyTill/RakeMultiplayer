@@ -154,6 +154,7 @@ namespace RakeMultiplayer
         private float originalAgentSpeed = 5f;
 
         private bool _initialized = false;
+        private bool _playerControlled;
         private bool _loggedHealthWarning = false;
         private bool _loggedMaxHealthWarning = false;
 
@@ -238,22 +239,25 @@ namespace RakeMultiplayer
 
                 if (!RakeMultiplayerPlugin.isConnected) return;
 
-                // Update hunter list
-                UpdateHunterList();
-
-                // Periodically refresh cave transform (in case it was added/loaded after Awake)
-                caveRefreshTimer += Time.deltaTime;
-                if (caveRefreshTimer >= CaveRefreshInterval)
+                if (!_playerControlled)
                 {
-                    caveRefreshTimer = 0f;
-                    if (caveTransform == null)
-                    {
-                        FindCaveTransform();
-                    }
-                }
+                    // Update hunter list
+                    UpdateHunterList();
 
-                // Run state machine
-                UpdateStateMachine();
+                    // Periodically refresh cave transform (in case it was added/loaded after Awake)
+                    caveRefreshTimer += Time.deltaTime;
+                    if (caveRefreshTimer >= CaveRefreshInterval)
+                    {
+                        caveRefreshTimer = 0f;
+                        if (caveTransform == null)
+                        {
+                            FindCaveTransform();
+                        }
+                    }
+
+                    // Run state machine
+                    UpdateStateMachine();
+                }
 
                 // Sync at 15Hz
                 sendTimer += Time.deltaTime;
@@ -289,6 +293,41 @@ namespace RakeMultiplayer
                 UpdateClientAnimation();
                 UpdateClientAudio();
             }
+        }
+
+        /// <summary>True while a human is driving the Rake instead of the AI.</summary>
+        public bool IsPlayerControlled { get { return _playerControlled; } }
+
+        public void SetPlayerControlled(bool value)
+        {
+            if (_playerControlled == value) return;
+            _playerControlled = value;
+
+            if (value)
+            {
+                if (enemyAI != null) enemyAI.enabled = false;
+                var agent = GetEnemyAgent();
+                if (agent != null)
+                {
+                    agent.Stop();
+                    agent.ResetPath();
+                }
+                currentState = RakeState.Chase;
+                RakeMultiplayerPlugin.Log?.LogInfo("[RakePlay] Rake switched to player control");
+            }
+            else
+            {
+                if (RakeMultiplayerPlugin.isServer && enemyAI != null) enemyAI.enabled = true;
+                RakeMultiplayerPlugin.Log?.LogInfo("[RakePlay] Rake returned to AI");
+            }
+        }
+
+        /// <summary>Player-controlled Rake hit a player (same damage path as the AI).</summary>
+        public bool AttackPlayer(Transform victim)
+        {
+            if (victim == null) return false;
+            DealRakeDamage(victim);
+            return true;
         }
 
         private void FindCaveTransform()
@@ -960,7 +999,9 @@ namespace RakeMultiplayer
             _clientAudioPosition = pos;
             _clientAudioValid = true;
 
-            if (speed > 0.35f)
+            bool crouching = animator != null && animator.GetBool("bCrouch");
+
+            if (speed > 0.35f && !crouching)
             {
                 _clientStepTimer -= dt;
                 if (_clientStepTimer <= 0f)
