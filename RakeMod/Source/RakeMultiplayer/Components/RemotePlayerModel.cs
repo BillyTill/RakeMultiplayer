@@ -171,9 +171,12 @@ namespace RakeMultiplayer
 
             SetClip(wanted);
 
+            // Reference speeds come from the root motion that was baked into the clips
+            // (Walk 1.56 m per 0.99 s cycle, Run 3.34 m per 0.59 s cycle); playing at
+            // speed / reference keeps the feet from sliding.
             float reference = 1f;
-            if (_clipName == ClipWalk) reference = 1.7f;
-            else if (_clipName == ClipRun) reference = 4.5f;
+            if (_clipName == ClipWalk) reference = 1.58f;
+            else if (_clipName == ClipRun) reference = 5.66f;
 
             if (reference > 0.01f) _rate = Mathf.Clamp(_speed / reference, 0.55f, 1.9f);
             else _rate = 1f;

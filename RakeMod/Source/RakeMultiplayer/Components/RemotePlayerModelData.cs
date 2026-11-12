@@ -45,12 +45,13 @@ namespace RakeMultiplayer
 
         /// <summary>
         /// Canonical placement of the model root: feet on y = 0, centred on x/z, facing +Z,
-        /// 1.76 m tall. The baked root transform contains scene leftovers, so the loader
-        /// always overwrites it with these values.
+        /// 1.80 m tall (the retail player capsule is 1.8 m high). The baked root transform
+        /// contains scene leftovers, so the loader always overwrites it with these values.
+        /// Values come from RakeMod/ModelBake/canonical_placement.py.
         /// </summary>
-        public static readonly Vector3 RootPosition = new Vector3(0.0313f, 0.8673f, -0.02741f);
+        public static readonly Vector3 RootPosition = new Vector3(1.41209f, 0.84430f, -1.96220f);
         public static readonly Quaternion RootRotation = new Quaternion(-0.709104f, 0.003993f, 0.004015f, 0.705081f);
-        public static readonly Vector3 RootScale = new Vector3(0.822672f, 0.822672f, 0.822672f);
+        public static readonly Vector3 RootScale = new Vector3(0.976563f, 0.976563f, 0.976563f);
 
         private static bool _attempted;
         private static bool _loaded;

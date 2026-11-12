@@ -189,6 +189,32 @@ namespace RakeBake
 
                     if (!sampled) continue;
 
+                    // ---- strip root motion ----
+                    // The humanoid clips carry baked-in forward translation on the pelvis
+                    // (Walk 1.56 m, Run 3.34 m, WalkLeft/Right ~3 m per cycle). Played back
+                    // as a pure pose that makes the body slide away from its owner, so remove
+                    // the linear drift and keep only the natural bob/sway.
+                    for (int k = 0; k < animNodes.Count; k++)
+                    {
+                        int firstIdx = k;
+                        int lastIdx = (frames - 1) * animNodes.Count + k;
+                        Vector3 drift = bc.pos[lastIdx] - bc.pos[firstIdx];
+                        if (drift.sqrMagnitude < 1e-10f) continue;
+
+                        for (int f = 0; f < frames; f++)
+                        {
+                            float u = frames > 1 ? (float)f / (frames - 1) : 0f;
+                            int idx = f * animNodes.Count + k;
+                            bc.pos[idx] = bc.pos[idx] - drift * u;
+                        }
+
+                        if (drift.magnitude > 0.05f)
+                        {
+                            L("  root motion removed: node " + animNodes[k] + " (" +
+                              trs[animNodes[k]].name + ") drift=" + drift.ToString("F3"));
+                        }
+                    }
+
                     // sanity: how much do bones move compared to rest pose
                     float maxDelta = 0f;
                     for (int k = 0; k < animNodes.Count; k++)

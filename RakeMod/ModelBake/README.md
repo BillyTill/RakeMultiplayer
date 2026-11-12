@@ -37,6 +37,8 @@ Unity project. Only a handful of files are needed:
 Only humanoid clips (127 muscle curves, classID 95) are usable. The first-person camera
 clips (`Walk.anim`, `Kick.anim`, ...) contain 1–2 object curves and are unrelated.
 
+`Jump.anim` is humanoid but completely static (0° bone delta), so it is not used.
+
 ### 2. Extract the skeleton
 
 ```sh
@@ -45,8 +47,8 @@ python parse_skeleton.py
 
 Parses `human 1.prefab` and writes `skeleton.json` (60 nodes, 42 bones, local TRS and
 parent indices). The prefab root transform contains leftovers from the scene it was
-authored in (position ~100, -3.6, -6.6 and a ~30° yaw), so the root placement is
-recomputed afterwards.
+authored in (position ~100, -3.6, -6.6, scale 0.82 and a ~30° yaw), so the root placement
+is recomputed afterwards.
 
 ### 3. Bake with Unity
 
@@ -62,22 +64,39 @@ Unity.exe -batchmode -nographics -quit \
 
 The script builds the hierarchy, adds the `SkinnedMeshRenderer` and an `Animator` with
 the humanoid avatar, samples every clip at 30 fps with
-`AnimationMode.SampleAnimationClip`, and writes the binary plus a report.
+`AnimationMode.SampleAnimationClip`, strips root motion, and writes the binary plus a
+report.
 
 > Note: `Unity.exe` must be started with `Start-Process -Wait` from PowerShell. Using
 > `&` returns immediately without running the editor.
 
-### 4. Canonical placement
+### 4. Strip root motion, then compute placement and scale
 
 ```sh
 python canonical_placement.py
 ```
 
-The baked root transform still carries the scene leftovers. This script derives the
-"right" axis from eight symmetric bone pairs (feet, toes, hands, clavicles, upper arms,
-forearms, thighs, calves), yaws the model so it faces +Z, and computes the root position
-that puts the feet on y = 0. The resulting constants are hard-coded in
+**Root motion.** The humanoid clips carry baked-in forward translation on the pelvis
+(Walk 1.56 m, Run 3.34 m, WalkLeft/Right ~3 m per cycle). Played back as a pure pose that
+makes the body slide away from its owner. `BakePlayer.cs` removes the linear drift from
+every animated node, keeping only the natural bob/sway, so the clips play in place.
+
+**Placement and scale.** The baked root transform still carries the scene leftovers, so
+this script derives the "right" axis from eight symmetric bone pairs (feet, toes, hands,
+clavicles, upper arms, forearms, thighs, calves), yaws the model so it faces +Z, then
+scales it so the animated Idle pose is 1.80 m tall (the retail player capsule is 1.8 m)
+and computes the root position that puts the feet on y = 0.
+
+The resulting constants are hard-coded in
 `RemotePlayerModelData.RootPosition/RootRotation/RootScale`.
+
+Expected verification output:
+
+```
+Idle       feet y=+0.000  top y=1.799  height=1.799
+Walk       feet y=-0.038  top y=1.746  height=1.784
+Run        feet y=-0.019  top y=1.704  height=1.723
+```
 
 ### 5. Validate
 
@@ -121,5 +140,8 @@ clip[clipCount]:
 `RemotePlayerModelData` parses the binary and builds the `Mesh`; `RemotePlayerModel`
 builds the transform hierarchy and plays the clips procedurally with quaternion
 interpolation. Clip selection uses movement speed plus the animation bitmask that
-`NetworkedPlayer` already synchronises (bit0 = running). `RemotePlayerVisual` falls back
-to the old primitive proxy if the binary is missing.
+`NetworkedPlayer` already synchronises (bit0 = running); the playback rate is
+`speed / reference` where the reference speeds (1.58 m/s walk, 5.66 m/s run) come from
+the root motion that was baked into the clips, so the feet do not slide.
+
+`RemotePlayerVisual` falls back to the old primitive proxy if the binary is missing.
