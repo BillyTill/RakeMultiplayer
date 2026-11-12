@@ -1,7 +1,9 @@
-import struct, math, sys
+import struct, math
 import numpy as np
 
 BIN = r"C:\Users\KOMPUHTER\AppData\Local\Temp\opencode\RakePlayerModel.bin"
+TARGET_HEIGHT = 1.80
+
 data = open(BIN, "rb").read()
 off = 4
 
@@ -50,16 +52,8 @@ for c in range(clipCount):
             pos[f, k] = f32s(3); rot[f, k] = f32s(4)
     clips[name] = (fps, frames, pos, rot)
 
-# root motion should be gone now
-pk = animNodes.index(3)
-print("=== root motion check (pelvis drift per clip) ===")
-for nm, (fps, frames, pos, rot) in clips.items():
-    d = pos[-1, pk] - pos[0, pk]
-    print(f"  {nm:10s} drift={np.round(d,4)} |{np.linalg.norm(d):.4f}|")
-
-ROOT_ROT = np.array([-0.709104, 0.003993, 0.004015, 0.705081])
-BASE_SCALE = 0.822672
 name2i = {n['name']: i for i, n in enumerate(nodes)}
+print("nodes", nodeCount, "bones", boneCount, "clips", list(clips.keys()))
 
 def qmat(q):
     x, y, z, w = q
@@ -70,22 +64,28 @@ def qmat(q):
         [2*(x*y + z*w), 1-2*(x*x+z*z),   2*(y*z - x*w)],
         [2*(x*z - y*w), 2*(y*z + x*w),   1-2*(x*x+y*y)],
     ])
-
 def trs(p, r, s):
     M = np.eye(4); M[:3, :3] = qmat(r) @ np.diag(s); M[:3, 3] = p
     return M
 
-def world_for(clip_name, frame, root_pos, root_scale):
-    lp = [list(nd['pos']) for nd in nodes]
-    lr = [list(nd['rot']) for nd in nodes]
-    ls = [list(nd['scale']) for nd in nodes]
-    if clip_name:
-        fps, frames, pos, rot = clips[clip_name]
+def qmul(a, b):
+    ax, ay, az, aw = a; bx, by, bz, bw = b
+    return np.array([
+        aw*bx + ax*bw + ay*bz - az*by,
+        aw*by - ax*bz + ay*bw + az*bx,
+        aw*bz + ax*by - ay*bx + az*bw,
+        aw*bw - ax*bx - ay*by - az*bz,
+    ])
+
+def world_for(clip, frame, root_pos, root_rot, root_scale):
+    lp = [list(n['pos']) for n in nodes]; lr = [list(n['rot']) for n in nodes]; ls = [list(n['scale']) for n in nodes]
+    if clip:
+        fps, frames, pos, rot = clips[clip]
         f = frame % frames
         for k, ni in enumerate(animNodes):
             if ni == 0: continue
             lp[ni] = list(pos[f, k]); lr[ni] = list(rot[f, k])
-    lp[0] = list(root_pos); lr[0] = list(ROOT_ROT); ls[0] = [root_scale]*3
+    lp[0] = list(root_pos); lr[0] = list(root_rot); ls[0] = [root_scale]*3
     W = [None]*nodeCount
     W[0] = trs(lp[0], lr[0], ls[0])
     def gw(i):
@@ -109,51 +109,86 @@ def skinned(W):
             sk[sel] += (verts[sel] @ m.T + t) * w[sel][:, None]
     return sk
 
-ZERO = np.array([0.0, 0.0, 0.0])
+PAIRS = ["Foot", "Toe0", "Hand", "Clavicle", "UpperArm", "Forearm", "Thigh", "Calf"]
 
-def bounds_over(clip_name, root_pos, root_scale, step=1):
+def yaw_of_right(W):
+    ys = []
+    for p in PAIRS:
+        l = W[name2i["Bip01 L " + p]][:3, 3]
+        r = W[name2i["Bip01 R " + p]][:3, 3]
+        d = r - l; d[1] = 0
+        if np.linalg.norm(d) < 1e-5: continue
+        d /= np.linalg.norm(d)
+        ys.append(math.degrees(math.atan2(d[2], d[0])))
+    return float(np.mean(ys)), ys
+
+ZERO = np.array([0.0, 0.0, 0.0])
+IDENT = np.array([0.0, 0.0, 0.0, 1.0])
+
+# 1) base orientation of the bind pose
+W0 = world_for(None, 0, ZERO, IDENT, 1.0)
+sk = skinned(W0)
+print()
+print("bind pose (root identity): bounds", np.round(sk.min(axis=0), 3), np.round(sk.max(axis=0), 3),
+      "size", np.round(sk.max(axis=0)-sk.min(axis=0), 3))
+yaw, ys = yaw_of_right(W0)
+print("right-axis yaw per pair:", [round(y, 1) for y in ys], "mean", round(yaw, 2))
+
+corr = yaw
+hy = math.radians(corr) / 2.0
+newR0 = np.array([0.0, math.sin(hy), 0.0, math.cos(hy)])
+
+W1 = world_for(None, 0, ZERO, newR0, 1.0)
+sk1 = skinned(W1)
+print("after yaw fix: bounds", np.round(sk1.min(axis=0), 3), np.round(sk1.max(axis=0), 3),
+      "size", np.round(sk1.max(axis=0)-sk1.min(axis=0), 3))
+yaw2, _ = yaw_of_right(W1)
+print("right-axis yaw after fix:", round(yaw2, 3), "(should be ~0)")
+
+lf = W1[name2i["Bip01 L Foot"]][:3, 3]; lt = W1[name2i["Bip01 L Toe0"]][:3, 3]
+rf = W1[name2i["Bip01 R Foot"]][:3, 3]; rt = W1[name2i["Bip01 R Toe0"]][:3, 3]
+print("toe L:", np.round(lt-lf, 3), " toe R:", np.round(rt-rf, 3), "(+Z expected)")
+print("head:", np.round(W1[name2i["Bip01 Head"]][:3, 3], 3),
+      "pelvis:", np.round(W1[name2i["Bip01 Pelvis"]][:3, 3], 3))
+
+# 2) height of the Idle pose with scale 1
+def bounds_over(clip, root_pos, root_rot, root_scale, step=1):
     mn = np.array([1e9]*3); mx = np.array([-1e9]*3)
-    frames = clips[clip_name][1]
+    frames = clips[clip][1]
     for f in range(0, frames, step):
-        sk = skinned(world_for(clip_name, f, root_pos, root_scale))
-        mn = np.minimum(mn, sk.min(axis=0))
-        mx = np.maximum(mx, sk.max(axis=0))
+        s = skinned(world_for(clip, f, root_pos, root_rot, root_scale))
+        mn = np.minimum(mn, s.min(axis=0)); mx = np.maximum(mx, s.max(axis=0))
     return mn, mx
 
-# 1) height of the Idle pose with the current base scale
-mn, mx = bounds_over("Idle", ZERO, BASE_SCALE, 8)
+idle_clip = "Idle" if "Idle" in clips else list(clips.keys())[0]
+mn, mx = bounds_over(idle_clip, ZERO, newR0, 1.0, 8)
 h = mx[1] - mn[1]
 print()
-print(f"Idle height at base scale: {h:.4f}  (min y {mn[1]:.4f}, max y {mx[1]:.4f})")
+print(f"{idle_clip} height at scale 1: {h:.4f}")
+k = TARGET_HEIGHT / h
+print(f"scale k = {k:.5f}")
 
-TARGET = 1.80
-k = TARGET / h
-scale = BASE_SCALE * k
-print(f"scale factor k = {k:.5f} -> ROOT_SCALE = {scale:.6f}")
-
-# 2) recompute root position: feet on 0, centred on the idle foot midpoint
-mn, mx = bounds_over("Idle", ZERO, scale, 8)
-foot_l = np.zeros(3); foot_r = np.zeros(3); n = 0
-fps, frames, pos, rot = clips["Idle"]
+mn, mx = bounds_over(idle_clip, ZERO, newR0, k, 8)
+fl = np.zeros(3); fr = np.zeros(3); n = 0
+frames = clips[idle_clip][1]
 for f in range(0, frames, 8):
-    W = world_for("Idle", f, ZERO, scale)
-    foot_l += W[name2i["Bip01 L Foot"]][:3, 3]
-    foot_r += W[name2i["Bip01 R Foot"]][:3, 3]
+    W = world_for(idle_clip, f, ZERO, newR0, k)
+    fl += W[name2i["Bip01 L Foot"]][:3, 3]
+    fr += W[name2i["Bip01 R Foot"]][:3, 3]
     n += 1
-mid = (foot_l + foot_r) / (2.0 * n)
+mid = (fl + fr) / (2.0 * n)
 root_pos = np.array([-mid[0], -mn[1], -mid[2]])
-print("idle foot midpoint:", np.round(mid, 4))
-print(f"ROOT_POS = [{root_pos[0]:.5f}, {root_pos[1]:.5f}, {root_pos[2]:.5f}]")
+print("foot midpoint:", np.round(mid, 4))
+print("ROOT_POS:", np.round(root_pos, 5))
 
-# 3) verify every clip
 print()
-print("=== verification (feet should be ~0, height ~1.7-1.8) ===")
+print("=== verification ===")
 for nm in clips:
-    mn, mx = bounds_over(nm, root_pos, scale, max(1, clips[nm][1] // 12))
+    mn, mx = bounds_over(nm, root_pos, newR0, k, max(1, clips[nm][1] // 12))
     print(f"  {nm:10s} feet y={mn[1]:+.3f}  top y={mx[1]:.3f}  height={mx[1]-mn[1]:.3f}")
 
 print()
 print("C# constants:")
 print(f"  RootPosition = new Vector3({root_pos[0]:.5f}f, {root_pos[1]:.5f}f, {root_pos[2]:.5f}f);")
-print(f"  RootRotation = new Quaternion({ROOT_ROT[0]:.6f}f, {ROOT_ROT[1]:.6f}f, {ROOT_ROT[2]:.6f}f, {ROOT_ROT[3]:.6f}f);")
-print(f"  RootScale    = new Vector3({scale:.6f}f, {scale:.6f}f, {scale:.6f}f);")
+print(f"  RootRotation = new Quaternion({newR0[0]:.6f}f, {newR0[1]:.6f}f, {newR0[2]:.6f}f, {newR0[3]:.6f}f);")
+print(f"  RootScale    = new Vector3({k:.6f}f, {k:.6f}f, {k:.6f}f);")

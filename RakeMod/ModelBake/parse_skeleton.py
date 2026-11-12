@@ -1,148 +1,148 @@
-import re, json, os
+import re, json, os, glob
 
-PREFAB = r"D:\Rake\RipMP\ExportedProject\Assets\GameObject\human 1.prefab"
-MESH = r"D:\Rake\RipMP\ExportedProject\Assets\Mesh\casual12_m_highpoly.asset"
+PREFAB = r"D:\Rake\RipMP\ExportedProject\Assets\GameObject\MP_HunterController.prefab"
 OUT = r"C:\Users\KOMPUHTER\AppData\Local\Temp\opencode\skeleton.json"
+BODY_ROOT = "Main_char"
 
 txt = open(PREFAB, encoding="utf-8", errors="ignore").read()
 
-# split into documents: --- !u!<class> &<fileID>
 docs = {}
 for m in re.finditer(r"^--- !u!(\d+) &(-?\d+)\s*$", txt, re.M):
-    cls = int(m.group(1))
-    fid = int(m.group(2))
+    cls = int(m.group(1)); fid = int(m.group(2))
     start = m.end()
     nxt = re.search(r"^--- !u!", txt[start:], re.M)
     end = start + nxt.start() if nxt else len(txt)
     docs[fid] = (cls, txt[start:end])
 
-def field(block, name):
-    m = re.search(r"^\s{2}" + re.escape(name) + r":\s*(.*)$", block, re.M)
+def field(b, name):
+    m = re.search(r"^\s{2}" + re.escape(name) + r":\s*(.*)$", b, re.M)
     return m.group(1).strip() if m else None
 
-def vec3(block, name):
-    v = field(block, name)
-    if not v:
-        return [0.0, 0.0, 0.0]
-    m = re.match(r"\{x:\s*([-\d.eE+]+),\s*y:\s*([-\d.eE+]+),\s*z:\s*([-\d.eE+]+)\}", v)
-    return [float(m.group(1)), float(m.group(2)), float(m.group(3))] if m else [0.0, 0.0, 0.0]
-
-def quat(block, name):
-    v = field(block, name)
-    if not v:
-        return [0.0, 0.0, 0.0, 1.0]
-    m = re.match(r"\{x:\s*([-\d.eE+]+),\s*y:\s*([-\d.eE+]+),\s*z:\s*([-\d.eE+]+),\s*w:\s*([-\d.eE+]+)\}", v)
-    return [float(m.group(i)) for i in range(1, 5)] if m else [0.0, 0.0, 0.0, 1.0]
-
-def fref(block, name):
-    v = field(block, name)
-    if not v:
-        return 0
+def fref(b, name):
+    v = field(b, name)
+    if not v: return 0
     m = re.search(r"fileID:\s*(-?\d+)", v)
     return int(m.group(1)) if m else 0
 
-# GameObject names
-go_name = {}
-for fid, (cls, block) in docs.items():
-    if cls == 1:
-        n = field(block, "m_Name")
-        go_name[fid] = n if n is not None else ""
+def vec(b, name, n=3):
+    v = field(b, name)
+    if not v: return [0.0]*n
+    nums = re.findall(r"([-\d.eE+]+)", v)
+    return [float(x) for x in nums[:n]]
 
-# Transforms
-transforms = {}
-for fid, (cls, block) in docs.items():
-    if cls in (4, 224):  # Transform / RectTransform
-        go = fref(block, "m_GameObject")
-        father = fref(block, "m_Father")
-        transforms[fid] = {
-            "id": fid,
-            "go": go,
-            "name": go_name.get(go, ""),
-            "father": father,
-            "pos": vec3(block, "m_LocalPosition"),
-            "rot": quat(block, "m_LocalRotation"),
-            "scale": vec3(block, "m_LocalScale"),
-            "order": int(field(block, "m_RootOrder") or 0),
-        }
+def refs_list(b, name):
+    out = []
+    m = re.search(r"^\s{2}" + re.escape(name) + r":\s*$", b, re.M)
+    if not m: return out
+    for line in b[m.end():].splitlines():
+        s = line.strip()
+        if s.startswith("- {fileID:"):
+            out.append(int(re.search(r"fileID:\s*(-?\d+)", s).group(1)))
+        elif s and not s.startswith("-"):
+            break
+    return out
 
-# SMR
-smr = None
-for fid, (cls, block) in docs.items():
-    if cls == 137:
-        bones = []
-        bm = re.search(r"^\s{2}m_Bones:\s*$", block, re.M)
-        if bm:
-            rest = block[bm.end():]
-            for line in rest.splitlines():
-                s = line.strip()
-                if s.startswith("- {fileID:"):
-                    bones.append(int(re.search(r"fileID:\s*(-?\d+)", s).group(1)))
-                elif s and not s.startswith("-"):
-                    break
-        smr = {
-            "id": fid,
-            "go": fref(block, "m_GameObject"),
-            "rootBone": fref(block, "m_RootBone"),
-            "bones": bones,
-        }
+def guid_of(b, name):
+    v = field(b, name) or ""
+    m = re.search(r"guid:\s*([0-9a-f]+)", v)
+    return m.group(1) if m else None
 
-print("transforms:", len(transforms), "smr bones:", len(smr["bones"]) if smr else 0)
+go_name = {fid: (field(b, "m_Name") or "") for fid, (c, b) in docs.items() if c == 1}
+tr = {}
+for fid, (c, b) in docs.items():
+    if c in (4, 224):
+        tr[fid] = dict(go=fref(b, "m_GameObject"), father=fref(b, "m_Father"),
+                       pos=vec(b, "m_LocalPosition"), rot=vec(b, "m_LocalRotation", 4),
+                       scale=vec(b, "m_LocalScale"), order=int(field(b, "m_RootOrder") or 0))
 
-# Build ordered list: root first, then bones in SMR order, then remaining
+def name_of(tid):
+    return go_name.get(tr[tid]['go'], '')
+
+children = {}
+for tid, t in tr.items():
+    children.setdefault(t['father'], []).append(tid)
+for k in children:
+    children[k].sort(key=lambda x: tr[x]['order'])
+
+# body root
+roots = [tid for tid in tr if name_of(tid) == BODY_ROOT]
+if not roots:
+    raise SystemExit("body root not found")
+root = roots[0]
+print("body root:", root, name_of(root), "local", tr[root]['pos'], tr[root]['rot'], tr[root]['scale'])
+
+# DFS
 order = []
-seen = set()
-
-def add_bone(bid):
-    if bid in seen or bid not in transforms:
+def walk(tid):
+    if tid in order:
         return
-    seen.add(bid)
-    order.append(bid)
+    order.append(tid)
+    for ch in children.get(tid, []):
+        walk(ch)
+walk(root)
+print("subtree nodes:", len(order))
 
-# root of the prefab = transform with father 0
-roots = [t["id"] for t in transforms.values() if t["father"] == 0]
-print("roots:", [(r, transforms[r]["name"]) for r in roots])
+# SMR with 42 bones
+smr = None
+for fid, (c, b) in docs.items():
+    if c == 137:
+        bones = refs_list(b, "m_Bones")
+        if len(bones) == 42:
+            smr = dict(id=fid, go=fref(b, "m_GameObject"), bones=bones,
+                       rootBone=fref(b, "m_RootBone"), mesh=guid_of(b, "m_Mesh"))
+if smr is None:
+    raise SystemExit("42-bone SMR not found")
 
-# depth-first from root for stable hierarchy
-def walk(bid, depth=0):
-    if bid not in transforms or bid in seen:
-        return
-    seen.add(bid)
-    order.append(bid)
-    kids = sorted([t["id"] for t in transforms.values() if t["father"] == bid],
-                  key=lambda x: transforms[x]["order"])
-    for k in kids:
-        walk(k, depth + 1)
-
-for r in roots:
-    walk(r)
-
-for b in smr["bones"]:
-    add_bone(b)
+bone_set = set(smr["bones"])
+missing = [b for b in smr["bones"] if b not in order]
+print("bones outside subtree:", len(missing))
+for b in missing:
+    order.append(b)
 
 idx = {tid: i for i, tid in enumerate(order)}
 skeleton = []
 for tid in order:
-    t = transforms[tid]
-    father = t["father"]
+    t = tr[tid]
     skeleton.append({
-        "name": t["name"],
-        "parent": idx.get(father, -1),
-        "pos": t["pos"],
-        "rot": t["rot"],
-        "scale": t["scale"],
-        "bone": tid in set(smr["bones"]),
+        "name": name_of(tid),
+        "parent": idx.get(t['father'], -1) if t['father'] in idx else -1,
+        "pos": t['pos'],
+        "rot": t['rot'],
+        "scale": t['scale'],
+        "bone": tid in bone_set,
     })
-
-bone_map = [idx.get(b, -1) for b in smr["bones"]]
 
 data = {
     "root_index": 0,
     "nodes": skeleton,
-    "boneNodes": bone_map,
+    "boneNodes": [idx[b] for b in smr["bones"]],
     "smrRootBone": idx.get(smr["rootBone"], -1),
 }
 json.dump(data, open(OUT, "w", encoding="utf-8"), indent=1)
-print("nodes:", len(skeleton), "boneNodes:", len(bone_map), "unresolved:", sum(1 for b in bone_map if b < 0))
-print("smrRootBone:", idx.get(smr["rootBone"]), transforms.get(smr["rootBone"], {}).get("name"))
-print("names:", [s["name"] for s in skeleton])
+
+smr_tr = next(t for t in tr if tr[t]['go'] == smr['go'])
+print("smr node:", idx[smr_tr], name_of(smr_tr))
+print("smrRootBone:", idx.get(smr["rootBone"]), name_of(smr["rootBone"]))
+print("nodes:", len(skeleton), "bones:", len(data["boneNodes"]))
+print("names:", [s['name'] for s in skeleton])
 print("wrote", OUT)
+
+# rifle
+for tid in order:
+    if name_of(tid).startswith("Rem870"):
+        print("RIFLE node:", idx[tid], name_of(tid), "local", tr[tid]['pos'], tr[tid]['rot'], tr[tid]['scale'])
+        # find MeshFilter on that GameObject
+        go = tr[tid]['go']
+        for fid, (c, b) in docs.items():
+            if c == 33 and fref(b, "m_GameObject") == go:
+                g = guid_of(b, "m_Mesh")
+                print("  MeshFilter mesh guid:", g)
+                for meta in glob.glob(r"D:\Rake\RipMP\ExportedProject\Assets\**\*.meta", recursive=True):
+                    try:
+                        t2 = open(meta, encoding="utf-8", errors="ignore").read()
+                    except Exception:
+                        continue
+                    if g and g in t2 and "guid:" in t2.split("\n")[1]:
+                        if re.search(r"^guid:\s*" + g, t2, re.M):
+                            print("  mesh file:", meta[:-5])
+                            break

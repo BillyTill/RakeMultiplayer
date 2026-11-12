@@ -41,12 +41,10 @@ namespace RakeBake
             { "Idle_10",        "Idle" },
             { "Walk_2",         "Walk" },
             { "Run_0",          "Run" },
-            { "Jump",           "Jump" },
             { "RakeAttack_TPS", "Attack" },
             { "Walk Left",      "WalkLeft" },
             { "Walk Right",     "WalkRight" },
             { "Take 001_15",    "RifleHold" },
-            { "Take 001_1",     "Take1" },
         };
 
         static StringBuilder _log;
@@ -216,6 +214,35 @@ namespace RakeBake
                               trs[animNodes[k]].name + ") drift=" + drift.ToString("F3"));
                         }
                     }
+
+                    // Re-base every animated node so its mean position equals the rest
+                    // position. Detrending removes the drift but leaves the offset that
+                    // the root motion accumulated at frame 0, which pushed Walk ~1.3 m
+                    // away from the owner. A no-op for nodes whose position is constant.
+                    for (int k = 0; k < animNodes.Count; k++)
+                    {
+                        int nodeIndex = animNodes[k];
+                        var restNode = sk.nodes[nodeIndex];
+                        Vector3 restPos = new Vector3(restNode.pos[0], restNode.pos[1], restNode.pos[2]);
+
+                        Vector3 sum = Vector3.zero;
+                        for (int f = 0; f < frames; f++) sum += bc.pos[f * animNodes.Count + k];
+                        Vector3 delta = sum / frames - restPos;
+                        if (delta.sqrMagnitude < 1e-8f) continue;
+
+                        for (int f = 0; f < frames; f++)
+                        {
+                            int idx = f * animNodes.Count + k;
+                            bc.pos[idx] = bc.pos[idx] - delta;
+                        }
+
+                        if (delta.magnitude > 0.02f)
+                        {
+                            L("  re-based: node " + nodeIndex + " (" + trs[nodeIndex].name +
+                              ") by " + delta.ToString("F3"));
+                        }
+                    }
+
 
                     // sanity: how much do bones move compared to rest pose
                     float maxDelta = 0f;

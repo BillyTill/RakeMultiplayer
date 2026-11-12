@@ -49,9 +49,9 @@ namespace RakeMultiplayer
         /// contains scene leftovers, so the loader always overwrites it with these values.
         /// Values come from RakeMod/ModelBake/canonical_placement.py.
         /// </summary>
-        public static readonly Vector3 RootPosition = new Vector3(1.41209f, 0.84430f, -1.96220f);
-        public static readonly Quaternion RootRotation = new Quaternion(-0.709104f, 0.003993f, 0.004015f, 0.705081f);
-        public static readonly Vector3 RootScale = new Vector3(0.976563f, 0.976563f, 0.976563f);
+        public static readonly Vector3 RootPosition = new Vector3(-0.02963f, 0.00571f, -0.12195f);
+        public static readonly Quaternion RootRotation = new Quaternion(0f, 0f, 0f, 1f);
+        public static readonly Vector3 RootScale = new Vector3(0.97728f, 0.97728f, 0.97728f);
 
         private static bool _attempted;
         private static bool _loaded;

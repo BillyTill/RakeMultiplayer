@@ -7,21 +7,21 @@ using UnityEngine;
 namespace RakeBake
 {
     /// <summary>
-    /// The player body prefab carries a shotgun (Rem870_3rd) as a plain MeshRenderer
-    /// parented to the right hand bone. Bake its mesh plus the texture name of every
-    /// submesh into a standalone file so the mod can attach it to the same bone.
+    /// The player prefab carries the shotgun as a plain MeshRenderer under
+    /// Bip01 R Hand -> rifle -> Rem870_3rd. Bake that mesh plus the texture name of
+    /// every submesh into a standalone file so the mod can attach it to the same node.
     /// </summary>
     public static class RifleBake
     {
         const string AssetDir = "Assets/RakeBake/";
         public const string OutBin = @"C:\Users\KOMPUHTER\AppData\Local\Temp\opencode\RakePlayerRifle.bin";
 
-        // Submesh order of Rem870_3rd in the asset: body, scope, scope cap, lens.
-        static readonly string[] Textures = { "rifle.png", "optika.png", "optika.png", "linza_0.png" };
+        // Submesh order of Rem870_3rd in the player prefab.
+        static readonly string[] Textures = { "rifle.png" };
 
         public static void Run(SkeletonData sk)
         {
-            var mesh = AssetDatabase.LoadMainAssetAtPath(AssetDir + "Rem870_3rd_0.asset") as Mesh;
+            var mesh = AssetDatabase.LoadMainAssetAtPath(AssetDir + "Rem870_3rd.asset") as Mesh;
             if (mesh == null)
             {
                 Debug.Log("[Bake] SKIP rifle: mesh not imported");
