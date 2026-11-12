@@ -339,6 +339,38 @@ namespace RakeMultiplayer
                 return "preview clip = " + args[0];
             });
 
+            Register("rake info", "rake info",
+                "Log the Rake transform, animator and NavMeshAgent state", args =>
+            {
+                var rake = RakeHighlight.FindRake();
+                if (rake == null) return "rake: not found in this scene";
+
+                var rakeAnimator = rake.GetComponent<Animator>();
+                if (rakeAnimator == null) rakeAnimator = rake.GetComponentInChildren<Animator>();
+
+                var rakeAgent = rake.GetComponent<NavMeshAgent>();
+                if (rakeAgent == null) rakeAgent = rake.GetComponentInChildren<NavMeshAgent>();
+
+                var sb = new StringBuilder();
+                sb.AppendLine("pos=" + rake.position.ToString("F2") + "  euler=" + rake.eulerAngles.ToString("F1"));
+                sb.AppendLine("forward=" + rake.forward.ToString("F2"));
+                sb.AppendLine("animator=" + (rakeAnimator != null ? rakeAnimator.name : "null") +
+                              "  rootMotion=" + (rakeAnimator != null && rakeAnimator.applyRootMotion) +
+                              "  speed=" + (rakeAnimator != null ? rakeAnimator.GetFloat("Speed") : 0f));
+                sb.AppendLine("agent=" + (rakeAgent != null ? (rakeAgent.enabled ? "on" : "off") : "null") +
+                              "  vel=" + (rakeAgent != null ? rakeAgent.velocity.ToString("F2") : "-"));
+
+                var smr = rake.GetComponentInChildren<SkinnedMeshRenderer>();
+                if (smr != null)
+                {
+                    sb.AppendLine("model=" + smr.transform.name +
+                                  "  forward=" + smr.transform.forward.ToString("F2") +
+                                  "  euler=" + smr.transform.eulerAngles.ToString("F1"));
+                }
+                return sb.ToString();
+            });
+
+
             Register("rake stun", "rake stun [seconds]", "Stun the Rake (host only)", args =>
             {
                 var rake = UnityEngine.Object.FindObjectOfType<NetworkedRakeAI>();

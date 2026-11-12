@@ -137,6 +137,7 @@ namespace RakeMultiplayer
         {
             enemyAI = GetComponent<Enemy_AI>();
             animator = GetComponent<Animator>();
+            if (animator == null) animator = GetComponentInChildren<Animator>();
             audioSource = GetComponent<AudioSource>();
 
             lastSentPosition = transform.position;
@@ -259,13 +260,9 @@ namespace RakeMultiplayer
                 if (hasTargetRotation)
                 {
                     transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, t);
+                }
 
-                if (animator != null)
-                {
-                    float currentSpeed = animator.GetFloat("Speed");
-                    animator.SetFloat("Speed", Mathf.MoveTowards(currentSpeed, targetSpeed, Time.deltaTime * 2.5f));
-                }
-                }
+                UpdateClientAnimation();
             }
         }
 
@@ -466,8 +463,7 @@ namespace RakeMultiplayer
                 lookDir.y = 0;
                 if (lookDir != Vector3.zero)
                 {
-                    transform.rotation = Quaternion.Slerp(transform.rotation, 
-                        Quaternion.LookRotation(lookDir), Time.deltaTime * 5f);
+                    FaceTarget(lookDir, 5f);
                 }
             }
 
@@ -515,8 +511,7 @@ namespace RakeMultiplayer
             lookDir.y = 0;
             if (lookDir != Vector3.zero)
             {
-                transform.rotation = Quaternion.Slerp(transform.rotation, 
-                    Quaternion.LookRotation(lookDir), Time.deltaTime * 3f);
+                FaceTarget(lookDir, 3f);
             }
 
             // Hunter look detection: raycast from Camera.main, 30° cone, 20m range
@@ -587,8 +582,7 @@ namespace RakeMultiplayer
             lookDir.y = 0;
             if (lookDir != Vector3.zero)
             {
-                transform.rotation = Quaternion.Slerp(transform.rotation, 
-                    Quaternion.LookRotation(lookDir), Time.deltaTime * 10f);
+                FaceTarget(lookDir, 10f);
             }
 
             // Check for frontal damage (Blocking trigger)
@@ -621,8 +615,7 @@ namespace RakeMultiplayer
             lookDir.y = 0;
             if (lookDir != Vector3.zero)
             {
-                transform.rotation = Quaternion.Slerp(transform.rotation, 
-                    Quaternion.LookRotation(lookDir), Time.deltaTime * 15f);
+                FaceTarget(lookDir, 15f);
             }
 
             // Attack logic - delegate to Enemy_AI using cached reflection
@@ -802,6 +795,55 @@ namespace RakeMultiplayer
             if (agent != null) return agent;
 
             return GetComponentInChildren<NavMeshAgent>();
+        }
+
+        private Vector3 _lastAnimPosition;
+        private float _observedSpeed;
+        private bool _lastAnimPositionValid;
+
+        /// <summary>
+        /// Clients drive the animator from the movement they actually observe. The old
+        /// code fed the animator a speed derived from the AI state (Follow = 1,
+        /// Chase = 2), which is never 0, so the Rake walked in place forever.
+        /// </summary>
+        private void UpdateClientAnimation()
+        {
+            if (animator == null) return;
+
+            float dt = Time.deltaTime;
+            Vector3 position = transform.position;
+
+            if (_lastAnimPositionValid && dt > 0.0001f)
+            {
+                float instant = (position - _lastAnimPosition).magnitude / dt;
+                _observedSpeed = Mathf.Lerp(_observedSpeed, instant, 1f - Mathf.Exp(-10f * dt));
+            }
+            _lastAnimPosition = position;
+            _lastAnimPositionValid = true;
+
+            // 0 = idle, 1 = walk, 2 = run - same values the vanilla Enemy_AI uses
+            float target = _observedSpeed < 0.2f ? 0f : (_observedSpeed < 3.5f ? 1f : 2f);
+            animator.SetFloat("Speed", Mathf.MoveTowards(animator.GetFloat("Speed"), target, dt * 4f));
+
+            // The vanilla AI keeps WalkType at 1; without it the animator picks another gait
+            animator.SetInteger("WalkType", 1);
+            animator.SetBool("bAttack", currentState == RakeState.Attack);
+        }
+
+        /// <summary>
+        /// Face a direction, but only while the NavMeshAgent is standing still: while it
+        /// moves, the agent owns the rotation and the Rake should look where it walks.
+        /// Overriding it made the model face sideways relative to its movement.
+        /// </summary>
+        private void FaceTarget(Vector3 direction, float speed)
+        {
+            if (direction.sqrMagnitude < 0.0001f) return;
+
+            var agent = ResolveAgent();
+            if (agent != null && agent.velocity.sqrMagnitude > 0.04f) return;
+
+            transform.rotation = Quaternion.Slerp(transform.rotation,
+                Quaternion.LookRotation(direction), Time.deltaTime * speed);
         }
 
         /// <summary>
