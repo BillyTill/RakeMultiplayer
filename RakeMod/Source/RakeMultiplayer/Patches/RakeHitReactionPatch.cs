@@ -43,12 +43,18 @@ namespace RakeMultiplayer.Patches
                 if (RakeMultiplayerPlugin.HitReaction != null && !RakeMultiplayerPlugin.HitReaction.Value) return;
                 if (PlayerRagdoll.IsActive) return;
 
+                // Direction only: the body is spawned at the player, this just decides
+                // which way the impulse pushes it (away from the attacker).
                 Vector3 away = Vector3.zero;
                 var rake = RakeHighlight.FindRake();
                 if (rake != null)
                 {
-                    away = __instance.transform.position - rake.position;
-                    away.y = 0f;
+                    Vector3 delta = __instance.transform.position - rake.position;
+                    delta.y = 0f;
+
+                    // If the Rake is almost directly below us the horizontal part is
+                    // numerical noise, so fall back to the player's backward direction.
+                    if (delta.sqrMagnitude > 0.25f) away = delta;
                 }
 
                 if (PlayerRagdoll.Trigger(away))
