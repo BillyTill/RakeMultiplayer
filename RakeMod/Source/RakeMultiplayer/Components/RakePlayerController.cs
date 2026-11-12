@@ -66,6 +66,11 @@ namespace RakeMultiplayer
         private bool _enemyWasEnabled;
         private bool _agentRotationWas = true;
         private bool _agentWasEnabled = true;
+        private CharacterController _rakeController;
+        private bool _rakeControllerAdded;
+        private bool _rakeControllerWasEnabled;
+        private float _verticalVelocity;
+        private readonly List<Collider> _disabledColliders = new List<Collider>();
         private bool _rootMotionWas = true;
 
         private readonly List<Camera> _hiddenCameras = new List<Camera>();
@@ -188,8 +193,12 @@ namespace RakeMultiplayer
                 _agent.Stop();
                 _agent.ResetPath();
 
-                _agent.enabled = true;
+                // The level NavMesh only covers the staging platform; the body is
+                // driven by a CharacterController instead.
+                _agent.enabled = false;
             }
+
+            SetupCharacterController();
 
             _rakeAI.SetPlayerControlled(true);
 
@@ -220,6 +229,36 @@ namespace RakeMultiplayer
             RakeMultiplayerPlugin.Log?.LogInfo("[RakePlay] Player took control of the Rake at " +
                                                rake.position.ToString("F1"));
             return true;
+        }
+
+        private void SetupCharacterController()
+        {
+            _rakeController = _rake.GetComponent<CharacterController>();
+            if (_rakeController == null)
+            {
+                _rakeController = _rake.gameObject.AddComponent<CharacterController>();
+                _rakeControllerAdded = true;
+            }
+
+            _rakeControllerWasEnabled = _rakeController.enabled;
+            _rakeController.height = 2.0f;
+            _rakeController.radius = 0.45f;
+            _rakeController.center = new Vector3(0f, 1.0f, 0f);
+            _rakeController.slopeLimit = 60f;
+            _rakeController.stepOffset = 0.55f;
+            _rakeController.enabled = true;
+
+            _verticalVelocity = 0f;
+
+            // Avoid self-collision with the Rake's own trigger/colliders.
+            Collider[] colliders = _rake.GetComponents<Collider>();
+            for (int i = 0; i < colliders.Length; i++)
+            {
+                Collider col = colliders[i];
+                if (col == null || col == _rakeController || !col.enabled) continue;
+                col.enabled = false;
+                _disabledColliders.Add(col);
+            }
         }
 
         private void HideHunter()
@@ -333,6 +372,19 @@ namespace RakeMultiplayer
             if (_enemyAI != null) _enemyAI.enabled = _enemyWasEnabled;
             if (_animator != null) _animator.applyRootMotion = _rootMotionWas;
             if (_rakeAI != null) _rakeAI.SetPlayerControlled(false);
+            if (_rakeController != null)
+            {
+                if (_rakeControllerAdded) UnityEngine.Object.Destroy(_rakeController);
+                else _rakeController.enabled = _rakeControllerWasEnabled;
+                _rakeController = null;
+            }
+
+            for (int i = 0; i < _disabledColliders.Count; i++)
+            {
+                if (_disabledColliders[i] != null) _disabledColliders[i].enabled = true;
+            }
+            _disabledColliders.Clear();
+
             if (_agent != null)
             {
                 _agent.updateRotation = _agentRotationWas;
@@ -432,16 +484,27 @@ namespace RakeMultiplayer
             bool moving = direction.sqrMagnitude > 0.001f;
             if (moving) direction.Normalize();
 
-            if (moving)
+            Vector3 move = moving ? direction * speed : Vector3.zero;
+
+            if (_rakeController != null && _rakeController.enabled)
             {
-                if (_agent != null && _agent.enabled && _agent.isOnNavMesh)
+                // CharacterController handles terrain, steps and obstacles; gravity is
+                // applied by hand because the Rake has no Rigidbody.
+                if (_rakeController.isGrounded)
                 {
-                    _agent.Move(direction * speed * dt);
+                    if (_verticalVelocity < 0f) _verticalVelocity = -2f;
                 }
                 else
                 {
-                    _rake.position += direction * speed * dt;
+                    _verticalVelocity += Physics.gravity.y * dt;
                 }
+
+                move.y = _verticalVelocity;
+                _rakeController.Move(move * dt);
+            }
+            else if (moving)
+            {
+                _rake.position += direction * speed * dt;
             }
 
             if (_firstPerson)
