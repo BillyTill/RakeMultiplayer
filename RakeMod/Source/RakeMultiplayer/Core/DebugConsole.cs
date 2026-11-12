@@ -339,6 +339,46 @@ namespace RakeMultiplayer
                 return "preview clip = " + args[0];
             });
 
+            Register("rake hit", "rake hit [damage]",
+                "Simulate a Rake hit on the local player (default 0 = all effects, no health loss)", args =>
+            {
+                var player = LocalPlayer();
+                if (player == null) return "rake hit: no local player";
+
+                var fps = player.GetComponent<FPSController>();
+                if (fps == null) return "rake hit: no FPSController on the local player";
+
+                if (PlayerRagdoll.IsActive) return "rake hit: reaction already playing";
+
+                int damage = 0;
+                if (args.Length > 0) int.TryParse(args[0], out damage);
+
+                bool triggered = false;
+                try
+                {
+                    // Goes through the real damage path: pain sound, effects and the
+                    // ragdoll hit reaction. 0 damage by default, so health is untouched.
+                    fps.TakeDamage(damage, "RakeAttack");
+                    triggered = PlayerRagdoll.IsActive;
+                }
+                catch (Exception ex)
+                {
+                    Print("rake hit: TakeDamage failed (" + ex.Message + "), triggering the reaction directly");
+                }
+
+                if (!triggered)
+                {
+                    var rake = RakeHighlight.FindRake();
+                    Vector3 away = rake != null ? player.position - rake.position : Vector3.zero;
+                    triggered = PlayerRagdoll.Trigger(away);
+                }
+
+                return triggered
+                    ? "rake hit simulated (" + damage + " damage)"
+                    : "rake hit: could not start the reaction";
+            });
+
+
             Register("ragdoll", "ragdoll",
                 "Play the hit reaction (ragdoll + head camera)", args =>
             {
