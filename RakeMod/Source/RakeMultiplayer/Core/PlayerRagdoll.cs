@@ -297,6 +297,10 @@ namespace RakeMultiplayer
             }
             _camera.nearClipPlane = 0.03f;
             _camera.enabled = true;
+
+            RakeMultiplayerPlugin.Log?.LogInfo("[Ragdoll] camera eye=" + eyeWorld.ToString("F2") +
+                                               " head=" + _head.position.ToString("F2") +
+                                               " root=" + transform.position.ToString("F2"));
         }
 
         private void DisablePlayerCameras(Transform player)
