@@ -20,6 +20,7 @@ namespace RakeMultiplayer
         private PlayerMovement playerMovement;
         private CameraMouseLook cameraMouseLook;
         private Animator _cachedAnimator;
+        private WeaponManager _weaponManager;
 
         // Sync timer
         private float sendTimer;
@@ -45,6 +46,7 @@ namespace RakeMultiplayer
             playerMovement = GetComponent<PlayerMovement>();
             cameraMouseLook = GetComponentInChildren<CameraMouseLook>();
             _cachedAnimator = GetComponentInChildren<Animator>();
+            _weaponManager = GetComponentInChildren<WeaponManager>();
 
             lastSentPosition = transform.position;
             lastSentRotation = transform.rotation;
@@ -275,6 +277,9 @@ namespace RakeMultiplayer
                 if (_cachedAnimator.GetBool("Aim")) state |= 1 << 2;
                 if (_cachedAnimator.GetBool("Grounded")) state |= 1 << 3;
             }
+
+            // bit4 = a weapon is out; the third-person body only shows the gun then
+            if (_weaponManager != null && _weaponManager.currentWeaponID > 0) state |= 1 << 4;
             return state;
         }
 

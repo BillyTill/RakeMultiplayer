@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace RakeMultiplayer
@@ -22,12 +23,31 @@ namespace RakeMultiplayer
         private const float WalkReferenceSpeed = 1.58f;
         private const float RunReferenceSpeed = 5.66f;
 
+        /// <summary>
+        /// Per-clip yaw correction (degrees). The humanoid clips carry a root rotation that
+        /// the bake does not extract, so the body faces a different direction in each clip
+        /// (Idle was 114 deg off, i.e. the body looked 90 deg to the right). Values are
+        /// produced by RakeMod/ModelBake/canonical_placement.py.
+        /// </summary>
+        private static readonly Dictionary<string, float> ClipYaw = new Dictionary<string, float>
+        {
+            { "Idle", -113.87f },
+            { "Walk", 2.64f },
+            { "Run", 2.51f },
+            { "Attack", -0.22f },
+            { "WalkLeft", 27.76f },
+            { "WalkRight", -27.78f },
+            { "RifleHold", -0.01f },
+        };
+
         private Transform[] _nodes;
         private Transform _tracked;
         private SkinnedMeshRenderer _renderer;
+        private MeshRenderer _weapon;
 
         private RemotePlayerModelClip _clip;
         private string _clipName;
+        private Quaternion _clipYawRot = Quaternion.identity;
         private float _time;
         private float _rate = 1f;
 
@@ -38,6 +58,7 @@ namespace RakeMultiplayer
         private NetworkedPlayer _networked;
         private bool _loggedBounds;
         private bool _manualClip;
+        private bool _weaponVisible = true;
 
         /// <summary>
         /// Create the body under <paramref name="parent"/>, tracking <paramref name="tracked"/>
@@ -91,12 +112,6 @@ namespace RakeMultiplayer
                 t.localScale = node.Scale;
             }
 
-            // The baked root transform carries scene leftovers; use the canonical placement
-            // (feet on the ground, facing +Z, human height).
-            _nodes[0].localPosition = RemotePlayerModelData.RootPosition;
-            _nodes[0].localRotation = RemotePlayerModelData.RootRotation;
-            _nodes[0].localScale = RemotePlayerModelData.RootScale;
-
             // ---- skinned renderer ----
             int smrNode = RemotePlayerModelData.SmrNode;
             if (smrNode < 0 || smrNode >= _nodes.Length) return false;
@@ -122,7 +137,7 @@ namespace RakeMultiplayer
 
             // The body prefab carries the shotgun as a plain mesh parented to the right
             // hand bone; add it as static geometry on the same node.
-            RemotePlayerWeaponData.Attach(_nodes);
+            _weapon = RemotePlayerWeaponData.Attach(_nodes);
 
             // ---- tracking / state ----
             _tracked = tracked != null ? tracked : transform.root;
@@ -132,6 +147,7 @@ namespace RakeMultiplayer
 
             SetClip(ClipIdle);
             ApplyPose();
+            UpdateWeaponVisibility();
 
             RakeMultiplayerPlugin.Log?.LogInfo("[Model] Built remote body for " + _tracked.name);
             return true;
@@ -144,6 +160,7 @@ namespace RakeMultiplayer
             UpdateSpeed();
             UpdateClip();
             ApplyPose();
+            UpdateWeaponVisibility();
 
             if (!_loggedBounds && _renderer != null)
             {
@@ -186,7 +203,7 @@ namespace RakeMultiplayer
 
             bool moving = _speed > 0.25f;
             bool running = moving && IsRunning();
-            bool aiming = IsAiming();
+            bool aiming = IsAiming() && HasWeapon();
 
             string wanted;
             if (!moving && aiming && RemotePlayerModelData.GetClip(ClipAim) != null) wanted = ClipAim;
@@ -206,6 +223,12 @@ namespace RakeMultiplayer
             }
         }
 
+        private byte AnimState()
+        {
+            if (_networked == null && _tracked != null) _networked = _tracked.GetComponent<NetworkedPlayer>();
+            return _networked != null ? _networked.CurrentAnimState : (byte)0;
+        }
+
         private bool IsRunning()
         {
             if (_networked == null && _tracked != null) _networked = _tracked.GetComponent<NetworkedPlayer>();
@@ -217,11 +240,33 @@ namespace RakeMultiplayer
 
         private bool IsAiming()
         {
-            if (_networked == null && _tracked != null) _networked = _tracked.GetComponent<NetworkedPlayer>();
-            if (_networked == null) return false;
-
             // bit2 of the animation bitmask is "aiming"
-            return (_networked.CurrentAnimState & 4) != 0;
+            return (AnimState() & 4) != 0;
+        }
+
+        /// <summary>bit4: the player has a weapon out (the mod only bakes the shotgun).</summary>
+        private bool HasWeapon()
+        {
+            return (AnimState() & 16) != 0;
+        }
+
+        private void UpdateWeaponVisibility()
+        {
+            if (_weapon == null) return;
+
+            // The debug preview always shows the weapon so it can be inspected.
+            bool visible = _manualClip || HasWeapon();
+            if (visible == _weaponVisible) return;
+
+            _weaponVisible = visible;
+            _weapon.enabled = visible;
+        }
+
+        /// <summary>Force the weapon on/off (used by the F10 debug preview).</summary>
+        public void SetWeaponVisible(bool visible)
+        {
+            _weaponVisible = visible;
+            if (_weapon != null) _weapon.enabled = visible;
         }
 
         private static bool IsLocomotion(string clip)
@@ -253,7 +298,27 @@ namespace RakeMultiplayer
 
             _clip = next;
             _clipName = name;
+
+            float yaw;
+            _clipYawRot = ClipYaw.TryGetValue(name, out yaw)
+                ? Quaternion.Euler(0f, yaw, 0f)
+                : Quaternion.identity;
+            ApplyRootPlacement();
+
             _time = phase * next.Length;
+        }
+
+        /// <summary>
+        /// Place the model root: canonical offset/scale from the bake plus the per-clip yaw
+        /// correction. Rotating the offset as well keeps the feet on the owner's position.
+        /// </summary>
+        private void ApplyRootPlacement()
+        {
+            if (_nodes == null || _nodes.Length == 0) return;
+
+            _nodes[0].localPosition = _clipYawRot * RemotePlayerModelData.RootPosition;
+            _nodes[0].localRotation = _clipYawRot * RemotePlayerModelData.RootRotation;
+            _nodes[0].localScale = RemotePlayerModelData.RootScale;
         }
 
         private void ApplyPose()
@@ -297,6 +362,7 @@ namespace RakeMultiplayer
             SetClip(name);
             _time = 0f;
             ApplyPose();
+            SetWeaponVisible(true);
         }
 
         /// <summary>Name of the clip currently playing (diagnostics).</summary>

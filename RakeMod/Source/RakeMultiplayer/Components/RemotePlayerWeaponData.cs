@@ -173,18 +173,18 @@ namespace RakeMultiplayer
         }
 
         /// <summary>Add a static mesh renderer for the weapon to its bone node.</summary>
-        public static bool Attach(Transform[] nodes)
+        public static MeshRenderer Attach(Transform[] nodes)
         {
-            if (nodes == null) return false;
-            if (!EnsureLoaded()) return false;
+            if (nodes == null) return null;
+            if (!EnsureLoaded()) return null;
             if (_nodeIndex < 0 || _nodeIndex >= nodes.Length)
             {
                 RakeMultiplayerPlugin.Log?.LogWarning("[Weapon] node index out of range: " + _nodeIndex);
-                return false;
+                return null;
             }
 
             var go = nodes[_nodeIndex].gameObject;
-            if (go.GetComponent<MeshFilter>() != null) return true; // already attached
+            if (go.GetComponent<MeshFilter>() != null) return go.GetComponent<MeshRenderer>(); // already attached
 
             var filter = go.AddComponent<MeshFilter>();
             filter.sharedMesh = _mesh;
@@ -193,7 +193,7 @@ namespace RakeMultiplayer
             renderer.sharedMaterials = _materials;
             renderer.receiveShadows = true;
             renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.On;
-            return true;
+            return renderer;
         }
     }
 }
