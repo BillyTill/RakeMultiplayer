@@ -145,3 +145,23 @@ interpolation. Clip selection uses movement speed plus the animation bitmask tha
 the root motion that was baked into the clips, so the feet do not slide.
 
 `RemotePlayerVisual` falls back to the old primitive proxy if the binary is missing.
+
+## Weapon
+
+The body prefab also carries a shotgun (Rem870_3rd) as a plain MeshRenderer
+parented to Bip01 R Hand. RifleBake.cs exports it to RakePlayerRifle.bin
+(4478 verts, 4 submeshes, textures rifle.png / optika.png / linza_0.png).
+
+RemotePlayerWeaponData rebuilds the mesh with SetTriangles per submesh, creates
+one material per submesh, and adds MeshFilter + MeshRenderer to the same bone node.
+No skinning is involved, so the weapon follows the hand automatically.
+
+The rifle node keeps the local transform from the prefab (scale 1858.95 against a
+~1e-4 unit mesh, i.e. a 1.41 m weapon). MP_HunterController.prefab has an extra
+intermediate rifle node that human 1.prefab collapsed, but its scale only makes
+sense against a different mesh copy, so the collapsed transform is kept.
+
+Take 001_15 is baked as the RifleHold clip: it is a static pose (0 deg variation
+over 10 s) that raises both arms up to 72.8 deg from rest, i.e. the weapon-hold pose.
+It is played when the synced aiming bit is set and the player is standing still.
+
