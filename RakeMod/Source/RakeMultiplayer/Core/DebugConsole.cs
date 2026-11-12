@@ -362,7 +362,41 @@ namespace RakeMultiplayer
                 controller.enabled = !controller.enabled;
                 return "noclip " + (controller.enabled ? "OFF" : "ON");
             });
+
+            Register("rake highlight", "rake highlight [on|off|toggle]",
+                "Highlight the Rake with a bright light and a marker above its head", args =>
+            {
+                string mode = args.Length > 0 ? args[0].ToLowerInvariant() : "toggle";
+                bool want;
+                if (mode == "on") want = true;
+                else if (mode == "off") want = false;
+                else want = !RakeHighlight.IsActive;
+
+                RakeHighlight.SetEnabled(want);
+                return want ? "rake highlight ON" : "rake highlight OFF";
+            });
+
+            CommandHandler focusRake = args =>
+            {
+                if (!DebugFreeCamera.IsActive)
+                {
+                    return "debug camera is not active - run 'debug camera on' first";
+                }
+
+                var rake = RakeHighlight.FindRake();
+                if (rake == null) return "rake: not found in this scene";
+
+                return DebugFreeCamera.FocusOn(rake)
+                    ? "debug camera moved to the Rake at " + rake.position.ToString("F1")
+                    : "debug camera: could not move";
+            };
+
+            Register("debug camera rake", "debug camera rake",
+                "Move the debug camera to the Rake (needs 'debug camera on')", focusRake);
+            Register("rake camera", "rake camera",
+                "Alias of 'debug camera rake'", focusRake);
         }
+
 
         private static Transform LocalPlayer()
         {

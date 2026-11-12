@@ -124,6 +124,37 @@ namespace RakeMultiplayer
             _disabledCameras.Clear();
         }
 
+        /// <summary>Move the active debug camera to a viewpoint looking at the target.</summary>
+        public static bool FocusOn(Transform target)
+        {
+            if (!IsActive || _instance == null || target == null) return false;
+
+            Vector3 targetPoint = target.position + Vector3.up * 1.2f;
+            Vector3 direction = targetPoint - _instance.transform.position;
+            direction.y = 0f;
+            if (direction.sqrMagnitude < 0.01f) direction = target.forward;
+            direction.y = 0f;
+            direction.Normalize();
+
+            Vector3 position = targetPoint - direction * 6f + Vector3.up * 2.5f;
+            return MoveTo(position, Quaternion.LookRotation(targetPoint - position));
+        }
+
+        /// <summary>Teleport the active debug camera (keeps the yaw/pitch state in sync).</summary>
+        public static bool MoveTo(Vector3 position, Quaternion rotation)
+        {
+            if (!IsActive || _instance == null) return false;
+
+            _instance.transform.position = position;
+
+            Vector3 euler = rotation.eulerAngles;
+            float pitch = euler.x > 180f ? euler.x - 360f : euler.x;
+            _instance._yaw = euler.y;
+            _instance._pitch = Mathf.Clamp(pitch, -89f, 89f);
+            _instance.transform.rotation = Quaternion.Euler(_instance._pitch, _instance._yaw, 0f);
+            return true;
+        }
+
         private static Camera FindCamera()
         {
             Camera main = Camera.main;
