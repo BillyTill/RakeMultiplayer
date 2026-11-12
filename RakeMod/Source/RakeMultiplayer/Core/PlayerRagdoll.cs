@@ -1,42 +1,41 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using RakeMultiplayer.Networking;
 
 namespace RakeMultiplayer
 {
     /// <summary>
-    /// Hit reaction ragdoll of the player body.
+    /// Universal hit-reaction ragdoll. Works for any damage source, not just the Rake:
+    /// call <see cref="TriggerNetworked"/> on the server (or <see cref="ApplyFor"/> locally)
+    /// with a player id and the direction the body should fly.
     ///
-    /// Local mode (the victim): builds the ragdoll, throws it away from the hit and keeps
-    /// the first-person camera attached to the ragdoll's head so the hit is felt while the
-    /// body tumbles. Restores first person after a couple of seconds.
+    /// Local mode (the victim): builds the ragdoll, throws it, and keeps the first-person
+    /// camera attached to the ragdoll's head so the hit is felt. Restores after a moment.
     ///
-    /// Remote mode (other players watching): same ragdoll, no camera, and the victim's
-    /// normal remote body is hidden while the ragdoll is visible.
-    ///
-    /// The ragdoll is built at runtime from the baked body model: every major bone gets a
-    /// Rigidbody, a CapsuleCollider and a CharacterJoint to its nearest physics parent.
+    /// Remote mode (everyone else): same ragdoll, no camera, and the victim's normal remote
+    /// body is hidden while the ragdoll is visible.
     /// </summary>
     public class PlayerRagdoll : MonoBehaviour
     {
-        /// <summary>Seconds the body stays on the ground before everything is restored.</summary>
+        /// <summary>Seconds the body stays down before everything is restored.</summary>
         public static float Duration = 2.0f;
 
-        /// <summary>Horizontal launch speed (m/s). ~6 gives a 2-3 m arc.</summary>
-        public static float LaunchSpeed = 6.0f;
+        /// <summary>Horizontal launch speed (m/s). ~3.5 gives a 2-3 m fall.</summary>
+        public static float LaunchSpeed = 3.0f;
 
         /// <summary>Upward launch speed (m/s).</summary>
-        public static float LaunchLift = 3.2f;
+        public static float LaunchLift = 2.0f;
 
         /// <summary>Random spin applied to the pelvis.</summary>
-        public static float LaunchSpin = 5.0f;
+        public static float LaunchSpin = 2.5f;
 
         // Only the local (victim) ragdoll is tracked here; remote ones are independent.
         private static PlayerRagdoll _localInstance;
+        private static PhysicMaterial _friction;
 
         public static bool IsActive { get { return _localInstance != null; } }
 
-        // Bones that get physics. Fingers/toes stay as kinematic children.
         private static readonly string[] PhysicsBones =
         {
             "Bip01 Pelvis", "Bip01 Spine", "Bip01 Spine1", "Bip01 Spine2",
@@ -50,7 +49,6 @@ namespace RakeMultiplayer
         private Transform[] _nodes;
         private Transform _pelvis;
         private Transform _head;
-        private Transform _headAnchor;
 
         private Camera _camera;
         private Camera _originalCamera;
@@ -59,8 +57,59 @@ namespace RakeMultiplayer
         private CharacterController _controller;
 
         private bool _isLocal;
+        private Vector3 _spawnPosition;
+        private Vector3 _playerPosition;
         private float _timer;
         private bool _restored;
+
+        // ---------------------------------------------------------------- public API
+
+        /// <summary>
+        /// Show the hit reaction for a player on this machine (local player or a remote clone).
+        /// </summary>
+        public static bool ApplyFor(int playerId, Vector3 direction)
+        {
+            var spawner = PlayerSpawner.Instance;
+            if (spawner == null) return false;
+
+            var local = spawner.LocalPlayer;
+            if (local != null && local.PlayerId == playerId)
+            {
+                return Trigger(direction);
+            }
+
+            NetworkedPlayer remote;
+            if (!spawner.TryGetRemotePlayer(playerId, out remote) || remote == null) return false;
+            return TriggerRemote(remote.transform, direction);
+        }
+
+        /// <summary>
+        /// Server: show it here and tell every client to show it too.
+        /// On a client this only plays locally (debug use).
+        /// </summary>
+        public static bool TriggerNetworked(int playerId, Vector3 direction)
+        {
+            if (playerId <= 0) return false;
+
+            bool applied = ApplyFor(playerId, direction);
+
+            if (RakeMultiplayerPlugin.isServer)
+            {
+                var packet = new PlayerRagdollPacket { PlayerId = playerId, Direction = direction };
+                RakeNetworkManager.Instance?.ServerBroadcast(packet.Serialize());
+            }
+
+            return applied;
+        }
+
+        /// <summary>Server: tell clients to show the reaction (no local spawn).</summary>
+        public static void BroadcastOnly(int playerId, Vector3 direction)
+        {
+            if (!RakeMultiplayerPlugin.isServer || playerId <= 0) return;
+
+            var packet = new PlayerRagdollPacket { PlayerId = playerId, Direction = direction };
+            RakeNetworkManager.Instance?.ServerBroadcast(packet.Serialize());
+        }
 
         /// <summary>Local player hit: ragdoll + head camera.</summary>
         public static bool Trigger(Vector3 awayFromHit)
@@ -103,6 +152,8 @@ namespace RakeMultiplayer
             return true;
         }
 
+        // ---------------------------------------------------------------- build
+
         private bool BuildInternal(Transform player, bool local)
         {
             var data = RemotePlayerModelData.Nodes;
@@ -111,10 +162,11 @@ namespace RakeMultiplayer
             _isLocal = local;
             _controller = player.GetComponent<CharacterController>();
 
-            // Place the body's feet where the player's feet are
             float footOffset = _controller != null ? _controller.center.y - _controller.height * 0.5f : 0f;
-            transform.position = player.position + Vector3.up * footOffset;
+            transform.position = player.position + Vector3.up * (footOffset + 0.05f);
             transform.rotation = Quaternion.Euler(0f, player.eulerAngles.y, 0f);
+            _spawnPosition = transform.position;
+            _playerPosition = player.position;
 
             // ---- hierarchy ----
             _nodes = new Transform[data.Length];
@@ -170,7 +222,6 @@ namespace RakeMultiplayer
             _head = FindNode("Bip01 Head");
             if (_pelvis == null || _head == null) return false;
 
-            // Start from the idle pose instead of the stiff bind pose
             ApplyIdlePose();
 
             if (!AddPhysics()) return false;
@@ -212,8 +263,8 @@ namespace RakeMultiplayer
         // ---------------------------------------------------------------- camera
 
         /// <summary>
-        /// Parent the camera to the head bone through an anchor placed at eye height, so the
-        /// position is exact by construction (no per-frame maths, no drift, no offset).
+        /// Parent the camera to the head bone through an anchor at eye height, so the
+        /// position is exact by construction and follows every tumble of the body.
         /// </summary>
         private void AttachHeadCamera()
         {
@@ -231,8 +282,7 @@ namespace RakeMultiplayer
             var anchor = new GameObject("RagdollHeadAnchor").transform;
             anchor.SetParent(_head, false);
             anchor.position = eyeWorld;
-            anchor.rotation = transform.rotation; // body forward; follows the head from now on
-            _headAnchor = anchor;
+            anchor.rotation = transform.rotation;
 
             var go = new GameObject("RagdollHeadCamera");
             go.transform.SetParent(anchor, false);
@@ -300,9 +350,23 @@ namespace RakeMultiplayer
 
         // ---------------------------------------------------------------- physics
 
+        private static PhysicMaterial Friction()
+        {
+            if (_friction == null)
+            {
+                _friction = new PhysicMaterial("RagdollFriction");
+                _friction.dynamicFriction = 0.9f;
+                _friction.staticFriction = 0.9f;
+                _friction.bounciness = 0f;
+                _friction.frictionCombine = PhysicMaterialCombine.Average;
+            }
+            return _friction;
+        }
+
         private bool AddPhysics()
         {
             var rigidbodies = new Dictionary<Transform, Rigidbody>();
+            var material = Friction();
 
             for (int b = 0; b < PhysicsBones.Length; b++)
             {
@@ -311,19 +375,19 @@ namespace RakeMultiplayer
 
                 var rb = bone.gameObject.AddComponent<Rigidbody>();
                 rb.mass = MassFor(bone.name);
-                rb.drag = 0.05f;
-                rb.angularDrag = 0.5f;
+                rb.drag = 0.1f;
+                rb.angularDrag = 1.5f;
                 rb.interpolation = RigidbodyInterpolation.Interpolate;
                 rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
                 rigidbodies[bone] = rb;
 
                 var collider = bone.gameObject.AddComponent<CapsuleCollider>();
+                collider.sharedMaterial = material;
                 SizeCollider(bone, collider);
             }
 
             if (rigidbodies.Count < 4) return false;
 
-            // Joints: connect every physics bone to its nearest physics ancestor
             foreach (var kv in rigidbodies)
             {
                 Transform bone = kv.Key;
@@ -384,14 +448,13 @@ namespace RakeMultiplayer
             return 2f;
         }
 
-        /// <summary>Size a capsule along the dominant axis towards the bone's main child.</summary>
         private static void SizeCollider(Transform bone, CapsuleCollider collider)
         {
             Transform child = MainChild(bone);
             Vector3 childLocal = child != null ? child.localPosition : Vector3.zero;
             float length = childLocal.magnitude;
 
-            int axis = 1; // Y
+            int axis = 1;
             float best = Mathf.Abs(childLocal.y);
             if (Mathf.Abs(childLocal.x) > best) { axis = 0; best = Mathf.Abs(childLocal.x); }
             if (Mathf.Abs(childLocal.z) > best) { axis = 2; best = Mathf.Abs(childLocal.z); }
@@ -401,7 +464,6 @@ namespace RakeMultiplayer
             collider.radius = Mathf.Clamp(length * 0.28f, 0.035f, 0.13f);
             collider.center = childLocal * 0.5f;
 
-            // Bones with no usable child (head, hands, feet) get a blob
             if (length < 0.02f)
             {
                 collider.height = 0.14f;
@@ -449,14 +511,43 @@ namespace RakeMultiplayer
                 pelvisBody.AddTorque(UnityEngine.Random.insideUnitSphere * LaunchSpin, ForceMode.VelocityChange);
             }
 
+            var rake = RakeHighlight.FindRake();
             RakeMultiplayerPlugin.Log?.LogInfo("[Ragdoll] " + (_isLocal ? "local" : "remote") +
-                                               " reaction started (dir=" + dir.ToString("F2") + ")");
+                                               " spawn=" + _spawnPosition.ToString("F2") +
+                                               " player=" + _playerPosition.ToString("F2") +
+                                               " rake=" + (rake != null ? rake.position.ToString("F2") : "none") +
+                                               " dir=" + dir.ToString("F2"));
         }
 
         private void LateUpdate()
         {
+            if (SafetyNet()) return;
+
             _timer += Time.deltaTime;
             if (_timer >= Duration && !_restored) Restore();
+        }
+
+        /// <summary>
+        /// If the ragdoll tunnels through the level (the physics can slip a fast body
+        /// through a mesh collider) it would fall onto whatever is below the map. Cut the
+        /// reaction short instead of dragging the camera down there.
+        /// </summary>
+        private bool SafetyNet()
+        {
+            if (_pelvis == null) return false;
+
+            Vector3 pelvis = _pelvis.position;
+            float drop = _spawnPosition.y - pelvis.y;
+            float horizontal = new Vector2(pelvis.x - _spawnPosition.x, pelvis.z - _spawnPosition.z).magnitude;
+
+            if (drop > 2.5f || horizontal > 6f)
+            {
+                RakeMultiplayerPlugin.Log?.LogWarning("[Ragdoll] body escaped the play area (drop=" +
+                    drop.ToString("F2") + " dist=" + horizontal.ToString("F2") + "), restoring");
+                Restore();
+                return true;
+            }
+            return false;
         }
 
         private void Restore()
@@ -477,7 +568,10 @@ namespace RakeMultiplayer
             if (_camera != null) UnityEngine.Object.Destroy(_camera.gameObject);
             _camera = null;
 
-            RakeMultiplayerPlugin.Log?.LogInfo("[Ragdoll] " + (_isLocal ? "local" : "remote") + " reaction finished");
+            Vector3 moved = _pelvis != null ? _pelvis.position - _spawnPosition : Vector3.zero;
+            RakeMultiplayerPlugin.Log?.LogInfo("[Ragdoll] " + (_isLocal ? "local" : "remote") +
+                                               " finished, body moved " + moved.magnitude.ToString("F2") + " m");
+
             UnityEngine.Object.Destroy(gameObject);
         }
 

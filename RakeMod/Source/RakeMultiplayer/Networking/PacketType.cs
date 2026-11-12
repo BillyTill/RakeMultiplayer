@@ -42,5 +42,6 @@ namespace RakeMultiplayer.Networking
         LevelChange = 33,
         ItemState = 34,
         PlayerDamaged = 35,
+        PlayerRagdoll = 36,
     }
 }

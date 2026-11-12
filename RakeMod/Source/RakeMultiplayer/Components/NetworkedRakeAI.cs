@@ -666,13 +666,18 @@ namespace RakeMultiplayer
             var net = victim.GetComponent<NetworkedPlayer>();
             if (net == null) return;
 
+            Vector3 away = victim.position - transform.position;
+            away.y = 0f;
+
             if (net.isLocalPlayer)
             {
+                // The TakeDamage patch spawns our own ragdoll; observers need the packet.
                 var fps = victim.GetComponent<FPSController>();
-                if (fps == null) return;
+                if (fps != null) fps.TakeDamage(AttackDamage, AttackDamageType);
+
+                PlayerRagdoll.BroadcastOnly(net.PlayerId, away);
 
                 RakeMultiplayerPlugin.Log?.LogInfo("[AI] Rake hit the host for " + AttackDamage);
-                fps.TakeDamage(AttackDamage, AttackDamageType);
                 return;
             }
 
@@ -685,15 +690,10 @@ namespace RakeMultiplayer
                 DamageType = AttackDamageType,
                 SourcePosition = transform.position
             };
-
-            // Broadcast so every client can show the victim's ragdoll; only the victim
-            // applies the damage (each client checks its own PlayerId).
             RakeNetworkManager.Instance?.ServerBroadcast(packet.Serialize());
 
-            // The host renders the remote victim itself: it never receives its own broadcast
-            Vector3 away = victim.position - transform.position;
-            away.y = 0f;
-            PlayerRagdoll.TriggerRemote(victim, away);
+            // Ragdoll on the host and on every client
+            PlayerRagdoll.TriggerNetworked(net.PlayerId, away);
 
             RakeMultiplayerPlugin.Log?.LogInfo("[AI] Rake hit player " + net.PlayerId +
                                               " for " + AttackDamage);

@@ -1302,6 +1302,9 @@ namespace RakeMultiplayer
                     case PacketType.PlayerDamaged:
                         HandleClientPlayerDamaged((PlayerDamagedPacket)packet);
                         break;
+                    case PacketType.PlayerRagdoll:
+                        HandleClientPlayerRagdoll((PlayerRagdollPacket)packet);
+                        break;
                     case PacketType.FireVisuals:
                         HandleClientFireVisuals((FireVisualsPacket)packet);
                         break;
@@ -1562,6 +1565,12 @@ namespace RakeMultiplayer
         /// A Rake hit on a player. The victim applies the damage locally (vanilla effects +
         /// ragdoll hit reaction); everyone else just sees the victim's body fly.
         /// </summary>
+        /// <summary>Server told us to show the hit-reaction ragdoll for a player.</summary>
+        private void HandleClientPlayerRagdoll(PlayerRagdollPacket packet)
+        {
+            PlayerRagdoll.ApplyFor(packet.PlayerId, packet.Direction);
+        }
+
         private void HandleClientPlayerDamaged(PlayerDamagedPacket packet)
         {
             var spawner = PlayerSpawner.Instance;

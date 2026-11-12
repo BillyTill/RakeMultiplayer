@@ -379,20 +379,40 @@ namespace RakeMultiplayer
             });
 
 
-            Register("ragdoll", "ragdoll",
-                "Play the hit reaction (ragdoll + head camera)", args =>
+            Register("ragdoll", "ragdoll [playerId|all]",
+                "Play the hit reaction for yourself, for one player id, or for everyone", args =>
             {
-                if (PlayerRagdoll.IsActive) return "ragdoll: already playing";
+                var spawner = PlayerSpawner.Instance;
+                if (spawner == null) return "ragdoll: no PlayerSpawner";
 
-                var player = LocalPlayer();
-                if (player == null) return "ragdoll: no local player";
+                var local = spawner.LocalPlayer;
+                if (local == null) return "ragdoll: no local player";
 
                 var rake = RakeHighlight.FindRake();
-                Vector3 away = rake != null ? player.position - rake.position : Vector3.zero;
+                Vector3 away = rake != null ? local.transform.position - rake.position : Vector3.zero;
 
-                return PlayerRagdoll.Trigger(away)
-                    ? "ragdoll started"
-                    : "ragdoll: could not start (model not loaded?)";
+                if (args.Length > 0 && args[0].Equals("all", StringComparison.OrdinalIgnoreCase))
+                {
+                    int count = 0;
+                    if (PlayerRagdoll.TriggerNetworked(local.PlayerId, away)) count++;
+
+                    foreach (var t in spawner.GetAllRemotePlayerTransforms())
+                    {
+                        if (t == null) continue;
+                        var np = t.GetComponent<NetworkedPlayer>();
+                        if (np == null) continue;
+                        if (PlayerRagdoll.TriggerNetworked(np.PlayerId, away)) count++;
+                    }
+
+                    return "ragdoll for " + count + " player(s)";
+                }
+
+                int id = local.PlayerId;
+                if (args.Length > 0) int.TryParse(args[0], out id);
+
+                return PlayerRagdoll.TriggerNetworked(id, away)
+                    ? "ragdoll started for player " + id
+                    : "ragdoll: could not start for player " + id;
             });
 
 

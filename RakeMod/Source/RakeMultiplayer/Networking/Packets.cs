@@ -120,6 +120,33 @@ namespace RakeMultiplayer.Networking
     }
 
 
+    /// <summary>
+    /// Show the hit-reaction ragdoll for a player. Works for any damage source.
+    /// Server -> all.
+    /// </summary>
+    public class PlayerRagdollPacket : NetworkPacket
+    {
+        public override PacketType Type => PacketType.PlayerRagdoll;
+
+        public int PlayerId;
+        public Vector3 Direction;
+
+        public override void Write(BinaryWriter writer)
+        {
+            writer.Write(PlayerId);
+            writer.Write(Direction.x);
+            writer.Write(Direction.y);
+            writer.Write(Direction.z);
+        }
+
+        public override void Read(BinaryReader reader)
+        {
+            PlayerId = reader.ReadInt32();
+            Direction = new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
+        }
+    }
+
+
     public class PlayerConnectedPacket : NetworkPacket
     {
         public override PacketType Type => PacketType.PlayerConnected;
