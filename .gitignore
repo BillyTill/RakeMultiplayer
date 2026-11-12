@@ -98,9 +98,7 @@ RakeMod/Source/RakeMultiplayer/obj/
 !RakeMod/DEVELOPER_REPORT.md
 !RakeMod/BuildMod.bat
 !RakeMod/InstallMod.bat
-!RakeMod/RakeMultiplayer.csproj
 !RakeMod/Plugins/Telepathy.dll
-!RakeMod/Plugins/UnityEngine.CoreModule.dll
 !RakeMod/Installer/build.ps1
 
 # Reference directories (not part of mod source)
@@ -112,3 +110,7 @@ RakePlayerSkin.png
 
 # AssetRipper export (local reference only - >100 MB files, not pushed)
 /1/
+
+# Project files that must be in the repository
+!RakeMod/Source/RakeMultiplayer/RakeMultiplayer.csproj
+!RakeMod/BepInEx.zip
