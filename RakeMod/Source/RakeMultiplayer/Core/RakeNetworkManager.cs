@@ -375,6 +375,7 @@ namespace RakeMultiplayer
                     IsYou = false
                 };
                 _server.Send(connectionId, hostPacket.Serialize());
+            _server.Send(connectionId, new LobbyRolePacket { HostIsRake = LobbyState.HostIsRake }.Serialize());
                 RakeMultiplayerPlugin.Log?.LogInfo($"[Net] Sent Host info to C{connectionId}: pos={hostPos}");
 
                 // 1. Send existing CLIENTS to the NEW client (use assignedPlayerId = existingId + 1)
@@ -1328,6 +1329,9 @@ namespace RakeMultiplayer
                         break;
                     case PacketType.DoorAction:
                         DoorSync.HandleBroadcast((DoorActionPacket)packet);
+                        break;
+                    case PacketType.LobbyRole:
+                        LobbyState.HostIsRake = ((LobbyRolePacket)packet).HostIsRake;
                         break;
                     case PacketType.FireVisuals:
                         HandleClientFireVisuals((FireVisualsPacket)packet);

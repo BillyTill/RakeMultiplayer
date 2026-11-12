@@ -68,6 +68,15 @@ namespace RakeMultiplayer
                 manager.PrepareForSceneLoad();
                 RegisterSceneObjects(manager);
 
+                if (RakeMultiplayerPlugin.isServer && LobbyState.HostIsRake)
+                {
+                    RakePlayerController.SetEnabled(true);
+                }
+                else if (RakePlayerController.IsActive)
+                {
+                    RakePlayerController.SetEnabled(false);
+                }
+
                 // Restore persisted cameras/traps for the new scene
                 if (RakeMultiplayerPlugin.isServer)
                 {

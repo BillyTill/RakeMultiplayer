@@ -45,5 +45,6 @@ namespace RakeMultiplayer.Networking
         PlayerRagdoll = 36,
         PlayerRagdollRequest = 37,
         DoorAction = 38,
+        LobbyRole = 39,
     }
 }

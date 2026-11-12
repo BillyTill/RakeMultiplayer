@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Text;
 using UnityEngine;
 using UnityEngine.UI;
 using RakeMultiplayer.Networking;
@@ -294,6 +295,11 @@ namespace RakeMultiplayer.UI
                 
                 RakeMultiplayerPlugin.Log?.LogInfo("[Menu] Sent StartGame with level index: 1");
                 RakeMultiplayerPlugin.Log?.LogInfo("[Menu] Host loading level index 1 NOW");
+
+                _menuVisible = false;
+                if (_mainContainer != null) _mainContainer.SetActive(false);
+                HideAllPanels();
+
                 UnityEngine.Application.LoadLevel(1); // Хост грузит СРАЗУ
             }
         }
@@ -308,6 +314,7 @@ namespace RakeMultiplayer.UI
                 _networkManager.Disconnect();
             }
             _startGameSent = false; // Allow starting a new game
+            LobbyState.HostIsRake = false;
             ShowMainMenu();
         }
 
@@ -375,7 +382,11 @@ namespace RakeMultiplayer.UI
             // Обновляем заголовок динамически (важно для хоста/клиента)
             if (_uiBuilder.LobbyTitleText != null)
             {
-                _uiBuilder.LobbyTitleText.text = RakeMultiplayerPlugin.isServer ? "Host Lobby" : "Client Lobby";
+                _uiBuilder.LobbyTitleText.text = "LOBBY";
+            }
+            if (_uiBuilder.LobbySubtitleText != null)
+            {
+                _uiBuilder.LobbySubtitleText.text = RakeMultiplayerPlugin.isServer ? "HOST" : "CLIENT";
             }
 
             if (_uiBuilder.ConnectionStatusText != null)
@@ -410,11 +421,59 @@ namespace RakeMultiplayer.UI
                 }
                 _uiBuilder.PlayerCountText.text = $"Players: {count}/{RakeMultiplayerPlugin.MaxPlayers.Value}";
             }
+
+            if (_uiBuilder.LobbyPanel != null && _uiBuilder.LobbyPanel.activeSelf)
+            {
+                UpdatePlayerList();
+            }
         }
 
         private void UpdatePlayerList()
         {
-            // TODO: Populate player list container
+            if (_uiBuilder == null) return;
+
+            int count = 1;
+            if (RakeNetworkManager.Instance != null)
+            {
+                count = RakeNetworkManager.Instance.GetKnownPlayerCount();
+            }
+            else if (RakeMultiplayerPlugin.isServer)
+            {
+                count = RakeMultiplayerPlugin.GetConnectedClientCount() + 1;
+            }
+
+            int max = RakeMultiplayerPlugin.MaxPlayers.Value;
+
+            StringBuilder sb = new StringBuilder();
+            int firstHunter = LobbyState.HostIsRake ? 2 : 1;
+            for (int i = firstHunter; i <= count; i++)
+            {
+                if (sb.Length > 0) sb.Append((char)10);
+                sb.Append(i == 1 ? "1. HOST" : (i + ". PLAYER " + i));
+            }
+            if (sb.Length == 0) sb.Append("no hunters");
+
+            if (_uiBuilder.PlayerListText != null) _uiBuilder.PlayerListText.text = sb.ToString();
+            if (_uiBuilder.PlayerCountText != null)
+                _uiBuilder.PlayerCountText.text = "Players: " + count + "/" + max;
+
+            _uiBuilder.SetLobbyRole(RakeMultiplayerPlugin.isServer, LobbyState.HostIsRake);
+        }
+
+        public void OnToggleRakeRole()
+        {
+            if (!RakeMultiplayerPlugin.isServer) return;
+
+            LobbyState.HostIsRake = !LobbyState.HostIsRake;
+            RakeMultiplayerPlugin.Log?.LogInfo("[Lobby] Host rake role: " + LobbyState.HostIsRake);
+
+            if (_networkManager != null)
+            {
+                var packet = new LobbyRolePacket { HostIsRake = LobbyState.HostIsRake };
+                _networkManager.ServerBroadcast(packet.Serialize());
+            }
+
+            UpdatePlayerList();
         }
 
         private string GetLocalIPAddress()

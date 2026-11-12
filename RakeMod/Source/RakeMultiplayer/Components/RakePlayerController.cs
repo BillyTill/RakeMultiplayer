@@ -52,6 +52,7 @@ namespace RakeMultiplayer
         private AudioListener _hunterListener;
         private bool _hunterListenerWasEnabled;
         private float _stepTimer;
+        private float _hunterRetry;
         private bool _hunterFpsWasEnabled;
         private bool _hunterMovementWasEnabled;
         private bool _enemyWasEnabled;
@@ -325,6 +326,16 @@ namespace RakeMultiplayer
             {
                 ReadLook();
                 ReadMovement(dt);
+            }
+
+            if (_hunter == null)
+            {
+                _hunterRetry -= dt;
+                if (_hunterRetry <= 0f)
+                {
+                    _hunterRetry = 0.5f;
+                    HideHunter(); // the local player may not exist yet right after a scene load
+                }
             }
 
             UpdateCamera(dt);

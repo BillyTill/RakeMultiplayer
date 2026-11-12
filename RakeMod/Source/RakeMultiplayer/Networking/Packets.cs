@@ -209,6 +209,27 @@ namespace RakeMultiplayer.Networking
     }
 
 
+    /// <summary>
+    /// Lobby role state. Server -> all.
+    /// </summary>
+    public class LobbyRolePacket : NetworkPacket
+    {
+        public override PacketType Type => PacketType.LobbyRole;
+
+        public bool HostIsRake;
+
+        public override void Write(BinaryWriter writer)
+        {
+            writer.Write(HostIsRake);
+        }
+
+        public override void Read(BinaryReader reader)
+        {
+            HostIsRake = reader.ReadBoolean();
+        }
+    }
+
+
     public class PlayerConnectedPacket : NetworkPacket
     {
         public override PacketType Type => PacketType.PlayerConnected;
