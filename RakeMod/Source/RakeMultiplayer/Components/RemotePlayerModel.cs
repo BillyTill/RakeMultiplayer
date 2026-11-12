@@ -67,6 +67,7 @@ namespace RakeMultiplayer
         private bool _manualClip;
         private bool _weaponVisible = true;
         private int _lastFootstep = -1;
+        private bool _rakeMode;
 
         /// <summary>
         /// Create the body under <paramref name="parent"/>, tracking <paramref name="tracked"/>
@@ -287,7 +288,11 @@ namespace RakeMultiplayer
         {
             // bit6: this player is the Rake right now, hide the hunter body.
             bool rakeMode = _networked != null && (_networked.CurrentAnimState & (1 << 6)) != 0;
-            if (_renderer != null) _renderer.enabled = !rakeMode;
+            if (rakeMode != _rakeMode)
+            {
+                _rakeMode = rakeMode;
+                if (_renderer != null) _renderer.enabled = !rakeMode;
+            }
             if (rakeMode)
             {
                 if (_weapon != null) _weapon.enabled = false;

@@ -156,6 +156,7 @@ namespace RakeMultiplayer
         private bool _initialized = false;
         private bool _playerControlled;
         private bool _daySpawnChecked;
+        private float _lastDayWarp;
         private bool _loggedHealthWarning = false;
         private bool _loggedMaxHealthWarning = false;
 
@@ -348,28 +349,67 @@ namespace RakeMultiplayer
                 return;
             }
 
-            if (_daySpawnChecked) return;
-            _daySpawnChecked = true;
-            MoveToForestSpawn();
+            if (!_daySpawnChecked)
+            {
+                _daySpawnChecked = true;
+                _lastDayWarp = Time.time;
+                MoveToForestSpawn();
+                return;
+            }
+
+            // Safety net: the level (or the vanilla AI) can put the Rake back on the
+            // staging platform far outside the map. Bring it back to the forest.
+            if (Time.time - _lastDayWarp < 10f) return;
+            _lastDayWarp = Time.time;
+
+            if (NearestPlayerDistance(transform.position) > 400f) MoveToForestSpawn();
+        }
+
+        private float NearestPlayerDistance(Vector3 position)
+        {
+            float best = float.MaxValue;
+            bool found = false;
+
+            var spawner = PlayerSpawner.Instance;
+            if (spawner != null)
+            {
+                var local = spawner.LocalPlayer;
+                if (local != null)
+                {
+                    best = Vector3.Distance(position, local.transform.position);
+                    found = true;
+                }
+
+                foreach (var remote in spawner.GetAllRemotePlayerTransforms())
+                {
+                    if (remote == null) continue;
+                    float d = Vector3.Distance(position, remote.position);
+                    if (d < best) best = d;
+                    found = true;
+                }
+            }
+
+            return found ? best : -1f;
         }
 
         private void MoveToForestSpawn()
         {
             Vector3 target;
-            if (!TryFindForestSpawn(out target))
+            string source;
+            if (!TryFindForestSpawn(out target, out source))
             {
                 RakeMultiplayerPlugin.Log?.LogWarning("[AI] Day spawn: no forest point found");
                 return;
             }
 
             NavMeshHit hit;
-            if (NavMesh.SamplePosition(target, out hit, 12f, NavMesh.AllAreas))
+            if (NavMesh.SamplePosition(target, out hit, 25f, NavMesh.AllAreas))
             {
                 target = hit.position;
             }
             else
             {
-                RakeMultiplayerPlugin.Log?.LogWarning("[AI] Day spawn: point is off the NavMesh: " + target.ToString("F1"));
+                RakeMultiplayerPlugin.Log?.LogWarning("[AI] Day spawn: '" + source + "' is off the NavMesh: " + target.ToString("F1"));
                 return;
             }
 
@@ -380,25 +420,34 @@ namespace RakeMultiplayer
             var agent = GetEnemyAgent();
             if (agent != null && agent.enabled) agent.Warp(target);
 
-            RakeMultiplayerPlugin.Log?.LogInfo("[AI] Day spawn: Rake moved to the forest at " + target.ToString("F1"));
+            RakeMultiplayerPlugin.Log?.LogInfo("[AI] Day spawn: Rake moved to the forest at " +
+                                               target.ToString("F1") + " (source: " + source + ")");
         }
 
-        private bool TryFindForestSpawn(out Vector3 position)
+        private bool TryFindForestSpawn(out Vector3 position, out string source)
         {
-            string[] names = { "foresttrigger", "mestorake", "rake place", "rakeplace", "rakespawn", "rake spawn" };
-            Transform[] all = UnityEngine.Object.FindObjectsOfType<Transform>();
+            string[] names = { "mestorake", "rake place", "rakeplace", "rakespawn", "rake spawn", "foresttrigger" };
+
+            // Include inactive objects: the level keeps its markers disabled.
+            Transform[] all = Resources.FindObjectsOfTypeAll<Transform>();
 
             for (int n = 0; n < names.Length; n++)
             {
                 for (int i = 0; i < all.Length; i++)
                 {
-                    if (all[i] == null) continue;
-                    string name = all[i].gameObject.name.ToLowerInvariant();
-                    if (name.Contains(names[n]))
-                    {
-                        position = all[i].position;
-                        return true;
-                    }
+                    Transform candidate = all[i];
+                    if (candidate == null) continue;
+
+                    string name = candidate.gameObject.name.ToLowerInvariant();
+                    if (!name.Contains(names[n])) continue;
+
+                    // Skip markers outside the playable map (the staging platform).
+                    float distance = NearestPlayerDistance(candidate.position);
+                    if (distance > 0f && distance > 1000f) continue;
+
+                    position = candidate.position;
+                    source = candidate.gameObject.name;
+                    return true;
                 }
             }
 
@@ -406,21 +455,30 @@ namespace RakeMultiplayer
             if (settings != null && settings.hasCave)
             {
                 position = settings.cavePosition;
+                source = "MapSettings cave";
                 return true;
             }
 
-            // Last resort: sample the surface above the staging platform.
+            // Interior of the map, away from the player spawn.
+            if (settings != null && settings.spawnPoints != null && settings.spawnPoints.Length > 0)
+            {
+                position = settings.spawnPoints[0] + new Vector3(60f, 0f, 60f);
+                source = "player spawn + 60m";
+                return true;
+            }
+
             NavMeshHit hit;
-            if (NavMesh.SamplePosition(transform.position + Vector3.up * 80f, out hit, 150f, NavMesh.AllAreas))
+            if (NavMesh.SamplePosition(transform.position + Vector3.up * 120f, out hit, 250f, NavMesh.AllAreas))
             {
                 position = hit.position;
+                source = "surface above current position";
                 return true;
             }
 
             position = transform.position;
+            source = "current position";
             return false;
         }
-
         private void FindCaveTransform()
         {
             var caveObj = GameObject.Find("Cave");

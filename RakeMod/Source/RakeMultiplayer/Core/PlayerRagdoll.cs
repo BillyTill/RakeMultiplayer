@@ -61,6 +61,7 @@ namespace RakeMultiplayer
         private Camera _originalCamera;
         private readonly List<Camera> _disabledCameras = new List<Camera>();
         private readonly List<Renderer> _hiddenRenderers = new List<Renderer>();
+        private readonly List<RemotePlayerModel> _hiddenModels = new List<RemotePlayerModel>();
         private CharacterController _controller;
 
         private bool _isLocal;
@@ -390,6 +391,16 @@ namespace RakeMultiplayer
                 r.enabled = false;
                 _hiddenRenderers.Add(r);
             }
+
+            // Stop the third-person body component too: it re-enables its renderer every
+            // frame, which left a second, standing copy next to the ragdoll.
+            var models = player.GetComponentsInChildren<RemotePlayerModel>(true);
+            for (int i = 0; i < models.Length; i++)
+            {
+                if (models[i] == null || !models[i].enabled) continue;
+                models[i].enabled = false;
+                _hiddenModels.Add(models[i]);
+            }
         }
 
         private void RestoreRenderers()
@@ -399,6 +410,12 @@ namespace RakeMultiplayer
                 if (_hiddenRenderers[i] != null) _hiddenRenderers[i].enabled = true;
             }
             _hiddenRenderers.Clear();
+
+            for (int i = 0; i < _hiddenModels.Count; i++)
+            {
+                if (_hiddenModels[i] != null) _hiddenModels[i].enabled = true;
+            }
+            _hiddenModels.Clear();
         }
 
         // ---------------------------------------------------------------- physics

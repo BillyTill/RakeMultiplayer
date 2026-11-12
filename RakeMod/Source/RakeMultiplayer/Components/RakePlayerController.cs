@@ -21,9 +21,9 @@ namespace RakeMultiplayer
         public static bool IsActive { get; private set; }
         public static Transform LocalHunter { get; private set; }
 
-        private const float WalkSpeed = 9.0f;
-        private const float RunSpeed = 20.0f;
-        private const float StealthSpeed = 5.0f;
+        private const float WalkSpeed = 6.75f;
+        private const float RunSpeed = 15.0f;
+        private const float StealthSpeed = 3.75f;
 
         private const float AttackRange = 3.4f;
         private const float AttackCone = 70f;
@@ -61,8 +61,11 @@ namespace RakeMultiplayer
         private float _hunterRetry;
         private bool _hunterFpsWasEnabled;
         private bool _hunterMovementWasEnabled;
+        private bool _hunterFpsCameraWasEnabled;
+        private bool _hunterInventoryWasEnabled;
         private bool _enemyWasEnabled;
         private bool _agentRotationWas = true;
+        private bool _rootMotionWas = true;
 
         private readonly List<Camera> _hiddenCameras = new List<Camera>();
         private readonly List<Renderer> _hiddenRenderers = new List<Renderer>();
@@ -172,6 +175,10 @@ namespace RakeMultiplayer
             _enemyWasEnabled = _enemyAI != null && _enemyAI.enabled;
             if (_enemyAI != null) _enemyAI.enabled = false;
 
+            // Attack clips carry root motion; with the AI off it would drag the body sideways.
+            _rootMotionWas = _animator.applyRootMotion;
+            _animator.applyRootMotion = false;
+
             if (_agent != null)
             {
                 _agent.enabled = true;
@@ -243,6 +250,21 @@ namespace RakeMultiplayer
                 _hunterListener.enabled = false;
             }
 
+            // The Rake must not pick items up: the hunter camera does the pickup raycast.
+            var fpsCameras = _hunter.GetComponentsInChildren<FPSCamera>(true);
+            if (fpsCameras.Length > 0 && fpsCameras[0] != null)
+            {
+                _hunterFpsCameraWasEnabled = fpsCameras[0].enabled;
+                fpsCameras[0].enabled = false;
+            }
+
+            var inventories = _hunter.GetComponentsInChildren<Inventory>(true);
+            if (inventories.Length > 0 && inventories[0] != null)
+            {
+                _hunterInventoryWasEnabled = inventories[0].enabled;
+                inventories[0].enabled = false;
+            }
+
             _hunterController = _hunter.GetComponent<CharacterController>();
             if (_hunterController != null)
             {
@@ -297,9 +319,16 @@ namespace RakeMultiplayer
                 if (movement != null) movement.enabled = _hunterMovementWasEnabled;
 
                 if (_hunterController != null) _hunterController.enabled = _hunterControllerWasEnabled;
+
+                var fpsCameras = _hunter.GetComponentsInChildren<FPSCamera>(true);
+                if (fpsCameras.Length > 0 && fpsCameras[0] != null) fpsCameras[0].enabled = _hunterFpsCameraWasEnabled;
+
+                var inventories = _hunter.GetComponentsInChildren<Inventory>(true);
+                if (inventories.Length > 0 && inventories[0] != null) inventories[0].enabled = _hunterInventoryWasEnabled;
             }
 
             if (_enemyAI != null) _enemyAI.enabled = _enemyWasEnabled;
+            if (_animator != null) _animator.applyRootMotion = _rootMotionWas;
             if (_rakeAI != null) _rakeAI.SetPlayerControlled(false);
             if (_agent != null) _agent.updateRotation = _agentRotationWas;
 
@@ -673,14 +702,11 @@ namespace RakeMultiplayer
         {
             if (_camera == null) return;
 
-            float radius = Mathf.Min(Screen.width, Screen.height) * 0.24f;
+            float radius = Mathf.Min(Screen.width, Screen.height) * 0.38f;
             Vector2 center = new Vector2(Screen.width * 0.5f, Screen.height * 0.5f);
 
             Color oldColor = GUI.color;
             Matrix4x4 oldMatrix = GUI.matrix;
-
-            GUI.color = new Color(1f, 1f, 1f, 0.28f);
-            GUI.DrawTexture(new Rect(center.x - radius, center.y - radius, radius * 2f, radius * 2f), Ring);
 
             DrawSenseList(_players.Count, i => _players[i] != null ? _players[i].transform.position : Vector3.zero, center, radius);
             DrawSenseList(_animals.Count, i => _animals[i] != null ? _animals[i].transform.position : Vector3.zero, center, radius);
@@ -719,7 +745,7 @@ namespace RakeMultiplayer
                 float degrees = Mathf.Atan2(outward.x, -outward.y) * Mathf.Rad2Deg;
 
                 Matrix4x4 oldMatrix = GUI.matrix;
-                GUI.color = new Color(1f, 0.92f, 0.85f, 0.95f);
+                GUI.color = new Color(1f, 0.12f, 0.08f, 0.95f);
                 GUIUtility.RotateAroundPivot(degrees, point);
                 GUI.DrawTexture(new Rect(point.x - 9f, point.y - 12f, 18f, 20f), Arrow);
                 GUI.matrix = oldMatrix;
