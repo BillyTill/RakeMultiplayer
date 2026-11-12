@@ -188,10 +188,7 @@ namespace RakeMultiplayer
                 _agent.Stop();
                 _agent.ResetPath();
 
-                // The level NavMesh only covers the staging platform; with the agent
-                // enabled it snaps the body back to the nearest platform point. Move
-                // the Rake by transform instead.
-                _agent.enabled = false;
+                _agent.enabled = true;
             }
 
             _rakeAI.SetPlayerControlled(true);

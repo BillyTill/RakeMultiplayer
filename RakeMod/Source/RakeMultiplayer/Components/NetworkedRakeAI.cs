@@ -420,7 +420,7 @@ namespace RakeMultiplayer
             // Detach the agent, move the transform, then re-attach: Warp alone can fail
             // and the agent would snap the body back to its old position next frame.
             var agent = GetEnemyAgent();
-            if (agent != null && agent.enabled && !_playerControlled)
+            if (agent != null)
             {
                 bool wasEnabled = agent.enabled;
                 if (wasEnabled) agent.enabled = false;
