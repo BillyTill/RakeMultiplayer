@@ -180,7 +180,7 @@ namespace RakeMultiplayer
             yield return null;
 
             // Disable local AI on clients (server-authoritative)
-            if (!RakeMultiplayerPlugin.isServer && enemyAI != null)
+            if (!RakeMultiplayerPlugin.isServer && RakeMultiplayerPlugin.isConnected && enemyAI != null)
             {
                 enemyAI.enabled = false;
             }
@@ -209,6 +209,8 @@ namespace RakeMultiplayer
             // Only server runs AI logic
             if (RakeMultiplayerPlugin.isServer)
             {
+                if (_clientFrozeSimulation) RestoreServerSimulation();
+
                 if (!RakeMultiplayerPlugin.isConnected) return;
 
                 // Update hunter list
@@ -238,6 +240,14 @@ namespace RakeMultiplayer
             }
             else
             {
+                // Clients must never simulate the Rake themselves, otherwise every
+                // player sees it in a different place. Enforced every frame because the
+                // role may only become known after Start().
+                if (RakeMultiplayerPlugin.isConnected)
+                {
+                    EnforceClientAuthority();
+                }
+
                 // Client: interpolate to target values
                 if (!RakeMultiplayerPlugin.isConnected) return;
 
@@ -728,6 +738,70 @@ namespace RakeMultiplayer
         {
             if (enemyAI == null || enemyAgentField == null) return null;
             return enemyAgentField.GetValue(enemyAI) as NavMeshAgent;
+        }
+
+        private bool _clientFrozeSimulation;
+        private bool _loggedClientFreeze;
+
+        /// <summary>
+        /// Clients only render the Rake; the server owns its AI. The vanilla Enemy_AI and
+        /// its NavMeshAgent keep writing the transform every frame, which undoes the
+        /// network interpolation and leaves each client with the Rake somewhere else.
+        /// </summary>
+        private void EnforceClientAuthority()
+        {
+            bool changed = false;
+
+            if (enemyAI != null && enemyAI.enabled)
+            {
+                enemyAI.enabled = false;
+                changed = true;
+            }
+
+            var agent = ResolveAgent();
+            if (agent != null && agent.enabled)
+            {
+                agent.enabled = false;
+                changed = true;
+            }
+
+            if (animator != null && animator.applyRootMotion)
+            {
+                animator.applyRootMotion = false;
+                changed = true;
+            }
+
+            _clientFrozeSimulation = true;
+
+            if (changed && !_loggedClientFreeze)
+            {
+                _loggedClientFreeze = true;
+                RakeMultiplayerPlugin.Log?.LogInfo("[AI] Client disabled the local Rake simulation (Enemy_AI + NavMeshAgent)");
+            }
+        }
+
+        /// <summary>Give the Rake back to this peer when it turns out to be the server.</summary>
+        private void RestoreServerSimulation()
+        {
+            _clientFrozeSimulation = false;
+
+            if (enemyAI != null && !enemyAI.enabled) enemyAI.enabled = true;
+
+            var agent = ResolveAgent();
+            if (agent != null && !agent.enabled) agent.enabled = true;
+
+            RakeMultiplayerPlugin.Log?.LogInfo("[AI] Rake simulation restored for the server role");
+        }
+
+        private NavMeshAgent ResolveAgent()
+        {
+            var agent = GetEnemyAgent();
+            if (agent != null) return agent;
+
+            agent = GetComponent<NavMeshAgent>();
+            if (agent != null) return agent;
+
+            return GetComponentInChildren<NavMeshAgent>();
         }
 
         /// <summary>

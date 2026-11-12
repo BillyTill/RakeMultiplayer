@@ -1521,7 +1521,7 @@ namespace RakeMultiplayer
 
         private void HandleClientRakeState(RakeStatePacket packet)
         {
-            RakeMultiplayerPlugin.Log?.LogInfo($"[3.4] Client received RakeState: pos={packet.Position}, health={packet.Health}, state={packet.State}");
+            // No per-packet logging: this runs at 15 Hz and would flood the log.
             
             // Use cached NetworkedRakeAI (avoid FindObjectOfType in hot path)
             if (_cachedRake != null)

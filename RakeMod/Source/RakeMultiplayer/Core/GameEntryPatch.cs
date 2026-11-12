@@ -117,6 +117,25 @@ namespace RakeMultiplayer
             }
             RakeMultiplayerPlugin.Log?.LogInfo($"[GameEntry] Registered {items.Length} networked items");
 
+            // The level ships the Rake itself (no prefab is spawned because
+            // PlayerSpawner.rakePrefab is never assigned), so make sure the networked
+            // AI exists on every peer. Without it each client runs the vanilla AI
+            // locally and every player sees the Rake in a different place.
+            var enemies = UnityEngine.Object.FindObjectsOfType<Enemy_AI>();
+            int rakeCount = 0;
+            for (int i = 0; i < enemies.Length; i++)
+            {
+                var enemy = enemies[i];
+                if (enemy == null) continue;
+
+                if (enemy.GetComponent<NetworkedRakeAI>() == null)
+                {
+                    enemy.gameObject.AddComponent<NetworkedRakeAI>();
+                }
+                rakeCount++;
+            }
+            RakeMultiplayerPlugin.Log?.LogInfo($"[GameEntry] Networked Rake instances: {rakeCount}");
+
             manager.RegisterCameras();
             manager.RegisterAnimals();
         }
