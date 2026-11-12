@@ -11,6 +11,7 @@
 - **Telepathy.dll** — транспорт (TCP, порт 7777).
 - **Ассеты модели**: `RakePlayerModel.bin`, `RakePlayerRifle.bin`, `RakePlayerSkin.png`,
   `rifle.png`.
+- **Деинсталлятор** `Uninstall_RakeMultiplayer.exe` в папке игры.
 
 Конфиг мода (`BepInEx\config\...`) не входит в установщик: при первом запуске BepInEx
 создаст его с дефолтами, а существующий конфиг не перезаписывается.
@@ -32,6 +33,22 @@ RakeMultiplayerSetup.exe /silent "D:\Games\Rake"
 
 Код возврата: `0` — успех, `1` — ошибка.
 
+## Удаление
+
+В папке игры появляется `Uninstall_RakeMultiplayer.exe` (это копия установщика в режиме
+удаления). Запустить → «Удалить мод».
+
+- Удаляет файлы BepInEx и мода; если в `BepInEx\plugins` не осталось других плагинов —
+  сносит папку `BepInEx` целиком (вместе с конфигом и логами).
+- Файлы самой игры (`Rake.exe`, `Rake_Data`) не трогает.
+- После удаления деинсталлятор удаляет сам себя.
+
+Тихий режим (без пути берёт папку, в которой лежит сам):
+
+```
+Uninstall_RakeMultiplayer.exe /uninstall "D:\Games\Rake"
+```
+
 ## Игра по сети
 
 - Хост: F1 → **Host Game** (порт 7777).
@@ -39,11 +56,6 @@ RakeMultiplayerSetup.exe /silent "D:\Games\Rake"
 - Radmin VPN / Hamachi работают: в поле IP вводится VPN-адрес хоста (`26.x.x.x` /
   `25.x.x.x`). На хосте нужно разрешить входящий TCP 7777 в брандмауэре Windows.
 - До 4 игроков; хост авторитетен.
-
-## Удаление
-
-Удалить из папки игры: `winhttp.dll`, `doorstop_config.ini`, `.doorstop_version`,
-папку `BepInEx`. Файлы самой игры установщик не трогает.
 
 ## Сборка установщика
 

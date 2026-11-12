@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
@@ -14,22 +15,36 @@ namespace RakeMultiplayerSetup
         [STAThread]
         private static void Main(string[] args)
         {
-            // Silent mode for testing / scripted installs: /silent <game folder>
+            // Silent install: /silent <game folder>
             if (args.Length >= 2 && string.Equals(args[0], "/silent", StringComparison.OrdinalIgnoreCase))
             {
                 Environment.ExitCode = Installer.Install(args[1], null) ? 0 : 1;
                 return;
             }
 
+            // Silent uninstall: /uninstall [game folder]
+            if (args.Length >= 1 && string.Equals(args[0], "/uninstall", StringComparison.OrdinalIgnoreCase))
+            {
+                string dir = args.Length >= 2 ? args[1] : Path.GetDirectoryName(Application.ExecutablePath);
+                bool removed = Installer.Uninstall(dir, null);
+                if (removed) Installer.ScheduleSelfDelete(dir);
+                Environment.ExitCode = removed ? 0 : 1;
+                return;
+            }
+
+            string exeName = Path.GetFileNameWithoutExtension(Application.ExecutablePath);
+            bool uninstallMode = exeName.IndexOf("Uninstall", StringComparison.OrdinalIgnoreCase) >= 0;
+
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
-            Application.Run(new InstallerForm());
+            Application.Run(new InstallerForm(uninstallMode));
         }
     }
 
     internal static class Installer
     {
         public const string PayloadResource = "payload.pak";
+        public const string UninstallerName = "Uninstall_RakeMultiplayer.exe";
 
         public static bool IsGameDir(string dir)
         {
@@ -44,6 +59,8 @@ namespace RakeMultiplayerSetup
                 return false;
             }
         }
+
+        // ------------------------------------------------------------------ install
 
         public static bool Install(string gameDir, Action<string> log)
         {
@@ -74,6 +91,8 @@ namespace RakeMultiplayerSetup
 
                 int files = Extract(pak, gameDir, log);
                 if (log != null) log("Установлено файлов: " + files + ".");
+
+                WriteUninstaller(gameDir, log);
                 return true;
             }
             catch (Exception ex)
@@ -84,6 +103,24 @@ namespace RakeMultiplayerSetup
             finally
             {
                 try { Directory.Delete(temp, true); } catch { }
+            }
+        }
+
+        private static void WriteUninstaller(string gameDir, Action<string> log)
+        {
+            try
+            {
+                string self = Application.ExecutablePath;
+                string target = Path.Combine(gameDir, UninstallerName);
+
+                if (string.Equals(self, target, StringComparison.OrdinalIgnoreCase)) return;
+
+                File.Copy(self, target, true);
+                if (log != null) log("Создан деинсталлятор: " + UninstallerName);
+            }
+            catch (Exception ex)
+            {
+                if (log != null) log("Не удалось создать деинсталлятор: " + ex.Message);
             }
         }
 
@@ -118,6 +155,163 @@ namespace RakeMultiplayerSetup
 
             return count;
         }
+
+        // ---------------------------------------------------------------- uninstall
+
+        public static bool Uninstall(string gameDir, Action<string> log)
+        {
+            if (!IsGameDir(gameDir))
+            {
+                if (log != null) log("В этой папке нет Rake.exe / Rake_Data.");
+                return false;
+            }
+
+            List<string> installed = ReadPayloadNames();
+            int removed = 0;
+
+            foreach (string name in installed)
+            {
+                string path = Path.Combine(gameDir, name.Replace('/', Path.DirectorySeparatorChar));
+                if (!File.Exists(path)) continue;
+
+                try
+                {
+                    File.Delete(path);
+                    removed++;
+                    if (log != null) log("  удалён " + name);
+                }
+                catch (Exception ex)
+                {
+                    if (log != null) log("  занят: " + name + " (" + ex.Message + ")");
+                }
+            }
+
+            // Leftovers from builds that shipped other file names.
+            string plugins = Path.Combine(gameDir, "BepInEx", "plugins");
+            if (Directory.Exists(plugins))
+            {
+                string[] patterns =
+                {
+                    "RakeMultiplayer.*",
+                    "RakePlayerModel.bin",
+                    "RakePlayerRifle.bin",
+                    "RakePlayerSkin.png",
+                    "rifle.png"
+                };
+
+                for (int i = 0; i < patterns.Length; i++)
+                {
+                    string[] matches;
+                    try { matches = Directory.GetFiles(plugins, patterns[i]); }
+                    catch { continue; }
+
+                    for (int j = 0; j < matches.Length; j++)
+                    {
+                        try { File.Delete(matches[j]); removed++; } catch { }
+                    }
+                }
+            }
+
+            string bepInEx = Path.Combine(gameDir, "BepInEx");
+            bool otherPlugins = false;
+
+            try
+            {
+                if (Directory.Exists(plugins))
+                {
+                    otherPlugins = Directory.GetFiles(plugins).Length > 0 ||
+                                   Directory.GetDirectories(plugins).Length > 0;
+                }
+            }
+            catch { }
+
+            if (!otherPlugins && Directory.Exists(bepInEx))
+            {
+                try
+                {
+                    Directory.Delete(bepInEx, true);
+                    if (log != null) log("  папка BepInEx удалена (других плагинов нет)");
+                }
+                catch (Exception ex)
+                {
+                    if (log != null) log("  BepInEx удалить не удалось: " + ex.Message);
+                }
+            }
+            else if (Directory.Exists(bepInEx))
+            {
+                RemoveEmptyDirs(bepInEx);
+            }
+
+            if (log != null) log("Удалено файлов: " + removed + ".");
+            return true;
+        }
+
+        private static List<string> ReadPayloadNames()
+        {
+            List<string> names = new List<string>();
+
+            using (Stream input = Assembly.GetExecutingAssembly().GetManifestResourceStream(PayloadResource))
+            {
+                if (input == null) return names;
+
+                using (BinaryReader reader = new BinaryReader(input))
+                {
+                    string magic = Encoding.ASCII.GetString(reader.ReadBytes(4));
+                    if (magic != "RMPK") return names;
+
+                    int entries = reader.ReadInt32();
+                    for (int i = 0; i < entries; i++)
+                    {
+                        int nameLen = reader.ReadInt32();
+                        names.Add(Encoding.UTF8.GetString(reader.ReadBytes(nameLen)));
+                        int dataLen = reader.ReadInt32();
+                        if (dataLen > 0) reader.BaseStream.Seek(dataLen, SeekOrigin.Current);
+                    }
+                }
+            }
+
+            return names;
+        }
+
+        private static void RemoveEmptyDirs(string dir)
+        {
+            try
+            {
+                foreach (string sub in Directory.GetDirectories(dir)) RemoveEmptyDirs(sub);
+
+                if (Directory.GetFiles(dir).Length == 0 && Directory.GetDirectories(dir).Length == 0)
+                {
+                    Directory.Delete(dir);
+                }
+            }
+            catch
+            {
+                // best effort
+            }
+        }
+
+        /// <summary>Delete the uninstaller copy after it finishes (a running exe cannot delete itself).</summary>
+        public static void ScheduleSelfDelete(string gameDir)
+        {
+            try
+            {
+                string self = Application.ExecutablePath;
+                if (!self.StartsWith(gameDir, StringComparison.OrdinalIgnoreCase)) return;
+
+                ProcessStartInfo info = new ProcessStartInfo("cmd.exe",
+                    "/c ping 127.0.0.1 -n 3 >nul & del /f /q \"" + self + "\"");
+                info.CreateNoWindow = true;
+                info.UseShellExecute = false;
+                info.WindowStyle = ProcessWindowStyle.Hidden;
+                Process.Start(info);
+            }
+            catch
+            {
+                // not critical
+            }
+        }
+
+        // ------------------------------------------------------------------ helpers
 
         public static string DetectGame()
         {
@@ -187,15 +381,18 @@ namespace RakeMultiplayerSetup
 
     internal class InstallerForm : Form
     {
+        private readonly bool _uninstallMode;
         private readonly TextBox _path = new TextBox();
         private readonly TextBox _log = new TextBox();
         private readonly Button _install = new Button();
         private readonly Button _launch = new Button();
         private readonly Label _status = new Label();
 
-        public InstallerForm()
+        public InstallerForm(bool uninstallMode)
         {
-            Text = "Rake Multiplayer - установка";
+            _uninstallMode = uninstallMode;
+
+            Text = uninstallMode ? "Rake Multiplayer - удаление" : "Rake Multiplayer - установка";
             ClientSize = new Size(640, 440);
             FormBorderStyle = FormBorderStyle.FixedSingle;
             MaximizeBox = false;
@@ -203,13 +400,15 @@ namespace RakeMultiplayerSetup
             Font = new Font("Segoe UI", 9f);
 
             Label title = new Label();
-            title.Text = "Rake Multiplayer";
+            title.Text = uninstallMode ? "Удаление Rake Multiplayer" : "Rake Multiplayer";
             title.Font = new Font("Segoe UI", 14f, FontStyle.Bold);
-            title.SetBounds(16, 12, 400, 28);
+            title.SetBounds(16, 12, 500, 28);
             Controls.Add(title);
 
             Label subtitle = new Label();
-            subtitle.Text = "BepInEx 5.4.23.2 (x86) + мод и все ассеты. Ставится на чистую игру.";
+            subtitle.Text = uninstallMode
+                ? "Уберёт BepInEx и файлы мода. Файлы игры не трогаются."
+                : "BepInEx 5.4.23.2 (x86) + мод и все ассеты. Ставится на чистую игру.";
             subtitle.SetBounds(16, 44, 600, 20);
             subtitle.ForeColor = Color.DimGray;
             Controls.Add(subtitle);
@@ -229,14 +428,15 @@ namespace RakeMultiplayerSetup
             browse.Click += BrowseClick;
             Controls.Add(browse);
 
-            _install.Text = "Установить";
-            _install.SetBounds(16, 142, 150, 34);
-            _install.Click += InstallClick;
+            _install.Text = uninstallMode ? "Удалить мод" : "Установить";
+            _install.SetBounds(16, 142, 160, 34);
+            _install.Click += ActionClick;
             Controls.Add(_install);
 
             _launch.Text = "Запустить игру";
-            _launch.SetBounds(176, 142, 160, 34);
+            _launch.SetBounds(186, 142, 160, 34);
             _launch.Enabled = false;
+            _launch.Visible = !uninstallMode;
             _launch.Click += LaunchClick;
             Controls.Add(_launch);
 
@@ -249,7 +449,7 @@ namespace RakeMultiplayerSetup
             Controls.Add(_log);
 
             _status.SetBounds(16, 392, 600, 24);
-            _status.Text = "Готов к установке.";
+            _status.Text = uninstallMode ? "Готов к удалению." : "Готов к установке.";
             Controls.Add(_status);
         }
 
@@ -267,7 +467,7 @@ namespace RakeMultiplayerSetup
             }
         }
 
-        private void InstallClick(object sender, EventArgs e)
+        private void ActionClick(object sender, EventArgs e)
         {
             string gameDir = _path.Text.Trim().TrimEnd('\\', '/');
 
@@ -287,29 +487,53 @@ namespace RakeMultiplayerSetup
                 return;
             }
 
+            if (_uninstallMode)
+            {
+                DialogResult confirm = MessageBox.Show(this,
+                    "Удалить BepInEx и файлы мода из этой папки?\n\n" + gameDir,
+                    "Rake Multiplayer", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+                if (confirm != DialogResult.Yes) return;
+            }
+
             _install.Enabled = false;
             _launch.Enabled = false;
             _log.Clear();
             _status.ForeColor = Color.Black;
-            _status.Text = "Установка...";
+            _status.Text = _uninstallMode ? "Удаление..." : "Установка...";
             Application.DoEvents();
 
             Append("Папка игры: " + gameDir);
-            bool ok = Installer.Install(gameDir, Append);
+
+            bool ok = _uninstallMode
+                ? Installer.Uninstall(gameDir, Append)
+                : Installer.Install(gameDir, Append);
 
             if (ok)
             {
+                if (_uninstallMode)
+                {
+                    Append(string.Empty);
+                    Append("Мод удалён. Деинсталлятор закроется и удалит себя.");
+                    _status.Text = "Удалено.";
+                    _status.ForeColor = Color.Green;
+
+                    Installer.ScheduleSelfDelete(gameDir);
+                    Close();
+                    return;
+                }
+
                 Append(string.Empty);
                 Append("Готово. Запустите игру и нажмите F1 - откроется меню мультиплеера.");
                 Append("Хост: Host Game. Клиент: IP хоста и порт 7777.");
                 Append("Radmin VPN / Hamachi тоже работают: введите VPN-адрес хоста.");
+                Append("Удалить мод потом: " + Installer.UninstallerName + " в папке игры.");
                 _status.Text = "Установлено.";
                 _status.ForeColor = Color.Green;
                 _launch.Enabled = true;
             }
             else
             {
-                _status.Text = "Установка не удалась.";
+                _status.Text = _uninstallMode ? "Удаление не удалось." : "Установка не удалась.";
                 _status.ForeColor = Color.Firebrick;
             }
 
