@@ -97,7 +97,6 @@ namespace RakeMultiplayer
         private float _cameraCooldown;
         private float _attackAnimation;
         private bool _actionLocked;
-        private string _lastAction = "-";
 
         private float _jumpCooldown;
         private float _jumpElapsed;
@@ -106,6 +105,9 @@ namespace RakeMultiplayer
         private bool _jumpActive;
 
         private bool _climbing;
+        private UI.RakeHudUI _hudUi;
+        private float _damageLockout;
+        private bool _preyInReach;
         private Vector3 _climbNormal = Vector3.forward;
         private Vector3 _climbMove;
         private float _mantleTimer;
@@ -115,11 +117,6 @@ namespace RakeMultiplayer
         private readonly List<NetworkedPlayer> _players = new List<NetworkedPlayer>();
         private readonly List<Animal_AI> _animals = new List<Animal_AI>();
         private readonly List<Trap_proj> _traps = new List<Trap_proj>();
-
-        private static Texture2D _ring;
-        private static Texture2D _arrow;
-        private static GUIStyle _hud;
-        private static GUIStyle _small;
 
         // ------------------------------------------------------------ static control
 
@@ -257,6 +254,8 @@ namespace RakeMultiplayer
             _animalCooldown = 0f;
             _cameraCooldown = 0f;
 
+            _hudUi = UI.RakeHudUI.Create(this);
+
             RakeMultiplayerPlugin.Log?.LogInfo("[RakePlay] Player took control of the Rake at " +
                                                rake.position.ToString("F1"));
             return true;
@@ -382,6 +381,12 @@ namespace RakeMultiplayer
 
         private void End()
         {
+            if (_hudUi != null)
+            {
+                UnityEngine.Object.Destroy(_hudUi.gameObject);
+                _hudUi = null;
+            }
+
             SetRakeVisible(true);
 
             if (_camera != null) UnityEngine.Object.Destroy(_camera.gameObject);
@@ -491,6 +496,7 @@ namespace RakeMultiplayer
             _animalCooldown = Mathf.Max(0f, _animalCooldown - dt);
             _cameraCooldown = Mathf.Max(0f, _cameraCooldown - dt);
             _jumpCooldown = Mathf.Max(0f, _jumpCooldown - dt);
+            _damageLockout = Mathf.Max(0f, _damageLockout - dt);
             _attackAnimation = Mathf.Max(0f, _attackAnimation - dt);
 
             if (!DebugConsole.ConsoleOpen && !_actionLocked)
@@ -733,6 +739,32 @@ namespace RakeMultiplayer
                 if (traps[i] == null) continue;
                 _traps.Add(traps[i]);
             }
+
+            UpdatePreyInReach();
+        }
+
+        /// <summary>True when a hunter or animal is close enough and in front, regardless of cooldowns.</summary>
+        private void UpdatePreyInReach()
+        {
+            _preyInReach = false;
+
+            for (int i = 0; i < _players.Count; i++)
+            {
+                NetworkedPlayer player = _players[i];
+                if (player == null) continue;
+                float distance;
+                if (InFront(player.transform.position, out distance)) { _preyInReach = true; break; }
+            }
+
+            if (_preyInReach) return;
+
+            for (int i = 0; i < _animals.Count; i++)
+            {
+                Animal_AI animal = _animals[i];
+                if (animal == null) continue;
+                float distance;
+                if (InFront(animal.transform.position, out distance)) { _preyInReach = true; break; }
+            }
         }
 
         private void TryAutoAttack()
@@ -804,7 +836,6 @@ namespace RakeMultiplayer
 
             _actionLocked = true;
             _playerCooldown = PlayerCooldown;
-            _lastAction = "player";
 
             FaceInstant(victim.position);
             PlayAttackRoar();
@@ -871,7 +902,6 @@ namespace RakeMultiplayer
 
             _actionLocked = true;
             _animalCooldown = AnimalCooldown;
-            _lastAction = "animal";
 
             FaceInstant(animal.position);
             if (_animator != null)
@@ -908,7 +938,6 @@ namespace RakeMultiplayer
 
             _actionLocked = true;
             _cameraCooldown = CameraCooldown;
-            _lastAction = "camera";
 
             FaceInstant(cameraTransform.position);
             if (_animator != null)
@@ -1159,6 +1188,7 @@ namespace RakeMultiplayer
             if (_playerCooldown < DamageAttackLockout) _playerCooldown = DamageAttackLockout;
             if (_animalCooldown < DamageAttackLockout) _animalCooldown = DamageAttackLockout;
             if (_cameraCooldown < DamageAttackLockout) _cameraCooldown = DamageAttackLockout;
+            _damageLockout = DamageAttackLockout;
 
             RakeMultiplayerPlugin.Log?.LogInfo("[RakePlay] Rake hit: attack locked for " +
                                                DamageAttackLockout + " s");
@@ -1211,6 +1241,31 @@ namespace RakeMultiplayer
                 _audio.PlayOneShot(_enemyAI.playerAttackRoars[Random.Range(0, _enemyAI.playerAttackRoars.Length)]);
             }
         }
+        // ---------------------------------------------------------------- HUD data
+
+        internal Transform RakeTransform { get { return _rake; } }
+        internal float Health { get { return _enemyAI != null ? _enemyAI.Health : 0f; } }
+        internal float MaxHealth { get { return _rakeAI != null ? _rakeAI.MaxHealth : 2500f; } }
+        internal bool AttacksAllowedForHud { get { return AttacksAllowed(); } }
+
+        internal float GrabCooldownLeft { get { return _playerCooldown; } }
+        internal float AnimalCooldownLeft { get { return _animalCooldown; } }
+        internal float CameraCooldownLeft { get { return _cameraCooldown; } }
+        internal float LeapCooldownLeft { get { return _jumpCooldown; } }
+
+        internal float GrabCooldownTotal { get { return PlayerCooldown; } }
+        internal float AnimalCooldownTotal { get { return AnimalCooldown; } }
+        internal float CameraCooldownTotal { get { return CameraCooldown; } }
+        internal float LeapCooldownTotal { get { return JumpCooldown; } }
+
+        internal float DamageLockoutLeft { get { return _damageLockout; } }
+        internal bool PreyInReach { get { return _preyInReach; } }
+        internal bool IsClimbing { get { return _climbing; } }
+        internal bool IsHanging { get { return _climbing && Mathf.Abs(_climbVertical) < 0.01f; } }
+
+        internal System.Collections.Generic.IList<NetworkedPlayer> SensePlayers { get { return _players; } }
+        internal System.Collections.Generic.IList<Animal_AI> SenseAnimals { get { return _animals; } }
+        internal System.Collections.Generic.IList<Trap_proj> SenseTraps { get { return _traps; } }
         private bool InFront(Vector3 targetPosition, out float distance)
         {
             Vector3 to = targetPosition - _rake.position;
@@ -1220,156 +1275,5 @@ namespace RakeMultiplayer
             return Vector3.Angle(_rake.forward, to) <= AttackCone;
         }
 
-        // ----------------------------------------------------------------------- HUD
-
-        private void OnGUI()
-        {
-            if (_rake == null) return;
-
-            if (_hud == null)
-            {
-                _hud = new GUIStyle(GUI.skin.label);
-                _hud.fontSize = 14;
-                _hud.fontStyle = FontStyle.Bold;
-                _small = new GUIStyle(GUI.skin.label);
-                _small.fontSize = 12;
-            }
-
-            bool night = AttacksAllowed();
-            _hud.normal.textColor = night ? new Color(1f, 0.45f, 0.15f) : new Color(0.65f, 0.75f, 1f);
-
-            GUI.depth = -900;
-            GUI.Label(new Rect(16f, 12f, 560f, 22f),
-                "RAKE MODE  " + (night ? "NIGHT - attacks enabled" : "DAY - attacks disabled"), _hud);
-
-            _small.normal.textColor = Color.white;
-            GUI.Label(new Rect(16f, 36f, 620f, 20f),
-                "WASD move, Shift run, Ctrl sneak (silent), Space leap, W at a wall - climb/hang, V view (" + (_firstPerson ? "1st" : "3rd") + "), mouse look", _small);
-            GUI.Label(new Rect(16f, 56f, 620f, 20f),
-                "Cooldowns: player " + Mathf.CeilToInt(_playerCooldown) + "s / animal " +
-                Mathf.CeilToInt(_animalCooldown) + "s / camera " + Mathf.CeilToInt(_cameraCooldown) +
-                "s / leap " + Mathf.CeilToInt(_jumpCooldown) + "s   last: " + _lastAction + (_climbing ? "   [CLIMBING]" : ""), _small);
-
-            DrawSense();
-        }
-
-        /// <summary>
-        /// WoT-style sense: a ring in the middle of the screen (top = forward, bottom =
-        /// backward) with an arrow on the ring for every target within 100 m. The arrow
-        /// is identical for players, animals and traps on purpose.
-        /// </summary>
-        private void DrawSense()
-        {
-            if (_camera == null) return;
-
-            float radius = Mathf.Min(Screen.width, Screen.height) * 0.38f;
-            Vector2 center = new Vector2(Screen.width * 0.5f, Screen.height * 0.5f);
-
-            Color oldColor = GUI.color;
-            Matrix4x4 oldMatrix = GUI.matrix;
-
-            DrawSenseList(_players.Count, i => _players[i] != null ? _players[i].transform.position : Vector3.zero, center, radius);
-            DrawSenseList(_animals.Count, i => _animals[i] != null ? _animals[i].transform.position : Vector3.zero, center, radius);
-            DrawSenseList(_traps.Count, i => _traps[i] != null ? _traps[i].transform.position : Vector3.zero, center, radius);
-
-            GUI.matrix = oldMatrix;
-            GUI.color = oldColor;
-        }
-
-        private void DrawSenseList(int count, System.Func<int, Vector3> position, Vector2 center, float radius)
-        {
-            Vector3 forward = _rake.forward;
-            forward.y = 0f;
-            if (forward.sqrMagnitude < 0.001f) forward = Vector3.forward;
-            forward.Normalize();
-
-            Vector3 right = Vector3.Cross(Vector3.up, forward);
-
-            for (int i = 0; i < count; i++)
-            {
-                Vector3 world = position(i);
-                if (world == Vector3.zero) continue;
-
-                Vector3 delta = world - _rake.position;
-                delta.y = 0f;
-                if (delta.sqrMagnitude < 0.01f || delta.sqrMagnitude > SenseRange * SenseRange) continue;
-
-                delta.Normalize();
-
-                // 0 = straight ahead, positive = to the right (clockwise on the ring).
-                float angle = Mathf.Atan2(Vector3.Dot(delta, right), Vector3.Dot(delta, forward));
-
-                Vector2 outward = new Vector2(Mathf.Sin(angle), -Mathf.Cos(angle));
-                Vector2 point = center + outward * radius;
-
-                float degrees = Mathf.Atan2(outward.x, -outward.y) * Mathf.Rad2Deg;
-
-                Matrix4x4 oldMatrix = GUI.matrix;
-                GUI.color = new Color(1f, 0.12f, 0.08f, 0.95f);
-                GUIUtility.RotateAroundPivot(degrees, point);
-                GUI.DrawTexture(new Rect(point.x - 9f, point.y - 12f, 18f, 20f), Arrow);
-                GUI.matrix = oldMatrix;
-            }
-        }
-
-        private static Texture2D Ring
-        {
-            get
-            {
-                if (_ring == null)
-                {
-                    const int size = 256;
-                    _ring = new Texture2D(size, size);
-                    float center = (size - 1) * 0.5f;
-                    float outer = center - 1f;
-                    float inner = outer - 3f;
-
-                    for (int y = 0; y < size; y++)
-                    {
-                        for (int x = 0; x < size; x++)
-                        {
-                            float dx = x - center;
-                            float dy = y - center;
-                            float d = Mathf.Sqrt(dx * dx + dy * dy);
-                            float alpha = (d <= outer && d >= inner) ? 0.6f : 0f;
-                            _ring.SetPixel(x, y, new Color(1f, 1f, 1f, alpha));
-                        }
-                    }
-
-                    _ring.Apply();
-                    _ring.hideFlags = HideFlags.HideAndDontSave;
-                }
-                return _ring;
-            }
-        }
-
-        private static Texture2D Arrow
-        {
-            get
-            {
-                if (_arrow == null)
-                {
-                    const int size = 32;
-                    _arrow = new Texture2D(size, size);
-
-                    for (int y = 0; y < size; y++)
-                    {
-                        float t = y / (float)(size - 1);
-                        float half = 2f + (1f - t) * 11f; // wide base, narrow tip at the top
-
-                        for (int x = 0; x < size; x++)
-                        {
-                            bool inside = y >= 3 && y <= 29 &&
-                                          Mathf.Abs(x - (size - 1) * 0.5f) <= half;
-                            _arrow.SetPixel(x, y, inside ? Color.white : new Color(1f, 1f, 1f, 0f));
-                        }
-                    }
-
-                    _arrow.Apply();
-                    _arrow.hideFlags = HideFlags.HideAndDontSave;
-                }
-                return _arrow;
-            }
-        }
     }
 }

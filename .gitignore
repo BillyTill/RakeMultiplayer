@@ -117,3 +117,6 @@ RakePlayerSkin.png
 
 # Release checksum generated next to the installer
 RakeMultiplayerSetup.exe.sha256
+
+# HUD mockup renders (regenerate with RakeMod/HUD/rake_hud_mock.py)
+RakeMod/HUD/*.png

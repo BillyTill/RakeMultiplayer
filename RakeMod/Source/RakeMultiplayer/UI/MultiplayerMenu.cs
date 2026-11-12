@@ -156,6 +156,12 @@ namespace RakeMultiplayer.UI
                 _rakeHealthTarget = rake != null ? rake.GetComponent<NetworkedRakeAI>() : null;
             }
 
+            if (RakePlayerController.IsActive)
+            {
+                _uiBuilder.HideRakeHealth();
+                return;
+            }
+
             if (_rakeHealthTarget == null)
             {
                 _uiBuilder.HideRakeHealth();
@@ -174,6 +180,14 @@ namespace RakeMultiplayer.UI
         private void UpdateHUD()
         {
             if (_uiBuilder == null) return;
+
+            // The Rake has its own full HUD (health, phase, timer, abilities).
+            if (RakePlayerController.IsActive)
+            {
+                _uiBuilder.SetHUDVisible(false);
+                _uiBuilder.HideRakeHealth();
+                return;
+            }
 
             var dayNight = DayNightManager.Instance;
             var session = SessionManager.Instance;
