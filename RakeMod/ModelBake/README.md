@@ -174,3 +174,22 @@ is `speed / reference` where the reference speeds (1.58 m/s walk, 5.66 m/s run) 
 the root motion that was baked into the clips, so the feet do not slide.
 
 `RemotePlayerVisual` falls back to the old primitive proxy if the binary is missing.
+
+### Per-clip yaw correction
+
+The humanoid clips also carry a root *rotation* that the bake does not extract, so the
+body faces a different direction in each clip. `clip_yaw.py` measures the pelvis world
+rotation relative to the bind pose for every clip and prints the correction that
+`RemotePlayerModel.ClipYaw` uses:
+
+```
+Idle       +113.87 -> -113.87   (the body looked 90 deg to the right)
+Walk         -2.64 ->  +2.64
+Run          -2.51 ->  +2.51
+Attack       +0.22 ->  -0.22
+RifleHold    +0.01 ->  -0.01
+```
+
+The correction is applied to the model root at runtime, rotating the canonical offset
+with it so the feet stay on the owner position.
+
