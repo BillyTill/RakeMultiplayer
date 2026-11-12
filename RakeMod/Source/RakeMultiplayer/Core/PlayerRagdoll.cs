@@ -30,6 +30,9 @@ namespace RakeMultiplayer
         /// <summary>Random spin applied to the pelvis.</summary>
         public static float LaunchSpin = 2.5f;
 
+        /// <summary>Body weight multiplier relative to the per-bone base masses (the Rake is heavy).</summary>
+        public static float MassScale = 1.5f;
+
         // Only the local (victim) ragdoll is tracked here; remote ones are independent.
         private static PlayerRagdoll _localInstance;
 
@@ -448,9 +451,9 @@ namespace RakeMultiplayer
                 if (bone == null) continue;
 
                 var rb = bone.gameObject.AddComponent<Rigidbody>();
-                rb.mass = MassFor(bone.name);
+                rb.mass = MassFor(bone.name) * MassScale;
                 rb.drag = 0.1f;
-                rb.angularDrag = 1.5f;
+                rb.angularDrag = 2.0f;
                 rb.interpolation = RigidbodyInterpolation.Interpolate;
                 rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
                 rigidbodies[bone] = rb;
