@@ -61,6 +61,12 @@ namespace RakeMultiplayer.Networking
         public byte State;
         public float Health;
 
+        // Animator snapshot so clients reproduce exactly what the host shows
+        // (crouch/sneak while hunting animals, animal kill, camera break...).
+        public byte AnimFlags;
+        public byte WalkType;
+        public float AnimSpeed;
+
         public override void Write(BinaryWriter writer)
         {
             writer.Write(Position.x);
@@ -72,6 +78,9 @@ namespace RakeMultiplayer.Networking
             writer.Write(Rotation.w);
             writer.Write(State);
             writer.Write(Health);
+            writer.Write(AnimFlags);
+            writer.Write(WalkType);
+            writer.Write(AnimSpeed);
         }
 
         public override void Read(BinaryReader reader)
@@ -80,6 +89,9 @@ namespace RakeMultiplayer.Networking
             Rotation = new Quaternion(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
             State = reader.ReadByte();
             Health = reader.ReadSingle();
+            AnimFlags = reader.ReadByte();
+            WalkType = reader.ReadByte();
+            AnimSpeed = reader.ReadSingle();
         }
     }
 

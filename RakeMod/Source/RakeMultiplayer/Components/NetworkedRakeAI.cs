@@ -71,6 +71,17 @@ namespace RakeMultiplayer
         // Smoothed animator speed (clients only) so state flapping does not jerk the walk blend
         private float targetSpeed;
 
+        // Animator snapshot received from the host (clients)
+        private byte targetAnimFlags;
+        private byte targetWalkType = 1;
+        private float targetAnimSpeed;
+        private bool hasAnimState;
+
+        // Last animator snapshot sent (server)
+        private byte lastSentAnimFlags;
+        private byte lastSentWalkType = 1;
+        private float lastSentAnimSpeed;
+
         // Server-authoritative Rake hit
         private const float AttackInterval = 1.4f;
         private const int AttackDamage = 10;
@@ -888,13 +899,26 @@ namespace RakeMultiplayer
             _lastAnimPosition = position;
             _lastAnimPositionValid = true;
 
-            // 0 = idle, 1 = walk, 2 = run - same values the vanilla Enemy_AI uses
-            float target = _observedSpeed < 0.2f ? 0f : (_observedSpeed < 3.5f ? 1f : 2f);
-            animator.SetFloat("Speed", Mathf.MoveTowards(animator.GetFloat("Speed"), target, dt * 4f));
+            if (!hasAnimState)
+            {
+                // Before the first snapshot arrives, fall back to the observed movement.
+                float derived = _observedSpeed < 0.2f ? 0f : (_observedSpeed < 3.5f ? 1f : 2f);
+                animator.SetFloat("Speed", Mathf.MoveTowards(animator.GetFloat("Speed"), derived, dt * 4f));
+                animator.SetInteger("WalkType", 1);
+                animator.SetBool("bAttack", currentState == RakeState.Attack);
+                return;
+            }
 
-            // The vanilla AI keeps WalkType at 1; without it the animator picks another gait
-            animator.SetInteger("WalkType", 1);
-            animator.SetBool("bAttack", currentState == RakeState.Attack);
+            // Mirror the host animator exactly: the crouch/sneak used while hunting
+            // animals lives only in the vanilla parameters, not in our state enum.
+            animator.SetBool("bCrouch", (targetAnimFlags & 1) != 0);
+            animator.SetBool("bAttack", (targetAnimFlags & 2) != 0);
+            animator.SetBool("bAnimalKilling", (targetAnimFlags & 4) != 0);
+            animator.SetBool("bPlayerAttack", (targetAnimFlags & 8) != 0);
+            animator.SetBool("bPlayerAppercut", (targetAnimFlags & 16) != 0);
+            animator.SetBool("bCameraBreak", (targetAnimFlags & 32) != 0);
+            animator.SetInteger("WalkType", targetWalkType);
+            animator.SetFloat("Speed", Mathf.MoveTowards(animator.GetFloat("Speed"), targetAnimSpeed, dt * 6f));
         }
 
         /// <summary>
@@ -1144,6 +1168,30 @@ namespace RakeMultiplayer
             }
         }
 
+        /// <summary>
+        /// Snapshot the animator parameters the vanilla AI uses. The host Rake can be
+        /// crouching (animal hunt), killing an animal or breaking a camera without any
+        /// change in our own state enum, so clients cannot derive this from movement.
+        /// </summary>
+        private void ReadAnimatorSnapshot(out byte flags, out byte walkType, out float speed)
+        {
+            flags = 0;
+            walkType = 1;
+            speed = 0f;
+
+            if (animator == null) return;
+
+            if (animator.GetBool("bCrouch")) flags |= 1;
+            if (animator.GetBool("bAttack")) flags |= 2;
+            if (animator.GetBool("bAnimalKilling")) flags |= 4;
+            if (animator.GetBool("bPlayerAttack")) flags |= 8;
+            if (animator.GetBool("bPlayerAppercut")) flags |= 16;
+            if (animator.GetBool("bCameraBreak")) flags |= 32;
+
+            walkType = (byte)Mathf.Clamp(animator.GetInteger("WalkType"), 0, 255);
+            speed = animator.GetFloat("Speed");
+        }
+
         private void SendRakeState()
         {
             Vector3 currentPos = transform.position;
@@ -1151,18 +1199,29 @@ namespace RakeMultiplayer
             float currentHealth = GetCurrentHealth();
 
             // Delta compression check
+            byte animFlags;
+            byte walkType;
+            float animSpeed;
+            ReadAnimatorSnapshot(out animFlags, out walkType, out animSpeed);
+
             bool posChanged = Vector3.Distance(currentPos, lastSentPosition) > PositionDeltaThreshold;
             bool stateChanged = currentStateByte != lastSentState;
             bool healthChanged = Math.Abs(currentHealth - lastSentHealth) > HealthDeltaThreshold;
+            bool animChanged = animFlags != lastSentAnimFlags ||
+                               walkType != lastSentWalkType ||
+                               Math.Abs(animSpeed - lastSentAnimSpeed) > 0.05f;
 
-            if (!posChanged && !stateChanged && !healthChanged) return;
+            if (!posChanged && !stateChanged && !healthChanged && !animChanged) return;
 
             var packet = new RakeStatePacket
             {
                 Position = currentPos,
                 Rotation = transform.rotation,
                 State = currentStateByte,
-                Health = currentHealth
+                Health = currentHealth,
+                AnimFlags = animFlags,
+                WalkType = walkType,
+                AnimSpeed = animSpeed
             };
 
             var data = packet.Serialize();
@@ -1177,6 +1236,9 @@ namespace RakeMultiplayer
             lastSentPosition = currentPos;
             lastSentState = currentStateByte;
             lastSentHealth = currentHealth;
+            lastSentAnimFlags = animFlags;
+            lastSentWalkType = walkType;
+            lastSentAnimSpeed = animSpeed;
         }
 
         private byte GetCurrentStateByte()
@@ -1223,6 +1285,13 @@ namespace RakeMultiplayer
         // Client-side apply (for 3.4)
         public void ApplySyncData(Vector3 position, Quaternion rotation, byte state, float health)
         {
+            ApplySyncData(position, rotation, state, health, 0, 1, 0f);
+            hasAnimState = false; // this overload carries no animator snapshot
+        }
+
+        public void ApplySyncData(Vector3 position, Quaternion rotation, byte state, float health,
+                                  byte animFlags, byte walkType, float animSpeed)
+        {
             if (RakeMultiplayerPlugin.isServer) return; // Don't apply on server
 
             // Set interpolation targets instead of direct assignment
@@ -1238,6 +1307,10 @@ namespace RakeMultiplayer
             hasTargetRotation = true;
             targetState = state;
             targetHealth = health;
+            targetAnimFlags = animFlags;
+            targetWalkType = walkType;
+            targetAnimSpeed = animSpeed;
+            hasAnimState = true;
 
             // Apply state/health immediately (they don't interpolate)
             ApplyState(state);

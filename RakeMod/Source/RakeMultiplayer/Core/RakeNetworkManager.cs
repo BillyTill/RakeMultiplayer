@@ -1566,7 +1566,8 @@ namespace RakeMultiplayer
             // Use cached NetworkedRakeAI (avoid FindObjectOfType in hot path)
             if (_cachedRake != null)
             {
-                _cachedRake.ApplySyncData(packet.Position, packet.Rotation, packet.State, packet.Health);
+                _cachedRake.ApplySyncData(packet.Position, packet.Rotation, packet.State, packet.Health,
+                                         packet.AnimFlags, packet.WalkType, packet.AnimSpeed);
             }
             else
             {
