@@ -25,6 +25,7 @@ namespace RakeMultiplayer
         internal static ConfigEntry<string> SteamAppId;
         internal static ConfigEntry<bool> RunInBackground;
         internal static ConfigEntry<bool> ControlLighting;
+        internal static ConfigEntry<bool> HitReaction;
 
         // Network state (managed by RakeNetworkManager)
         internal static bool isServer = false;
@@ -63,6 +64,9 @@ namespace RakeMultiplayer
 
             // The game levels ship their own day/night lighting; overriding it makes
             // night look like day under a black sky. Off by default.
+            HitReaction = Config.Bind("General", "HitReaction", true,
+                "Play the ragdoll hit reaction when the Rake hits the local player");
+
             ControlLighting = Config.Bind("General", "ControlLighting", false,
                 "Let the mod drive scene ambient light and sun intensity (off = keep the level lighting)");
 

@@ -339,6 +339,23 @@ namespace RakeMultiplayer
                 return "preview clip = " + args[0];
             });
 
+            Register("ragdoll", "ragdoll",
+                "Play the hit reaction (ragdoll + head camera)", args =>
+            {
+                if (PlayerRagdoll.IsActive) return "ragdoll: already playing";
+
+                var player = LocalPlayer();
+                if (player == null) return "ragdoll: no local player";
+
+                var rake = RakeHighlight.FindRake();
+                Vector3 away = rake != null ? player.position - rake.position : Vector3.zero;
+
+                return PlayerRagdoll.Trigger(away)
+                    ? "ragdoll started"
+                    : "ragdoll: could not start (model not loaded?)";
+            });
+
+
             Register("rake info", "rake info",
                 "Log the Rake transform, animator and NavMeshAgent state", args =>
             {
@@ -576,6 +593,7 @@ namespace RakeMultiplayer
     {
         private static bool _console;
         private static bool _camera;
+        private static bool _ragdoll;
         private static bool _applied;
 
         private static CameraMouseLook _look;
@@ -589,6 +607,12 @@ namespace RakeMultiplayer
             Apply();
         }
 
+        public static void SetRagdoll(bool active)
+        {
+            _ragdoll = active;
+            Apply();
+        }
+
         public static void SetCamera(bool active)
         {
             _camera = active;
@@ -597,7 +621,7 @@ namespace RakeMultiplayer
 
         private static void Apply()
         {
-            bool locked = _console || _camera;
+            bool locked = _console || _camera || _ragdoll;
             if (locked == _applied) return;
 
             if (locked)
