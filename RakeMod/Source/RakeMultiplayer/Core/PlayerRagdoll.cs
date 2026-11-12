@@ -25,7 +25,7 @@ namespace RakeMultiplayer
         public static float LaunchSpeed = 3.0f;
 
         /// <summary>Upward launch speed (m/s).</summary>
-        public static float LaunchLift = 2.0f;
+        public static float LaunchLift = 0f;
 
         /// <summary>Random spin applied to the pelvis.</summary>
         public static float LaunchSpin = 2.5f;
@@ -239,8 +239,11 @@ namespace RakeMultiplayer
                 t.localScale = node.Scale;
             }
 
-            _nodes[0].localPosition = RemotePlayerModelData.RootPosition;
-            _nodes[0].localRotation = RemotePlayerModelData.RootRotation;
+            // The baked model needs the same per-clip yaw correction as the animated body,
+            // otherwise the ragdoll faces ~114 degrees off the player (Idle yaw).
+            Quaternion clipYaw = RemotePlayerModel.GetClipYaw("Idle");
+            _nodes[0].localPosition = clipYaw * RemotePlayerModelData.RootPosition;
+            _nodes[0].localRotation = clipYaw * RemotePlayerModelData.RootRotation;
             _nodes[0].localScale = RemotePlayerModelData.RootScale;
 
             // ---- skinned renderer ----
@@ -575,6 +578,10 @@ namespace RakeMultiplayer
             for (int i = 0; i < bodies.Length; i++)
             {
                 bodies[i].AddForce(velocity, ForceMode.VelocityChange);
+
+                // A small independent spin per bone: without it a ragdoll in free fall
+                // keeps its idle pose and looks like a mannequin sliding through the air.
+                bodies[i].angularVelocity += UnityEngine.Random.insideUnitSphere * 2.5f;
             }
 
             var pelvisBody = _pelvis.GetComponent<Rigidbody>();

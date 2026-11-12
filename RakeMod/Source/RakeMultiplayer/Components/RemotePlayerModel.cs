@@ -29,6 +29,13 @@ namespace RakeMultiplayer
         /// (Idle was 114 deg off, i.e. the body looked 90 deg to the right). Values are
         /// produced by RakeMod/ModelBake/canonical_placement.py.
         /// </summary>
+        /// <summary>Yaw correction for a clip, so other systems (the ragdoll) can match the body.</summary>
+        public static Quaternion GetClipYaw(string clipName)
+        {
+            float yaw;
+            return ClipYaw.TryGetValue(clipName, out yaw) ? Quaternion.Euler(0f, yaw, 0f) : Quaternion.identity;
+        }
+
         private static readonly Dictionary<string, float> ClipYaw = new Dictionary<string, float>
         {
             { "Idle", -113.87f },
