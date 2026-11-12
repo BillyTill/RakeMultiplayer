@@ -192,7 +192,6 @@ namespace RakeMultiplayer.Patches
         {
             if (!RakeMultiplayerPlugin.Enabled.Value) return;
             if (!RakeMultiplayerPlugin.isConnected) return;
-            if (RakeMultiplayerPlugin.isServer) return; // host damage already applied by vanilla
 
             var netPlayer = __instance.GetComponentInParent<NetworkedPlayer>();
             if (netPlayer == null || !netPlayer.isLocalPlayer) return;
@@ -203,18 +202,36 @@ namespace RakeMultiplayer.Patches
             var caster = GetCaster(__instance);
             if (caster == null) return;
 
+            var manager = RakeNetworkManager.Instance;
+            if (manager == null) return;
+
+            int shooterId = PlayerSpawner.Instance != null && PlayerSpawner.Instance.LocalPlayer != null
+                ? PlayerSpawner.Instance.LocalPlayer.PlayerId : 1;
+
+            var visual = new FireVisualsPacket
+            {
+                ShooterId = shooterId,
+                WeaponType = 0,
+                Origin = caster.position,
+                Direction = caster.forward
+            };
+
+            if (RakeMultiplayerPlugin.isServer) manager.ServerBroadcast(visual.Serialize());
+            else manager.ClientSend(visual.Serialize());
+
+            if (RakeMultiplayerPlugin.isServer) return; // host damage already applied by vanilla
+
             var packet = new DamageRequestPacket
             {
-                ShooterId = PlayerSpawner.Instance?.LocalPlayer?.PlayerId ?? 1,
+                ShooterId = shooterId,
                 TargetId = 0,
                 Amount = 100,
                 DamageType = "Bullet",
                 ShooterPosition = caster.position
             };
-            RakeNetworkManager.Instance?.ClientSend(packet.Serialize());
+            manager.ClientSend(packet.Serialize());
             RakeMultiplayerPlugin.Log?.LogInfo($"[3.4] Client sent rifle DamageRequest from {caster.position}");
         }
-
         private static int GetAmmo(Rifle_weapon w)
         {
             return AmmoField != null ? (int)AmmoField.GetValue(w) : 0;
@@ -250,7 +267,6 @@ namespace RakeMultiplayer.Patches
         {
             if (!RakeMultiplayerPlugin.Enabled.Value) return;
             if (!RakeMultiplayerPlugin.isConnected) return;
-            if (RakeMultiplayerPlugin.isServer) return;
 
             var netPlayer = __instance.GetComponentInParent<NetworkedPlayer>();
             if (netPlayer == null || !netPlayer.isLocalPlayer) return;
@@ -261,18 +277,36 @@ namespace RakeMultiplayer.Patches
             var caster = GetCaster(__instance);
             if (caster == null) return;
 
+            var manager = RakeNetworkManager.Instance;
+            if (manager == null) return;
+
+            int shooterId = PlayerSpawner.Instance != null && PlayerSpawner.Instance.LocalPlayer != null
+                ? PlayerSpawner.Instance.LocalPlayer.PlayerId : 1;
+
+            var visual = new FireVisualsPacket
+            {
+                ShooterId = shooterId,
+                WeaponType = 1,
+                Origin = caster.position,
+                Direction = caster.forward
+            };
+
+            if (RakeMultiplayerPlugin.isServer) manager.ServerBroadcast(visual.Serialize());
+            else manager.ClientSend(visual.Serialize());
+
+            if (RakeMultiplayerPlugin.isServer) return;
+
             var packet = new DamageRequestPacket
             {
-                ShooterId = PlayerSpawner.Instance?.LocalPlayer?.PlayerId ?? 1,
+                ShooterId = shooterId,
                 TargetId = 0,
                 Amount = 200,
                 DamageType = "SniperShot",
                 ShooterPosition = caster.position
             };
-            RakeNetworkManager.Instance?.ClientSend(packet.Serialize());
+            manager.ClientSend(packet.Serialize());
             RakeMultiplayerPlugin.Log?.LogInfo($"[3.4] Client sent sniper DamageRequest from {caster.position}");
         }
-
         private static int GetAmmo(SniperRifle_weapon w)
         {
             return AmmoField != null ? (int)AmmoField.GetValue(w) : 0;

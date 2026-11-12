@@ -19,7 +19,7 @@ namespace RakeMultiplayer
     public class PlayerRagdoll : MonoBehaviour
     {
         /// <summary>Seconds the body stays down before everything is restored.</summary>
-        public static float Duration = 2.0f;
+        public static float Duration = 4.0f;
 
         /// <summary>Horizontal launch speed (m/s). ~3.5 gives a 2-3 m fall.</summary>
         public static float LaunchSpeed = 3.0f;
@@ -268,6 +268,10 @@ namespace RakeMultiplayer
             smr.sharedMaterial = RemotePlayerModelData.Material;
             smr.updateWhenOffscreen = true;
 
+            // The victim's camera sits inside this body: hide it locally so its
+            // backfaces/shadows do not break the scene lighting from the inside.
+            if (local) smr.enabled = false;
+
             _pelvis = FindNode("Bip01 Pelvis");
             _head = FindNode("Bip01 Head");
             if (_pelvis == null || _head == null) return false;
@@ -490,9 +494,10 @@ namespace RakeMultiplayer
                 joint.axis = axis;
                 joint.swingAxis = swingDir;
 
-                var low = new SoftJointLimit(); low.limit = -45f;
-                var high = new SoftJointLimit(); high.limit = 45f;
-                var swing = new SoftJointLimit(); swing.limit = 55f;
+                // Tight limits: wide ones let the body fold into itself.
+                var low = new SoftJointLimit(); low.limit = -25f;
+                var high = new SoftJointLimit(); high.limit = 25f;
+                var swing = new SoftJointLimit(); swing.limit = 40f;
 
                 joint.lowTwistLimit = low;
                 joint.highTwistLimit = high;

@@ -484,6 +484,9 @@ namespace RakeMultiplayer
                     case PacketType.DoorAction:
                         DoorSync.HandleServerRequest((DoorActionPacket)packet);
                         break;
+                    case PacketType.FireVisuals:
+                        HandleServerFireVisuals(connectionId, (FireVisualsPacket)packet);
+                        break;
                     case PacketType.ItemPickup:
                         HandleServerItemPickup(connectionId, (ItemPickupPacket)packet, data);
                         break;
@@ -2086,12 +2089,24 @@ namespace RakeMultiplayer
             // CameraBreak (0) is handled by NetworkedCamera.HandleQuestTrigger
         }
 
+        private void HandleServerFireVisuals(int connectionId, FireVisualsPacket packet)
+        {
+            // Play it for the host, then relay to the other clients. The sender
+            // ignores its own packet in HandleClientFireVisuals.
+            HandleClientFireVisuals(packet);
+            ServerBroadcast(packet.Serialize());
+        }
+
         private void HandleClientFireVisuals(FireVisualsPacket packet)
         {
             RakeMultiplayerPlugin.Log?.LogInfo($"[3.5] Client received FireVisuals: shooterId={packet.ShooterId}, weaponType={packet.WeaponType}");
 
-            // Find remote player by shooterId
+            // Our own shot already plays the vanilla sound locally.
             if (PlayerSpawner.Instance == null) return;
+            if (PlayerSpawner.Instance.LocalPlayer != null &&
+                PlayerSpawner.Instance.LocalPlayer.PlayerId == packet.ShooterId) return;
+
+            // Find remote player by shooterId
             if (!PlayerSpawner.Instance.TryGetRemotePlayer(packet.ShooterId, out var shooter)) return;
 
             try
@@ -2099,7 +2114,8 @@ namespace RakeMultiplayer
                 // WeaponType: 0 = Rifle, 1 = Sniper
                 if (packet.WeaponType == 0)
                 {
-                    var rifle = shooter.GetComponentInChildren<Rifle_weapon>();
+                    var rifles = shooter.GetComponentsInChildren<Rifle_weapon>(true);
+                    var rifle = rifles.Length > 0 ? rifles[0] : null;
                     if (rifle != null)
                     {
                         // Use reflection to access private fields
@@ -2129,13 +2145,14 @@ namespace RakeMultiplayer
                             var fireSound = fireSoundField.GetValue(rifle) as AudioClip;
                             // The clone AudioSources are disabled, so play a temporary 3D
                             // source at the shooter instead of on its weapon.
-                            PlayerAudio.PlayAt(fireSound, shooter.transform.position + Vector3.up * 1.4f, 1f);
+                            PlayerAudio.PlayAt(fireSound, packet.Origin != Vector3.zero ? packet.Origin : shooter.transform.position + Vector3.up * 1.4f, 1f);
                         }
                     }
                 }
                 else if (packet.WeaponType == 1)
                 {
-                    var sniper = shooter.GetComponentInChildren<SniperRifle_weapon>();
+                    var snipers = shooter.GetComponentsInChildren<SniperRifle_weapon>(true);
+                    var sniper = snipers.Length > 0 ? snipers[0] : null;
                     if (sniper != null)
                     {
                         var muzzleFireField = typeof(SniperRifle_weapon).GetField("muzzleFire", 
@@ -2160,7 +2177,7 @@ namespace RakeMultiplayer
                         if (fireSoundField != null && sfxField != null)
                         {
                             var fireSound = fireSoundField.GetValue(sniper) as AudioClip;
-                            PlayerAudio.PlayAt(fireSound, shooter.transform.position + Vector3.up * 1.4f, 1f);
+                            PlayerAudio.PlayAt(fireSound, packet.Origin != Vector3.zero ? packet.Origin : shooter.transform.position + Vector3.up * 1.4f, 1f);
                         }
                     }
                 }
