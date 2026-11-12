@@ -240,6 +240,7 @@ namespace RakeMultiplayer.Networking
 
         public int PlayerId;
         public Vector3 RakePosition;
+        public Vector3 FocusPosition;
 
         public override void Write(BinaryWriter writer)
         {
@@ -247,12 +248,16 @@ namespace RakeMultiplayer.Networking
             writer.Write(RakePosition.x);
             writer.Write(RakePosition.y);
             writer.Write(RakePosition.z);
+            writer.Write(FocusPosition.x);
+            writer.Write(FocusPosition.y);
+            writer.Write(FocusPosition.z);
         }
 
         public override void Read(BinaryReader reader)
         {
             PlayerId = reader.ReadInt32();
             RakePosition = new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
+            FocusPosition = new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
         }
     }
 

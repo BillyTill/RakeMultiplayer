@@ -329,8 +329,13 @@ namespace RakeMultiplayer
         /// <summary>Player-controlled Rake hit a player (same damage path as the AI).</summary>
         public bool AttackPlayer(Transform victim)
         {
+            return AttackPlayer(victim, AttackDamage, AttackDamageType);
+        }
+
+        public bool AttackPlayer(Transform victim, int damage, string damageType)
+        {
             if (victim == null) return false;
-            DealRakeDamage(victim);
+            DealRakeDamage(victim, damage, damageType);
             return true;
         }
 
@@ -950,6 +955,11 @@ namespace RakeMultiplayer
         /// </summary>
         private void DealRakeDamage(Transform victim)
         {
+            DealRakeDamage(victim, AttackDamage, AttackDamageType);
+        }
+
+        private void DealRakeDamage(Transform victim, int damage, string damageType)
+        {
             if (victim == null) return;
 
             var net = victim.GetComponent<NetworkedPlayer>();
@@ -962,11 +972,11 @@ namespace RakeMultiplayer
             {
                 // The TakeDamage patch spawns our own ragdoll; observers need the packet.
                 var fps = victim.GetComponent<FPSController>();
-                if (fps != null) fps.TakeDamage(AttackDamage, AttackDamageType);
+                if (fps != null) fps.TakeDamage(damage, damageType);
 
                 PlayerRagdoll.BroadcastOnly(net.PlayerId, away);
 
-                RakeMultiplayerPlugin.Log?.LogInfo("[AI] Rake hit the host for " + AttackDamage);
+                RakeMultiplayerPlugin.Log?.LogInfo("[AI] Rake hit the host for " + damage);
                 return;
             }
 
@@ -975,8 +985,8 @@ namespace RakeMultiplayer
             var packet = new PlayerDamagedPacket
             {
                 PlayerId = net.PlayerId,
-                Amount = AttackDamage,
-                DamageType = AttackDamageType,
+                Amount = damage,
+                DamageType = damageType,
                 SourcePosition = transform.position
             };
             RakeNetworkManager.Instance?.ServerBroadcast(packet.Serialize());
@@ -988,7 +998,7 @@ namespace RakeMultiplayer
             PlayerRagdoll.TriggerNetworked(net.PlayerId, away);
 
             RakeMultiplayerPlugin.Log?.LogInfo("[AI] Rake hit player " + net.PlayerId +
-                                              " for " + AttackDamage);
+                                              " for " + damage);
         }
 
         private void UpdateBlocking()

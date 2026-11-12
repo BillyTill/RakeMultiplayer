@@ -1607,10 +1607,14 @@ namespace RakeMultiplayer
             var local = spawner != null ? spawner.LocalPlayer : null;
             if (local == null || local.PlayerId != packet.PlayerId) return;
 
-            StartCoroutine(RakeGrabRoutine(packet.RakePosition));
+            Vector3 focus = packet.FocusPosition != Vector3.zero
+                ? packet.FocusPosition
+                : packet.RakePosition + Vector3.up * 1.6f;
+
+            StartCoroutine(RakeGrabRoutine(focus));
         }
 
-        private System.Collections.IEnumerator RakeGrabRoutine(Vector3 rakePosition)
+        private System.Collections.IEnumerator RakeGrabRoutine(Vector3 focusPosition)
         {
             var spawner = PlayerSpawner.Instance;
             var local = spawner != null ? spawner.LocalPlayer : null;
@@ -1629,7 +1633,7 @@ namespace RakeMultiplayer
             {
                 if (look != null && look.camera != null)
                 {
-                    look.camera.LookAt(rakePosition + Vector3.up * 1.6f);
+                    look.camera.LookAt(focusPosition);
                 }
                 yield return null;
             }

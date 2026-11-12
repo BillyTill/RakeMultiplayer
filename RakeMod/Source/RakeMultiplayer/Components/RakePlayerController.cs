@@ -715,8 +715,12 @@ namespace RakeMultiplayer
             {
                 _animator.SetFloat("Speed", 0f);
                 _animator.SetBool("bCrouch", false);
+                _animator.SetBool("bAttack", false);
                 _animator.SetBool("bPlayerAttack", true);
             }
+
+            Vector3 focus = transform.position + Vector3.up * 1.6f;
+            if (_enemyAI != null && _enemyAI.focusPoint != null) focus = _enemyAI.focusPoint.position;
 
             NetworkedPlayer net = victim.GetComponent<NetworkedPlayer>();
             int victimId = net != null ? net.PlayerId : 0;
@@ -725,7 +729,8 @@ namespace RakeMultiplayer
                 var grab = new RakeGrabPacket
                 {
                     PlayerId = victimId,
-                    RakePosition = transform.position
+                    RakePosition = transform.position,
+                    FocusPosition = focus
                 };
                 RakeNetworkManager.Instance?.ServerBroadcast(grab.Serialize());
             }
@@ -737,8 +742,20 @@ namespace RakeMultiplayer
         {
             yield return new WaitForSeconds(1.2f);
 
-            if (victim != null && _rakeAI != null) _rakeAI.AttackPlayer(victim);
-            if (_animator != null) _animator.SetBool("bPlayerAttack", false);
+            // Vanilla grab: kick sound, then the hit and the victim is released.
+            if (_audio != null && _enemyAI != null && _enemyAI.playerAttackKicks != null &&
+                _enemyAI.playerAttackKicks.Length > 0)
+            {
+                _audio.PlayOneShot(_enemyAI.playerAttackKicks[Random.Range(0, _enemyAI.playerAttackKicks.Length)]);
+            }
+
+            if (victim != null && _rakeAI != null) _rakeAI.AttackPlayer(victim, 10, "RakeKick");
+
+            if (_animator != null)
+            {
+                _animator.SetBool("bPlayerAttack", false);
+                _animator.SetBool("bAttack", false);
+            }
 
             _actionLocked = false;
         }
@@ -808,7 +825,6 @@ namespace RakeMultiplayer
             if (dir.sqrMagnitude > 0.001f)
             {
                 transform.rotation = Quaternion.LookRotation(dir);
-                _yaw = transform.eulerAngles.y; // keep the camera behind the Rake
             }
         }
 
