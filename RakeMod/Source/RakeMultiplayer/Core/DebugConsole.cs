@@ -679,6 +679,34 @@ namespace RakeMultiplayer
             Apply();
         }
 
+        /// <summary>
+        /// Called when a ragdoll reaction ends. The vanilla Rake attack freezes the player
+        /// *before* dealing damage and unfreezes it right after, so the flags captured when
+        /// the ragdoll started are stale (false). Restoring them would leave the player
+        /// frozen for good, so standing up always hands control back.
+        /// </summary>
+        public static void ReleaseRagdoll()
+        {
+            _ragdoll = false;
+            Apply();
+
+            // Another lock (console / debug camera) still owns the input.
+            if (_console || _camera) return;
+
+            var spawner = PlayerSpawner.Instance;
+            var local = spawner != null ? spawner.LocalPlayer : null;
+            if (local == null) return;
+
+            var fps = local.GetComponent<FPSController>();
+            if (fps != null && fps.Health < 0) return; // dead: the game owns the input
+
+            var movement = local.GetComponent<PlayerMovement>();
+            if (movement != null) movement.UnFreezePlayer();
+
+            var look = local.GetComponentInChildren<CameraMouseLook>();
+            if (look != null) look.bControl = true;
+        }
+
         private static void Apply()
         {
             bool locked = _console || _camera || _ragdoll;

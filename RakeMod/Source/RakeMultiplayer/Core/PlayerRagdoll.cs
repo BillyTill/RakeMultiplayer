@@ -643,7 +643,7 @@ namespace RakeMultiplayer
             {
                 RestorePlayerCameras();
                 if (_controller != null) _controller.enabled = true;
-                PlayerInputLock.SetRagdoll(false);
+                PlayerInputLock.ReleaseRagdoll();
             }
             else
             {
