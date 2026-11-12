@@ -402,6 +402,39 @@ namespace RakeMultiplayer.Networking
     }
 
     /// <summary>
+    /// Stackable item state (e.g. box of cameras): remaining count.
+    /// Server -> All
+    /// </summary>
+    public class ItemStatePacket : NetworkPacket
+    {
+        public override PacketType Type => PacketType.ItemState;
+
+        public int ItemNetworkId;
+        public int RemainingCount;
+        public bool IsActive;
+        public int PickerId;   // who took one (0 = state only)
+        public string ItemType; // type name for client-side effect replay
+
+        public override void Write(BinaryWriter writer)
+        {
+            writer.Write(ItemNetworkId);
+            writer.Write(RemainingCount);
+            writer.Write(IsActive);
+            writer.Write(PickerId);
+            writer.Write(ItemType ?? string.Empty);
+        }
+
+        public override void Read(BinaryReader reader)
+        {
+            ItemNetworkId = reader.ReadInt32();
+            RemainingCount = reader.ReadInt32();
+            IsActive = reader.ReadBoolean();
+            PickerId = reader.ReadInt32();
+            ItemType = reader.ReadString();
+        }
+    }
+
+    /// <summary>
     /// Day/Night phase change notification
     /// Server -> All (broadcast on phase transition)
     /// </summary>

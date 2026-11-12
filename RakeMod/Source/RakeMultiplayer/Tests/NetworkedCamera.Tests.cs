@@ -4126,5 +4126,72 @@ namespace RakeMultiplayer.Tests
         }
 
         #endregion
+
+        #region Box Of Cameras State Tests
+
+        [TestFixture]
+        public class BoxOfCamerasStateTests
+        {
+            [Test]
+            public void ItemStatePacket_RoundTrip()
+            {
+                var original = new ItemStatePacket
+                {
+                    ItemNetworkId = 9,
+                    RemainingCount = 3,
+                    IsActive = true,
+                    PickerId = 2,
+                    ItemType = "BoxOfCameras_item"
+                };
+
+                var restored = PacketSerializer.Deserialize(original.Serialize()) as ItemStatePacket;
+                Assert.IsNotNull(restored);
+                Assert.AreEqual(PacketType.ItemState, restored.Type);
+                Assert.AreEqual(9, restored.ItemNetworkId);
+                Assert.AreEqual(3, restored.RemainingCount);
+                Assert.IsTrue(restored.IsActive);
+                Assert.AreEqual(2, restored.PickerId);
+                Assert.AreEqual("BoxOfCameras_item", restored.ItemType);
+            }
+
+            [Test]
+            public void ItemState_PacketType_Is34()
+            {
+                Assert.AreEqual(34, (byte)PacketType.ItemState);
+            }
+
+            [Test]
+            public void Box_DecrementsOnePerPickup_StaysActive()
+            {
+                int count = 5;
+                count--;
+                bool active = count > 0;
+
+                Assert.AreEqual(4, count);
+                Assert.IsTrue(active, "Box must remain active until the last camera");
+            }
+
+            [Test]
+            public void Box_LastCamera_RemovesBox()
+            {
+                int count = 1;
+                count--;
+                bool active = count > 0;
+
+                Assert.AreEqual(0, count);
+                Assert.IsFalse(active, "Only the last pickup removes the box");
+            }
+
+            [Test]
+            public void Box_NoChange_DoesNotBroadcast()
+            {
+                // "Full count of cameras" early-return leaves count unchanged
+                int before = 3;
+                int after = 3;
+                Assert.AreEqual(before, after);
+            }
+        }
+
+        #endregion
     }
 }

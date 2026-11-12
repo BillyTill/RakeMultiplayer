@@ -738,6 +738,32 @@ namespace RakeMultiplayer
                 return; // Item stays in the world
             }
 
+            // ---- Box of cameras: stackable, do not delete after the first camera ----
+            var box = item as BoxOfCameras_item;
+            if (box != null)
+            {
+                if (box.count <= 0)
+                {
+                    _server.Send(connectionId, new ItemPickupConfirmPacket
+                    {
+                        PlayerId = playerId,
+                        ItemNetworkId = packet.ItemNetworkId,
+                        Success = false,
+                        Reason = "Empty"
+                    }.Serialize());
+                    return;
+                }
+
+                box.count--;
+                bool active = box.count > 0;
+                if (!active && box.obj != null) box.obj.SetActive(false);
+
+                ServerAuthorizeBoxPickup(packet.ItemNetworkId, playerId, box.count, active);
+                RakeMultiplayerPlugin.Log?.LogInfo(
+                    $"[3.5] Box {packet.ItemNetworkId}: player {playerId} took 1 camera, remaining={box.count}");
+                return;
+            }
+
             // Remove the authoritative world object (the host does not receive its own broadcast)
             RakeMultiplayerPlugin.IsApplyingNetworkDestroy = true;
             try { UnityEngine.Object.Destroy(item.gameObject); }
@@ -1266,6 +1292,9 @@ namespace RakeMultiplayer
                     case PacketType.ItemDestroyed:
                         HandleClientItemDestroyed((ItemDestroyedPacket)packet);
                         break;
+                    case PacketType.ItemState:
+                        HandleClientItemState((ItemStatePacket)packet);
+                        break;
                     case PacketType.ItemPickupConfirm:
                         HandleClientItemPickupConfirm((ItemPickupConfirmPacket)packet);
                         break;
@@ -1630,6 +1659,94 @@ namespace RakeMultiplayer
 
             RakeMultiplayerPlugin.Log?.LogInfo($"[3.5] Client applied pickup {packet.ItemNetworkId} (picker={packet.PickerId}, local={localPlayerId})");
         }
+        /// <summary>
+        /// Server: synchronize the remaining camera count of a box (or remove it when empty).
+        /// </summary>
+        public void ServerAuthorizeBoxPickup(int itemNetworkId, int pickerId, int remaining, bool active)
+        {
+            if (!RakeMultiplayerPlugin.isServer) return;
+
+            if (!active)
+            {
+                _networkedItems.Remove(itemNetworkId);
+                foreach (var kvp in _itemToNetworkId)
+                {
+                    if (kvp.Value == itemNetworkId)
+                    {
+                        _itemToNetworkId.Remove(kvp.Key);
+                        break;
+                    }
+                }
+            }
+
+            var packet = new ItemStatePacket
+            {
+                ItemNetworkId = itemNetworkId,
+                RemainingCount = remaining,
+                IsActive = active,
+                PickerId = pickerId,
+                ItemType = "BoxOfCameras_item"
+            };
+            ServerBroadcast(packet.Serialize());
+        }
+
+        private void HandleClientItemState(ItemStatePacket packet)
+        {
+            if (RakeMultiplayerPlugin.isServer) return;
+
+            Item item = null;
+            if (!_networkedItems.TryGetValue(packet.ItemNetworkId, out item) || item == null)
+            {
+                _pendingPickups.TryGetValue(packet.ItemNetworkId, out item);
+            }
+            _pendingPickups.Remove(packet.ItemNetworkId);
+
+            int localPlayerId = PlayerSpawner.Instance?.LocalPlayer?.PlayerId ?? 1;
+            bool isPicker = packet.PickerId != 0 && packet.PickerId == localPlayerId;
+
+            if (item != null)
+            {
+                item.count = packet.RemainingCount;
+                var box = item as BoxOfCameras_item;
+                if (box != null && box.obj != null) box.obj.SetActive(packet.IsActive);
+
+                if (isPicker)
+                {
+                    var localPlayer = PlayerSpawner.Instance != null ? PlayerSpawner.Instance.LocalPlayer : null;
+                    var localWm = localPlayer != null ? localPlayer.GetComponentInChildren<WeaponManager>() : null;
+                    if (localWm != null) WeaponManager.instance = localWm;
+                    if (localPlayer != null) FPSController.instance = localPlayer.GetComponent<FPSController>();
+
+                    RakeMultiplayerPlugin.IsApplyingNetworkDestroy = true;
+                    try { item.PickupItem(); }
+                    catch (Exception ex)
+                    {
+                        RakeMultiplayerPlugin.Log?.LogError($"[3.5] Box pickup replay failed: {ex.Message}");
+                        GrantItemEffectByType(packet.ItemType);
+                    }
+                    finally { RakeMultiplayerPlugin.IsApplyingNetworkDestroy = false; }
+
+                    // Reapply the authoritative count (the vanilla replay decremented it again)
+                    item.count = packet.RemainingCount;
+                    if (box != null && box.obj != null) box.obj.SetActive(packet.IsActive);
+                }
+
+                if (!packet.IsActive)
+                {
+                    _networkedItems.Remove(packet.ItemNetworkId);
+                    _itemToNetworkId.Remove(item);
+                }
+            }
+            else if (isPicker)
+            {
+                // Local object is gone/desynced - still grant the camera
+                GrantItemEffectByType(string.IsNullOrEmpty(packet.ItemType) ? "BoxOfCameras_item" : packet.ItemType);
+            }
+
+            RakeMultiplayerPlugin.Log?.LogInfo(
+                $"[3.5] BoxState {packet.ItemNetworkId}: remaining={packet.RemainingCount}, active={packet.IsActive}, picker={packet.PickerId}, local={localPlayerId}");
+        }
+
         private void HandleClientItemPickupConfirm(ItemPickupConfirmPacket packet)
         {
             if (packet.Success)
@@ -1687,6 +1804,7 @@ namespace RakeMultiplayer
                 case "SniperAmmo_item": weaponId = 6; ammoCount = 2; isNewWeapon = false; break;
                 case "Trap_item": weaponId = 4; isNewWeapon = !weaponManager.CheckWeapon(weaponId); break;
                 case "Camera_item": weaponId = 2; ammoCount = 1; isNewWeapon = !weaponManager.CheckWeapon(weaponId); break;
+                case "BoxOfCameras_item": weaponId = 2; ammoCount = 1; isNewWeapon = !weaponManager.CheckWeapon(weaponId); break;
                 case "Binocular_weapon":
                 case "Binocular_item": weaponId = 7; isNewWeapon = !weaponManager.CheckWeapon(weaponId); break;
                 case "MapCase_weapon":

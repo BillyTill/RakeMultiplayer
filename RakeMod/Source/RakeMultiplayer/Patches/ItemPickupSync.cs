@@ -25,6 +25,9 @@ namespace RakeMultiplayer.Patches
         private static readonly System.Collections.Generic.HashSet<int> _consumed =
             new System.Collections.Generic.HashSet<int>();
 
+        private static readonly System.Collections.Generic.Dictionary<int, int> _boxCountBefore =
+            new System.Collections.Generic.Dictionary<int, int>();
+
         internal static void MarkConsumed(int itemId)
         {
             if (itemId > 0) _consumed.Add(itemId);
@@ -61,6 +64,17 @@ namespace RakeMultiplayer.Patches
             if (manager == null) return true;
 
             int itemId = GetItemId(item);
+
+            // Remember the count for stackable items (host only) to detect a real pickup
+            if (RakeMultiplayerPlugin.isServer)
+            {
+                var boxBefore = item as BoxOfCameras_item;
+                if (boxBefore != null && itemId > 0)
+                {
+                    _boxCountBefore[itemId] = boxBefore.count;
+                }
+            }
+
             if (itemId == 0)
             {
                 RakeMultiplayerPlugin.Log?.LogWarning(
@@ -103,11 +117,27 @@ namespace RakeMultiplayer.Patches
             if (RakeMultiplayerPlugin.IsApplyingNetworkDestroy) return;
             if (itemId <= 0) return;
 
+            int pickerId = PlayerSpawner.Instance?.LocalPlayer?.PlayerId ?? 1;
+
+            // Box of cameras is stackable: vanilla only decrements and hides its visual
+            var box = item as BoxOfCameras_item;
+            if (box != null)
+            {
+                int before;
+                bool had = _boxCountBefore.TryGetValue(itemId, out before);
+                _boxCountBefore.Remove(itemId);
+                if (!had || before == box.count) return; // no real pickup (e.g. full ammo)
+
+                bool active = box.count > 0;
+                if (!active && box.obj != null) box.obj.SetActive(false);
+                RakeNetworkManager.Instance?.ServerAuthorizeBoxPickup(itemId, pickerId, box.count, active);
+                return;
+            }
+
             // DestroyPatch marks the item when the vanilla pickup actually called Destroy
             // (e.g. "Full ammo" returns early and never destroys it).
             if (!ConsumeMark(itemId)) return;
 
-            int pickerId = PlayerSpawner.Instance?.LocalPlayer?.PlayerId ?? 1;
             string itemType = item != null ? item.GetType().Name : string.Empty;
             RakeNetworkManager.Instance?.ServerAuthorizeItemPickup(itemId, pickerId, itemType);
         }

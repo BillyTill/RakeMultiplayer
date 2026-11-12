@@ -40,5 +40,6 @@ namespace RakeMultiplayer.Networking
         CameraSetupRequest = 31,
         PlayerTeleport = 32,
         LevelChange = 33,
+        ItemState = 34,
     }
 }
