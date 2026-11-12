@@ -23,6 +23,8 @@ namespace RakeMultiplayer.UI
         private bool _lastIsServer = false;
         private bool _lastIsConnected = false;
         private string _lastSceneName;
+        private SteamLobbyManager.LobbyInfo _steamSelectedLobby;
+        private float _steamUiTimer;
 
         /// <summary>True while the F1 menu (or any of its panels) is on screen.</summary>
         public static bool IsOpen
@@ -138,6 +140,17 @@ namespace RakeMultiplayer.UI
             UpdateConnectionStatus();
             UpdateHUD();
             UpdateRakeHealthBar();
+
+            if (_uiBuilder != null && _uiBuilder.SteamBrowsePanel != null &&
+                _uiBuilder.SteamBrowsePanel.activeSelf)
+            {
+                _steamUiTimer -= Time.deltaTime;
+                if (_steamUiTimer <= 0f)
+                {
+                    _steamUiTimer = 0.4f;
+                    UpdateSteamBrowse();
+                }
+            }
         }
 
         private NetworkedRakeAI _rakeHealthTarget;
@@ -288,6 +301,10 @@ namespace RakeMultiplayer.UI
             if (_uiBuilder.LobbyPanel) _uiBuilder.LobbyPanel.SetActive(false);
             if (_uiBuilder.SettingsPanel) _uiBuilder.SettingsPanel.SetActive(false);
             if (_uiBuilder.JoinGamePanel) _uiBuilder.JoinGamePanel.SetActive(false);
+            if (_uiBuilder.SteamPanel) _uiBuilder.SteamPanel.SetActive(false);
+            if (_uiBuilder.SteamCreatePanel) _uiBuilder.SteamCreatePanel.SetActive(false);
+            if (_uiBuilder.SteamBrowsePanel) _uiBuilder.SteamBrowsePanel.SetActive(false);
+            if (_uiBuilder.SteamPasswordPanel) _uiBuilder.SteamPasswordPanel.SetActive(false);
         }
 
         private void EnsureNetworkManager()
@@ -308,6 +325,7 @@ namespace RakeMultiplayer.UI
         public void OnHostGame()
         {
             RakeMultiplayerPlugin.Log?.LogInfo("[Menu] Host game clicked");
+            RakeMultiplayerPlugin.UseSteamP2P.Value = false;
             EnsureNetworkManager();
             RakeMultiplayerPlugin.Log?.LogInfo($"[Menu] Calling StartHost on {_networkManager.gameObject.name}");
             _networkManager.StartHost();
@@ -329,9 +347,9 @@ namespace RakeMultiplayer.UI
 
         public void OnOnline()
         {
-            RakeMultiplayerPlugin.Log?.LogInfo("[Menu] Online mode selected");
+            RakeMultiplayerPlugin.Log?.LogInfo("[Menu] Steam mode selected");
             RakeMultiplayerPlugin.UseSteamP2P.Value = true;
-            ShowJoinGamePanel();
+            ShowSteamMain();
         }
 
         public void OnBackToMain()
@@ -395,6 +413,7 @@ namespace RakeMultiplayer.UI
         public void OnLeaveLobby()
         {
             RakeMultiplayerPlugin.Log?.LogInfo("[Menu] Leaving lobby");
+            if (SteamLobbyManager.Instance != null) SteamLobbyManager.Instance.LeaveLobby();
             if (_networkManager != null)
             {
                 _networkManager.Disconnect();
@@ -434,6 +453,7 @@ namespace RakeMultiplayer.UI
                     port = p;
             }
 
+            RakeMultiplayerPlugin.UseSteamP2P.Value = false;
             RakeMultiplayerPlugin.Log?.LogInfo($"[Menu] Connecting to {ip}:{port}");
             RakeMultiplayerPlugin.NetworkAddress.Value = ip;
             RakeMultiplayerPlugin.NetworkPort.Value = (ushort)port;
@@ -534,12 +554,26 @@ namespace RakeMultiplayer.UI
             int max = RakeMultiplayerPlugin.MaxPlayers.Value;
 
             StringBuilder sb = new StringBuilder();
-            int firstHunter = LobbyState.RakeOwnerId == 1 ? 2 : 1;
-            for (int i = firstHunter; i <= count; i++)
+
+            if (SteamLobbyManager.InLobby)
             {
-                if (i == LobbyState.RakeOwnerId) continue;
-                if (sb.Length > 0) sb.Append((char)10);
-                sb.Append(i == 1 ? "1. HOST" : (i + ". PLAYER " + i));
+                var steamNames = SteamLobbyManager.GetMemberNames();
+                for (int i = 0; i < steamNames.Count; i++)
+                {
+                    if (sb.Length > 0) sb.Append((char)10);
+                    sb.Append(steamNames[i]);
+                }
+                count = steamNames.Count;
+            }
+            else
+            {
+                int firstHunter = LobbyState.RakeOwnerId == 1 ? 2 : 1;
+                for (int i = firstHunter; i <= count; i++)
+                {
+                    if (i == LobbyState.RakeOwnerId) continue;
+                    if (sb.Length > 0) sb.Append((char)10);
+                    sb.Append(i == 1 ? "1. HOST" : (i + ". PLAYER " + i));
+                }
             }
             if (sb.Length == 0) sb.Append("no hunters");
 
@@ -584,6 +618,142 @@ namespace RakeMultiplayer.UI
             menu.HideAllPanels();
         }
 
+        // ------------------------------------------------------------- steam lobby UI
+
+        public void ShowSteamMain()
+        {
+            HideAllPanels();
+            if (_uiBuilder == null) return;
+
+            if (_uiBuilder.SteamPanel != null) _uiBuilder.SteamPanel.SetActive(true);
+
+            if (SteamLobbyManager.Instance != null)
+            {
+                _uiBuilder.SetSteamStatus(SteamLobbyManager.Instance.SteamStatus,
+                    !SteamIntegration.Initialized);
+            }
+            else
+            {
+                _uiBuilder.SetSteamStatus("Steam unavailable", true);
+            }
+        }
+
+        public void ShowSteamCreate()
+        {
+            HideAllPanels();
+            if (_uiBuilder == null) return;
+
+            if (_uiBuilder.SteamCreatePanel != null) _uiBuilder.SteamCreatePanel.SetActive(true);
+
+            if (_uiBuilder.SteamNameInput != null)
+            {
+                _uiBuilder.SteamNameInput.text = SteamIntegration.PersonaName + "'s Hunt";
+            }
+            if (_uiBuilder.SteamPasswordInput != null) _uiBuilder.SteamPasswordInput.text = "";
+            _uiBuilder.SetSteamCreateStatus("");
+        }
+
+        public void ShowSteamBrowse()
+        {
+            HideAllPanels();
+            if (_uiBuilder == null) return;
+
+            if (_uiBuilder.SteamBrowsePanel != null) _uiBuilder.SteamBrowsePanel.SetActive(true);
+
+            if (SteamLobbyManager.Instance != null) SteamLobbyManager.Instance.RefreshLobbies();
+
+            _steamUiTimer = 0f;
+            UpdateSteamBrowse();
+        }
+
+        public void ShowSteamPassword(SteamLobbyManager.LobbyInfo lobby)
+        {
+            if (lobby == null) return;
+
+            _steamSelectedLobby = lobby;
+            HideAllPanels();
+            if (_uiBuilder == null) return;
+
+            if (_uiBuilder.SteamPasswordPanel != null) _uiBuilder.SteamPasswordPanel.SetActive(true);
+            if (_uiBuilder.SteamJoinPasswordInput != null) _uiBuilder.SteamJoinPasswordInput.text = "";
+            _uiBuilder.SetSteamPasswordLobby(lobby.Name + "  ·  " + lobby.Host);
+            _uiBuilder.SetSteamPasswordStatus("");
+        }
+
+        public void ShowSteamMainNoHide()
+        {
+            if (_uiBuilder == null) return;
+            HideAllPanels();
+            if (_uiBuilder.SteamPanel != null) _uiBuilder.SteamPanel.SetActive(true);
+        }
+
+        public void OnSteamCreate()
+        {
+            if (_uiBuilder == null || SteamLobbyManager.Instance == null) return;
+
+            string name = _uiBuilder.SteamNameInput != null ? _uiBuilder.SteamNameInput.text : "Hunt";
+            string password = _uiBuilder.SteamPasswordInput != null ? _uiBuilder.SteamPasswordInput.text : "";
+
+            SteamLobbyManager.Instance.CreateLobby(name, password, 4);
+            _uiBuilder.SetSteamCreateStatus(SteamLobbyManager.LastError);
+        }
+
+        public void OnSteamRefresh()
+        {
+            if (SteamLobbyManager.Instance == null) return;
+            SteamLobbyManager.Instance.RefreshLobbies();
+            UpdateSteamBrowse();
+        }
+
+        public void OnSteamLobbyClicked(int index)
+        {
+            if (SteamLobbyManager.Instance == null) return;
+            if (index < 0 || index >= SteamLobbyManager.Lobbies.Count) return;
+
+            var lobby = SteamLobbyManager.Lobbies[index];
+            if (lobby.HasPassword)
+            {
+                ShowSteamPassword(lobby);
+                return;
+            }
+
+            SteamLobbyManager.Instance.JoinLobby(lobby, "");
+            if (_uiBuilder != null) _uiBuilder.SetSteamBrowseStatus(SteamLobbyManager.LastError);
+        }
+
+        public void OnSteamJoin()
+        {
+            if (SteamLobbyManager.Instance == null || _steamSelectedLobby == null) return;
+
+            string password = _uiBuilder != null && _uiBuilder.SteamJoinPasswordInput != null
+                ? _uiBuilder.SteamJoinPasswordInput.text
+                : "";
+
+            SteamLobbyManager.Instance.JoinLobby(_steamSelectedLobby, password);
+
+            if (_uiBuilder != null)
+            {
+                _uiBuilder.SetSteamPasswordStatus(SteamLobbyManager.LastError);
+                if (string.IsNullOrEmpty(SteamLobbyManager.LastError)) _uiBuilder.SetSteamPasswordStatus("Joining...");
+            }
+        }
+
+        private void UpdateSteamBrowse()
+        {
+            if (_uiBuilder == null) return;
+            if (_uiBuilder.SteamBrowsePanel == null || !_uiBuilder.SteamBrowsePanel.activeSelf) return;
+
+            _uiBuilder.UpdateSteamRows(SteamLobbyManager.Lobbies);
+
+            string status = SteamLobbyManager.LastError;
+            if (string.IsNullOrEmpty(status))
+            {
+                status = SteamLobbyManager.Lobbies.Count == 0
+                    ? "No lobbies found - create one or press REFRESH"
+                    : SteamLobbyManager.Lobbies.Count + " lobby(ies) - pick one";
+            }
+            _uiBuilder.SetSteamBrowseStatus(status);
+        }
         private string GetLocalIPAddress()
         {
             try

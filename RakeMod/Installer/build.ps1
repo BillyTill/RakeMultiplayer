@@ -28,6 +28,12 @@ foreach ($f in $files) {
     Copy-Item $src $pluginsDst -Force
 }
 
+# Steam (Spacewar app 480): native DLLs + appid next to Rake.exe
+$steamSrc = Join-Path $root "RakeMod\libs\steam\x86"
+Copy-Item (Join-Path $steamSrc "steam_api.dll") $staging -Force
+Copy-Item (Join-Path $steamSrc "CSteamworks.dll") $staging -Force
+[IO.File]::WriteAllText((Join-Path $staging "steam_appid.txt"), "480")
+
 $pak = Join-Path $installer "payload.pak"
 $all = Get-ChildItem $staging -Recurse -File
 

@@ -471,6 +471,63 @@ namespace RakeMultiplayer
                 menu.OnStartGame();
                 return "start: requested";
             });
+            Register("steam", "steam [info|create <name> [password]|list|lobbies|join <n> [password]|leave]",
+                "Steam (Spacewar 480): lobby browser/lifecycle", args =>
+            {
+                var lobby = SteamLobbyManager.Instance;
+                if (lobby == null) return "steam: lobby manager missing";
+                if (!SteamIntegration.Initialized) return "steam: " + SteamIntegration.Status;
+
+                string sub = args.Length > 0 ? args[0].ToLowerInvariant() : "info";
+
+                if (sub == "create")
+                {
+                    string name = args.Length > 1 ? args[1] : SteamIntegration.PersonaName + "'s Hunt";
+                    string pass = args.Length > 2 ? args[2] : "";
+                    lobby.CreateLobby(name, pass, 4);
+                    return "steam: creating '" + name + "'";
+                }
+
+                if (sub == "list")
+                {
+                    lobby.RefreshLobbies();
+                    return "steam: refreshing lobby list";
+                }
+
+                if (sub == "lobbies")
+                {
+                    var sb = new System.Text.StringBuilder();
+                    for (int i = 0; i < SteamLobbyManager.Lobbies.Count; i++)
+                    {
+                        var l = SteamLobbyManager.Lobbies[i];
+                        sb.AppendLine(i + ". " + l.Name + " | " + l.Host + " | " + l.Members + "/" + l.Max +
+                                      (l.HasPassword ? " | locked" : ""));
+                    }
+                    return sb.Length == 0 ? "no lobbies" : sb.ToString();
+                }
+
+                if (sub == "join")
+                {
+                    int index;
+                    if (args.Length < 2 || !int.TryParse(args[1], out index)) return "usage: steam join <n> [password]";
+                    if (index < 0 || index >= SteamLobbyManager.Lobbies.Count) return "steam: no such lobby";
+                    string pass = args.Length > 2 ? args[2] : "";
+                    lobby.JoinLobby(SteamLobbyManager.Lobbies[index], pass);
+                    return "steam: joining lobby " + index;
+                }
+
+                if (sub == "leave")
+                {
+                    lobby.LeaveLobby();
+                    return "steam: left lobby";
+                }
+
+                return lobby.SteamStatus + " | inLobby=" + SteamLobbyManager.InLobby +
+                       " lobby=" + SteamLobbyManager.CurrentLobby +
+                       " owner=" + SteamLobbyManager.LobbyOwner +
+                       " lobbies=" + SteamLobbyManager.Lobbies.Count +
+                       (string.IsNullOrEmpty(SteamLobbyManager.LastError) ? "" : " | " + SteamLobbyManager.LastError);
+            });
             Register("cams", "cams", "Open/close the camera monitor from anywhere (same as Tab)", args =>
             {
                 if (RakePlayerController.IsActive) return "cams: not while playing the Rake";

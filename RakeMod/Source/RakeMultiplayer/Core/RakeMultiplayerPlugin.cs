@@ -169,6 +169,16 @@ namespace RakeMultiplayer
             cameraViewObj.AddComponent<CameraViewHotkey>();
             Log.LogInfo("[RakeMultiplayer] Camera view hotkey created (Tab)");
 
+            // Steam (Spacewar app 480) - optional; LAN keeps working without it.
+            var steamObj = new UnityEngine.GameObject("SteamIntegration");
+            UnityEngine.Object.DontDestroyOnLoad(steamObj);
+            steamObj.AddComponent<SteamIntegration>();
+            Log.LogInfo("[RakeMultiplayer] Steam integration created");
+
+            var steamLobbyObj = new UnityEngine.GameObject("SteamLobbyManager");
+            UnityEngine.Object.DontDestroyOnLoad(steamLobbyObj);
+            steamLobbyObj.AddComponent<SteamLobbyManager>();
+
             // InitializeNetworking() УБРАН — сеть только через UI
             // Если Enabled = false, сеть не стартует, но патчи применены (F1 работает)
 

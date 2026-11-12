@@ -31,6 +31,22 @@ namespace RakeMultiplayer.UI
         private GameObject _settingsPanel;
         private GameObject _joinGamePanel;
 
+        private GameObject _steamPanel;
+        private GameObject _steamCreatePanel;
+        private GameObject _steamBrowsePanel;
+        private GameObject _steamPasswordPanel;
+
+        private Text _steamMainStatus;
+        private Text _steamCreateStatus;
+        private Text _steamBrowseStatus;
+        private Text _steamPasswordStatus;
+        private Text _steamPasswordTitle;
+        private InputField _steamNameInput;
+        private InputField _steamPasswordInput;
+        private InputField _steamJoinPasswordInput;
+        private readonly Button[] _steamRows = new Button[6];
+        private readonly Text[] _steamRowTexts = new Text[6];
+
         private InputField _ipInputField;
         private InputField _portInputField;
         private InputField _playerNameInputField;
@@ -110,6 +126,7 @@ namespace RakeMultiplayer.UI
             BuildJoinPanel();
             BuildLobbyPanel();
             BuildSettingsPanel();
+            BuildSteamPanels();
 
             _menu.SetMainContainer(_mainContainer);
         }
@@ -150,7 +167,7 @@ namespace RakeMultiplayer.UI
             CreateSeparator(_multiplayerPanel.transform, 214f, 440f);
 
             CreateButton(_multiplayerPanel.transform, "LANBtn", "LAN / DIRECT IP", new Vector2(380, 52), new Vector2(0, 120), OnLANClicked);
-            CreateButton(_multiplayerPanel.transform, "OnlineBtn", "STEAM P2P (SOON)", new Vector2(380, 52), new Vector2(0, 58), OnOnlineClicked, ColPanelLight);
+            CreateButton(_multiplayerPanel.transform, "OnlineBtn", "STEAM LOBBY", new Vector2(380, 52), new Vector2(0, 58), OnOnlineClicked, ColPanelLight);
             CreateButton(_multiplayerPanel.transform, "BackToMainBtn", "BACK", new Vector2(380, 46), new Vector2(0, -60), OnBackToMainClicked, ColPanelLight);
 
             CreateText(_multiplayerPanel.transform, "Hint", "Radmin VPN / Hamachi work too: enter the host's VPN IP.",
@@ -255,6 +272,176 @@ namespace RakeMultiplayer.UI
             CreateButton(_settingsPanel.transform, "SettingsBackBtn", "BACK", new Vector2(380, 46), new Vector2(0, -100), OnBackToMultiplayerClicked, ColPanelLight);
         }
 
+        // ------------------------------------------------------------- steam panels
+
+        private void BuildSteamPanels()
+        {
+            // main
+            _steamPanel = CreatePanel(_mainContainer.transform, "SteamPanel", Vector2.zero, Vector2.zero,
+                Vector2.zero, Vector2.one);
+            _steamPanel.GetComponent<Image>().color = new Color(0f, 0f, 0f, 0f);
+            _steamPanel.SetActive(false);
+
+            CreateTitle(_steamPanel.transform, "STEAM", 30, new Vector2(0, 250));
+            _steamMainStatus = CreateText(_steamPanel.transform, "SteamStatus", "Steam ready", 12,
+                new Vector2(0, 210), ColMuted, TextAnchor.MiddleCenter, 460);
+            CreateSeparator(_steamPanel.transform, 184f, 440f);
+
+            CreateButton(_steamPanel.transform, "SteamCreateBtn", "CREATE LOBBY", new Vector2(380, 52),
+                new Vector2(0, 110), OnSteamCreateClicked);
+            CreateButton(_steamPanel.transform, "SteamBrowseBtn", "BROWSE LOBBIES", new Vector2(380, 52),
+                new Vector2(0, 48), OnSteamBrowseClicked);
+            CreateButton(_steamPanel.transform, "SteamBackBtn", "BACK", new Vector2(380, 46),
+                new Vector2(0, -40), OnBackToMultiplayerClicked, ColPanelLight);
+
+            CreateText(_steamPanel.transform, "SteamHint", "Spacewar app 480 · Steam must be running", 11,
+                new Vector2(0, -150), ColMuted, TextAnchor.MiddleCenter, 460);
+
+            // create
+            _steamCreatePanel = CreatePanel(_mainContainer.transform, "SteamCreatePanel", Vector2.zero, Vector2.zero,
+                Vector2.zero, Vector2.one);
+            _steamCreatePanel.GetComponent<Image>().color = new Color(0f, 0f, 0f, 0f);
+            _steamCreatePanel.SetActive(false);
+
+            CreateTitle(_steamCreatePanel.transform, "CREATE LOBBY", 30, new Vector2(0, 250));
+            CreateSeparator(_steamCreatePanel.transform, 214f, 440f);
+
+            CreateText(_steamCreatePanel.transform, "SteamNameLabel", "LOBBY NAME", 12, new Vector2(0, 160),
+                ColMuted, TextAnchor.MiddleLeft, 380);
+            _steamNameInput = CreateInputField(_steamCreatePanel.transform, "SteamNameInput", "Night Hunt",
+                "Night Hunt", new Vector2(380, 44), new Vector2(0, 128));
+
+            CreateText(_steamCreatePanel.transform, "SteamPassLabel", "PASSWORD (OPTIONAL)", 12,
+                new Vector2(0, 86), ColMuted, TextAnchor.MiddleLeft, 380);
+            _steamPasswordInput = CreateInputField(_steamCreatePanel.transform, "SteamPassInput", "empty = public",
+                "", new Vector2(380, 44), new Vector2(0, 54));
+
+            CreateText(_steamCreatePanel.transform, "SteamSlots", "SLOTS: 4 (1 Rake + 3 hunters)", 12,
+                new Vector2(0, 12), ColMuted, TextAnchor.MiddleCenter, 440);
+
+            CreateButton(_steamCreatePanel.transform, "SteamCreateOk", "CREATE", new Vector2(380, 52),
+                new Vector2(0, -40), OnSteamCreateConfirmed);
+            CreateButton(_steamCreatePanel.transform, "SteamCreateBack", "BACK", new Vector2(380, 46),
+                new Vector2(0, -102), OnSteamBackClicked, ColPanelLight);
+
+            _steamCreateStatus = CreateText(_steamCreatePanel.transform, "SteamCreateStatus", "", 12,
+                new Vector2(0, -166), ColBad, TextAnchor.MiddleCenter, 460);
+
+            // browse
+            _steamBrowsePanel = CreatePanel(_mainContainer.transform, "SteamBrowsePanel", Vector2.zero, Vector2.zero,
+                Vector2.zero, Vector2.one);
+            _steamBrowsePanel.GetComponent<Image>().color = new Color(0f, 0f, 0f, 0f);
+            _steamBrowsePanel.SetActive(false);
+
+            CreateTitle(_steamBrowsePanel.transform, "LOBBIES", 30, new Vector2(0, 250));
+            _steamBrowseStatus = CreateText(_steamBrowsePanel.transform, "SteamBrowseStatus", "", 12,
+                new Vector2(0, 214), ColMuted, TextAnchor.MiddleCenter, 460);
+            CreateSeparator(_steamBrowsePanel.transform, 190f, 460f);
+
+            for (int i = 0; i < 6; i++)
+            {
+                int index = i;
+                var row = CreateButton(_steamBrowsePanel.transform, "SteamRow" + i, "", new Vector2(460, 38),
+                    new Vector2(0, 140 - i * 44), () => OnSteamRowClicked(index), ColPanelLight);
+                _steamRows[i] = row;
+                _steamRowTexts[i] = row.GetComponentInChildren<Text>();
+                row.gameObject.SetActive(false);
+            }
+
+            CreateButton(_steamBrowsePanel.transform, "SteamRefresh", "REFRESH", new Vector2(220, 42),
+                new Vector2(-118, -164), OnSteamRefreshClicked);
+            CreateButton(_steamBrowsePanel.transform, "SteamBrowseBack", "BACK", new Vector2(220, 42),
+                new Vector2(118, -164), OnSteamBackClicked, ColPanelLight);
+
+            // password
+            _steamPasswordPanel = CreatePanel(_mainContainer.transform, "SteamPasswordPanel", Vector2.zero, Vector2.zero,
+                Vector2.zero, Vector2.one);
+            _steamPasswordPanel.GetComponent<Image>().color = new Color(0f, 0f, 0f, 0f);
+            _steamPasswordPanel.SetActive(false);
+
+            CreateTitle(_steamPasswordPanel.transform, "JOIN LOBBY", 30, new Vector2(0, 250));
+            _steamPasswordTitle = CreateText(_steamPasswordPanel.transform, "SteamJoinTitle", "", 13,
+                new Vector2(0, 210), ColAccent, TextAnchor.MiddleCenter, 460);
+            CreateSeparator(_steamPasswordPanel.transform, 184f, 440f);
+
+            CreateText(_steamPasswordPanel.transform, "SteamJoinPassLabel", "PASSWORD", 12, new Vector2(0, 140),
+                ColMuted, TextAnchor.MiddleLeft, 380);
+            _steamJoinPasswordInput = CreateInputField(_steamPasswordPanel.transform, "SteamJoinPassInput",
+                "lobby password", "", new Vector2(380, 44), new Vector2(0, 108));
+
+            CreateButton(_steamPasswordPanel.transform, "SteamJoinOk", "JOIN", new Vector2(380, 52),
+                new Vector2(0, 28), OnSteamJoinConfirmed);
+            CreateButton(_steamPasswordPanel.transform, "SteamJoinBack", "BACK", new Vector2(380, 46),
+                new Vector2(0, -34), OnSteamRowBackClicked, ColPanelLight);
+
+            _steamPasswordStatus = CreateText(_steamPasswordPanel.transform, "SteamJoinStatus", "", 12,
+                new Vector2(0, -120), ColBad, TextAnchor.MiddleCenter, 460);
+        }
+
+        // -------------------------------------------------- steam callbacks
+
+        private void OnSteamCreateClicked() { if (_menu != null) _menu.ShowSteamCreate(); }
+        private void OnSteamBrowseClicked() { if (_menu != null) _menu.ShowSteamBrowse(); }
+        private void OnSteamBackClicked() { if (_menu != null) _menu.ShowSteamMain(); }
+        private void OnSteamCreateConfirmed() { if (_menu != null) _menu.OnSteamCreate(); }
+        private void OnSteamRefreshClicked() { if (_menu != null) _menu.OnSteamRefresh(); }
+        private void OnSteamJoinConfirmed() { if (_menu != null) _menu.OnSteamJoin(); }
+        private void OnSteamRowBackClicked() { if (_menu != null) _menu.ShowSteamBrowse(); }
+        private void OnSteamRowClicked(int index) { if (_menu != null) _menu.OnSteamLobbyClicked(index); }
+
+        // -------------------------------------------------- steam accessors
+
+        public GameObject SteamPanel { get { return _steamPanel; } }
+        public GameObject SteamCreatePanel { get { return _steamCreatePanel; } }
+        public GameObject SteamBrowsePanel { get { return _steamBrowsePanel; } }
+        public GameObject SteamPasswordPanel { get { return _steamPasswordPanel; } }
+        public InputField SteamNameInput { get { return _steamNameInput; } }
+        public InputField SteamPasswordInput { get { return _steamPasswordInput; } }
+        public InputField SteamJoinPasswordInput { get { return _steamJoinPasswordInput; } }
+
+        public void SetSteamStatus(string text, bool error = false)
+        {
+            if (_steamMainStatus != null)
+            {
+                _steamMainStatus.text = text;
+                _steamMainStatus.color = error ? ColBad : ColMuted;
+            }
+        }
+
+        public void SetSteamCreateStatus(string text)
+        {
+            if (_steamCreateStatus != null) _steamCreateStatus.text = text;
+        }
+
+        public void SetSteamBrowseStatus(string text)
+        {
+            if (_steamBrowseStatus != null) _steamBrowseStatus.text = text;
+        }
+
+        public void SetSteamPasswordStatus(string text)
+        {
+            if (_steamPasswordStatus != null) _steamPasswordStatus.text = text;
+        }
+
+        public void SetSteamPasswordLobby(string text)
+        {
+            if (_steamPasswordTitle != null) _steamPasswordTitle.text = text;
+        }
+
+        public void UpdateSteamRows(System.Collections.Generic.List<SteamLobbyManager.LobbyInfo> lobbies)
+        {
+            for (int i = 0; i < _steamRows.Length; i++)
+            {
+                bool has = i < lobbies.Count;
+                _steamRows[i].gameObject.SetActive(has);
+                if (!has) continue;
+
+                var info = lobbies[i];
+                string lockIcon = info.HasPassword ? "  [LOCK]" : "";
+                _steamRowTexts[i].text = info.Name + "   " + info.Host + "   " +
+                                         info.Members + "/" + info.Max + lockIcon;
+            }
+        }
         // --------------------------------------------------------------- callbacks
 
         private void OnHostGameClicked() { if (_menu != null) _menu.OnHostGame(); }

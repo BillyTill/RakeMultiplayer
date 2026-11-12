@@ -42,14 +42,14 @@ namespace RakeMultiplayer
         public string gameScene = "GameScene";
 
         // Server state
-        private Telepathy.Server _server;
+        private INetServer _server;
         private Dictionary<int, PlayerStatePacket> _playerStates = new Dictionary<int, PlayerStatePacket>();
         private HashSet<int> _connectedClients = new HashSet<int>();
         private Vector3 _hostSpawnPosition = Vector3.zero;
         private bool _hostSpawnPositionSet = false;
 
         // Client state
-        private Telepathy.Client _client;
+        private INetClient _client;
 
         // Client-side known players (for UI player count)
         private HashSet<int> _knownPlayerIds = new HashSet<int>();
@@ -144,8 +144,7 @@ namespace RakeMultiplayer
             RakeMultiplayerPlugin.IsServer.Value = true;
             RakeMultiplayerPlugin.isServer = true; // <--- КРИТИЧЕСКИЙ ФИКС
 
-            _server = new Telepathy.Server();
-            _server.NoDelay = true;
+            _server = TransportFactory.CreateServer();
 
             if (_server.Start(RakeMultiplayerPlugin.NetworkPort.Value))
             {
@@ -179,8 +178,7 @@ namespace RakeMultiplayer
 
             if (_client != null) Disconnect();
 
-            _client = new Telepathy.Client();
-            _client.NoDelay = true;
+            _client = TransportFactory.CreateClient();
 
             try
             {
@@ -301,23 +299,23 @@ namespace RakeMultiplayer
 
         private void ProcessServerMessages()
         {
-            Telepathy.Message msg;
+            NetMessage msg;
             while (_server.GetNextMessage(out msg))
             {
-                switch (msg.eventType)
+                switch (msg.EventType)
                 {
-                    case Telepathy.EventType.Connected:
-                        RakeMultiplayerPlugin.Log?.LogInfo($"[Net] Server: client {msg.connectionId} connected");
-                        OnServerClientConnected(msg.connectionId);
+                    case NetEventType.Connected:
+                        RakeMultiplayerPlugin.Log?.LogInfo($"[Net] Server: client {msg.ConnectionId} connected");
+                        OnServerClientConnected(msg.ConnectionId);
                         break;
-                    case Telepathy.EventType.Data:
-                        OnServerDataReceived(msg.connectionId, msg.data);
+                    case NetEventType.Data:
+                        OnServerDataReceived(msg.ConnectionId, msg.Data);
                         break;
-                    case Telepathy.EventType.Disconnected:
-                        RakeMultiplayerPlugin.Log?.LogInfo($"[Net] Server: client {msg.connectionId} disconnected");
-                        _connectedClients.Remove(msg.connectionId);
-                        _playerStates.Remove(msg.connectionId);
-                        OnServerClientDisconnected(msg.connectionId);
+                    case NetEventType.Disconnected:
+                        RakeMultiplayerPlugin.Log?.LogInfo($"[Net] Server: client {msg.ConnectionId} disconnected");
+                        _connectedClients.Remove(msg.ConnectionId);
+                        _playerStates.Remove(msg.ConnectionId);
+                        OnServerClientDisconnected(msg.ConnectionId);
                         break;
                 }
             }
@@ -325,19 +323,19 @@ namespace RakeMultiplayer
 
         private void ProcessClientMessages()
         {
-            Telepathy.Message msg;
+            NetMessage msg;
             while (_client.GetNextMessage(out msg))
             {
-                switch (msg.eventType)
+                switch (msg.EventType)
                 {
-                    case Telepathy.EventType.Connected:
+                    case NetEventType.Connected:
                         RakeMultiplayerPlugin.Log?.LogInfo("[Net] Client: connected to server");
                         RakeMultiplayerPlugin.isConnected = true;
                         break;
-                    case Telepathy.EventType.Data:
-                        OnClientDataReceived(msg.data);
+                    case NetEventType.Data:
+                        OnClientDataReceived(msg.Data);
                         break;
-                    case Telepathy.EventType.Disconnected:
+                    case NetEventType.Disconnected:
                         RakeMultiplayerPlugin.Log?.LogWarning("[Net] Client: disconnected from server");
                         RakeMultiplayerPlugin.isConnected = false;
                         break;
