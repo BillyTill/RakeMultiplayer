@@ -59,6 +59,12 @@ namespace RakeMultiplayer.UI
                 WeaponDiagnostics.Dump("F8 pressed");
             }
 
+            // Dump the local player prefab hierarchy (third-person model availability)
+            if (Input.GetKeyDown(KeyCode.F9))
+            {
+                PlayerHierarchyDiagnostics.Dump("F9 pressed");
+            }
+
             // Ждем подключения клиента перед показом лобби
             if (_waitingForConnection)
             {
