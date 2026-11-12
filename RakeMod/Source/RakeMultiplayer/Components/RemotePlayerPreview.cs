@@ -39,6 +39,16 @@ namespace RakeMultiplayer
             RakeMultiplayerPlugin.Log?.LogInfo("[Preview] clip=" + clip + " (F10 = next, F11 = remove)");
         }
 
+        /// <summary>Force a clip on the existing preview. Returns false when there is none.</summary>
+        public static bool PlayClip(string clipName)
+        {
+            if (_model == null || string.IsNullOrEmpty(clipName)) return false;
+            if (RemotePlayerModelData.GetClip(clipName) == null) return false;
+            _model.PlayClip(clipName, 1f);
+            _index = -1;
+            return true;
+        }
+
         public static void Remove()
         {
             if (_root != null) UnityEngine.Object.Destroy(_root);

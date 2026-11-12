@@ -65,6 +65,18 @@ namespace RakeMultiplayer
             Application.runInBackground = RunInBackground.Value;
             Log.LogInfo($"[Multiplayer] runInBackground = {Application.runInBackground}");
 
+            // In-game debug console (toggle with the backquote key)
+            try
+            {
+                var consoleGo = new GameObject("RakeDebugConsole");
+                UnityEngine.Object.DontDestroyOnLoad(consoleGo);
+                consoleGo.AddComponent<DebugConsole>();
+            }
+            catch (Exception ex)
+            {
+                Log.LogWarning("[Multiplayer] debug console failed: " + ex.Message);
+            }
+
             // Initialize Harmony — ВСЕГДА (для F1 меню)
             // Diagnostic: verify that every type in this assembly can be loaded by the
             // game's Mono runtime (mismatched mscorlib/System.Core versions show up here).
