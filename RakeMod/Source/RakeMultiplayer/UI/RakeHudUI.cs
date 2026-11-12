@@ -89,7 +89,18 @@ namespace RakeMultiplayer.UI
 
             var hud = go.AddComponent<RakeHudUI>();
             hud._owner = owner;
-            hud.Build();
+
+            try
+            {
+                hud.Build();
+            }
+            catch (Exception ex)
+            {
+                RakeMultiplayerPlugin.Log?.LogError("[HUD] failed to build the Rake HUD: " + ex);
+                UnityEngine.Object.Destroy(go);
+                return null;
+            }
+
             return hud;
         }
 
@@ -346,6 +357,12 @@ namespace RakeMultiplayer.UI
             _dayPill = NewPill(root, "DayPill", 260f, new Vector2(-(BandRadiusX - 30f), -110f), false, DayAccent);
             _dayText = _dayPill.GetComponentInChildren<Text>();
             _dayText.text = "ATTACKS DISABLED";
+
+            // Everything is wired; hide until the state actually happens.
+            _preyPill.SetActive(false);
+            _statePill.SetActive(false);
+            _lockPill.SetActive(false);
+            _dayPill.SetActive(false);
         }
 
         private GameObject NewPill(RectTransform root, string name, float width, Vector2 pos, bool leftAligned, Color notch)
@@ -374,7 +391,6 @@ namespace RakeMultiplayer.UI
             lrt.offsetMin = leftAligned ? new Vector2(14f, 0f) : new Vector2(6f, 0f);
             lrt.offsetMax = leftAligned ? new Vector2(-6f, 0f) : new Vector2(-14f, 0f);
 
-            bg.gameObject.SetActive(false);
             return bg.gameObject;
         }
 
@@ -498,6 +514,8 @@ namespace RakeMultiplayer.UI
 
         private void RefreshTexts()
         {
+            if (_phaseKicker == null || _phaseTitle == null || _hpValue == null) return;
+
             // ---- health
             float hp = _owner.Health;
             float max = Mathf.Max(1f, _owner.MaxHealth);
@@ -564,6 +582,9 @@ namespace RakeMultiplayer.UI
 
         private void SetCard(int index, float remaining, float total)
         {
+            if (index < 0 || index >= _sweeps.Length) return;
+            if (_sweeps[index] == null || _cardStates[index] == null || _cardNames[index] == null) return;
+
             bool ready = remaining <= 0.01f;
             _sweeps[index].gameObject.SetActive(!ready);
             if (!ready)
