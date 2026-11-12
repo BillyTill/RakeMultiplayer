@@ -618,10 +618,18 @@ namespace RakeMultiplayer
                 FaceTarget(lookDir, 15f);
             }
 
-            // Attack logic - delegate to Enemy_AI using cached reflection
-            if (enemyAI != null && enemyAttackMethod != null)
+            // Enemy_AI has no Attack() method - the attack is the "bAttack" animator
+            // flag. Stop the agent and freeze the walk so the animation plays in place.
+            var attackAgent = GetEnemyAgent();
+            if (attackAgent != null && attackAgent.isOnNavMesh)
             {
-                enemyAttackMethod.Invoke(enemyAI, null);
+                attackAgent.Stop();
+            }
+
+            if (animator != null)
+            {
+                animator.SetFloat("Speed", 0f);
+                animator.SetBool("bAttack", true);
             }
 
             // Attack -> Chase: target escaped (moved out of range)
@@ -911,6 +919,12 @@ namespace RakeMultiplayer
                         blockingEndTime = Time.time + UnityEngine.Random.Range(blockingDurationMin, blockingDurationMax);
                     }
                     break;
+            }
+
+            // The vanilla attack animation is the bAttack flag, not a method call.
+            if (animator != null)
+            {
+                animator.SetBool("bAttack", newState == RakeState.Attack);
             }
 
             RakeMultiplayerPlugin.Log?.LogInfo($"[AI] State transition: {previousState} -> {currentState}");
