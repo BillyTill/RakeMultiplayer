@@ -1558,22 +1558,42 @@ namespace RakeMultiplayer
         /// vanilla damage effects (pain sound, blood, death) and the ragdoll hit reaction
         /// run exactly as they do on the host.
         /// </summary>
+        /// <summary>
+        /// A Rake hit on a player. The victim applies the damage locally (vanilla effects +
+        /// ragdoll hit reaction); everyone else just sees the victim's body fly.
+        /// </summary>
         private void HandleClientPlayerDamaged(PlayerDamagedPacket packet)
         {
             var spawner = PlayerSpawner.Instance;
-            var local = spawner != null ? spawner.LocalPlayer : null;
-            if (local == null) return;
-            if (local.PlayerId != packet.PlayerId) return;
+            if (spawner == null) return;
 
-            var fps = local.GetComponent<FPSController>();
-            if (fps == null)
+            var local = spawner.LocalPlayer;
+
+            if (local != null && local.PlayerId == packet.PlayerId)
             {
-                RakeMultiplayerPlugin.Log?.LogWarning("[AI] PlayerDamaged: no FPSController on the local player");
+                var fps = local.GetComponent<FPSController>();
+                if (fps == null)
+                {
+                    RakeMultiplayerPlugin.Log?.LogWarning("[AI] PlayerDamaged: no FPSController on the local player");
+                    return;
+                }
+
+                RakeMultiplayerPlugin.Log?.LogInfo($"[AI] Rake hit us for {packet.Amount} ({packet.DamageType})");
+                fps.TakeDamage(packet.Amount, packet.DamageType);
                 return;
             }
 
-            RakeMultiplayerPlugin.Log?.LogInfo($"[AI] Rake hit us for {packet.Amount} ({packet.DamageType})");
-            fps.TakeDamage(packet.Amount, packet.DamageType);
+            // Someone else got hit - show their body flying
+            NetworkedPlayer victim;
+            if (!spawner.TryGetRemotePlayer(packet.PlayerId, out victim) || victim == null) return;
+
+            Vector3 away = victim.transform.position - packet.SourcePosition;
+            away.y = 0f;
+
+            if (PlayerRagdoll.TriggerRemote(victim.transform, away))
+            {
+                RakeMultiplayerPlugin.Log?.LogInfo("[Ragdoll] Showing remote hit for player " + packet.PlayerId);
+            }
         }
 
         private void HandleClientDamageApplied(DamageAppliedPacket packet)

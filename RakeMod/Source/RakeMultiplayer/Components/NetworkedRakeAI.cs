@@ -686,11 +686,17 @@ namespace RakeMultiplayer
                 SourcePosition = transform.position
             };
 
-            bool sent = RakeNetworkManager.Instance != null &&
-                        RakeNetworkManager.Instance.SendToPlayer(net.PlayerId, packet.Serialize());
+            // Broadcast so every client can show the victim's ragdoll; only the victim
+            // applies the damage (each client checks its own PlayerId).
+            RakeNetworkManager.Instance?.ServerBroadcast(packet.Serialize());
+
+            // The host renders the remote victim itself: it never receives its own broadcast
+            Vector3 away = victim.position - transform.position;
+            away.y = 0f;
+            PlayerRagdoll.TriggerRemote(victim, away);
 
             RakeMultiplayerPlugin.Log?.LogInfo("[AI] Rake hit player " + net.PlayerId +
-                                              " for " + AttackDamage + " (sent=" + sent + ")");
+                                              " for " + AttackDamage);
         }
 
         private void UpdateBlocking()

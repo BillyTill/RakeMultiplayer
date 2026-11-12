@@ -5,10 +5,14 @@ using UnityEngine;
 namespace RakeMultiplayer
 {
     /// <summary>
-    /// Hit reaction: spawns a physics ragdoll of the player body, throws it away from the
-    /// hit, and keeps the camera attached to the ragdoll's head so the hit is felt in
-    /// first person while the body tumbles. Restores first person after a couple of
-    /// seconds. Purely visual - the real player never moves.
+    /// Hit reaction ragdoll of the player body.
+    ///
+    /// Local mode (the victim): builds the ragdoll, throws it away from the hit and keeps
+    /// the first-person camera attached to the ragdoll's head so the hit is felt while the
+    /// body tumbles. Restores first person after a couple of seconds.
+    ///
+    /// Remote mode (other players watching): same ragdoll, no camera, and the victim's
+    /// normal remote body is hidden while the ragdoll is visible.
     ///
     /// The ragdoll is built at runtime from the baked body model: every major bone gets a
     /// Rigidbody, a CapsuleCollider and a CharacterJoint to its nearest physics parent.
@@ -27,9 +31,10 @@ namespace RakeMultiplayer
         /// <summary>Random spin applied to the pelvis.</summary>
         public static float LaunchSpin = 5.0f;
 
-        private static PlayerRagdoll _instance;
+        // Only the local (victim) ragdoll is tracked here; remote ones are independent.
+        private static PlayerRagdoll _localInstance;
 
-        public static bool IsActive { get { return _instance != null; } }
+        public static bool IsActive { get { return _localInstance != null; } }
 
         // Bones that get physics. Fingers/toes stay as kinematic children.
         private static readonly string[] PhysicsBones =
@@ -45,26 +50,22 @@ namespace RakeMultiplayer
         private Transform[] _nodes;
         private Transform _pelvis;
         private Transform _head;
-
-        // Camera attachment, computed once from the initial pose
-        private Vector3 _headLocalEye;
-        private Quaternion _headRotationOffset;
+        private Transform _headAnchor;
 
         private Camera _camera;
         private Camera _originalCamera;
         private readonly List<Camera> _disabledCameras = new List<Camera>();
+        private readonly List<Renderer> _hiddenRenderers = new List<Renderer>();
         private CharacterController _controller;
 
+        private bool _isLocal;
         private float _timer;
         private bool _restored;
 
-        /// <summary>
-        /// Start the reaction. <paramref name="awayFromHit"/> is the horizontal direction the
-        /// body should fly towards (usually away from the Rake).
-        /// </summary>
+        /// <summary>Local player hit: ragdoll + head camera.</summary>
         public static bool Trigger(Vector3 awayFromHit)
         {
-            if (_instance != null) return false;
+            if (_localInstance != null) return false;
             if (!RemotePlayerModelData.EnsureLoaded()) return false;
 
             var spawner = PlayerSpawner.Instance;
@@ -73,7 +74,26 @@ namespace RakeMultiplayer
 
             var go = new GameObject("RakePlayerRagdoll");
             var ragdoll = go.AddComponent<PlayerRagdoll>();
-            if (!ragdoll.Build(local.transform))
+            if (!ragdoll.BuildInternal(local.transform, true))
+            {
+                UnityEngine.Object.Destroy(go);
+                return false;
+            }
+
+            ragdoll.Launch(awayFromHit);
+            _localInstance = ragdoll;
+            return true;
+        }
+
+        /// <summary>Another player got hit: show their body flying (no camera).</summary>
+        public static bool TriggerRemote(Transform remotePlayer, Vector3 awayFromHit)
+        {
+            if (remotePlayer == null) return false;
+            if (!RemotePlayerModelData.EnsureLoaded()) return false;
+
+            var go = new GameObject("RakeRemoteRagdoll");
+            var ragdoll = go.AddComponent<PlayerRagdoll>();
+            if (!ragdoll.BuildInternal(remotePlayer, false))
             {
                 UnityEngine.Object.Destroy(go);
                 return false;
@@ -83,11 +103,12 @@ namespace RakeMultiplayer
             return true;
         }
 
-        private bool Build(Transform player)
+        private bool BuildInternal(Transform player, bool local)
         {
             var data = RemotePlayerModelData.Nodes;
             if (data == null || data.Length == 0) return false;
 
+            _isLocal = local;
             _controller = player.GetComponent<CharacterController>();
 
             // Place the body's feet where the player's feet are
@@ -152,21 +173,20 @@ namespace RakeMultiplayer
             // Start from the idle pose instead of the stiff bind pose
             ApplyIdlePose();
 
-            // Camera sits at the head; remember where relative to that bone
-            CaptureHeadAttachment();
-
-            // ---- physics ----
             if (!AddPhysics()) return false;
 
-            // ---- cameras ----
-            DisablePlayerCameras(player);
-            CreateCamera();
+            if (local)
+            {
+                AttachHeadCamera();
+                DisablePlayerCameras(player);
+                PlayerInputLock.SetRagdoll(true);
+                if (_controller != null) _controller.enabled = false;
+            }
+            else
+            {
+                HideRenderers(player);
+            }
 
-            // Freeze the player while the body is flying
-            PlayerInputLock.SetRagdoll(true);
-            if (_controller != null) _controller.enabled = false;
-
-            _instance = this;
             return true;
         }
 
@@ -189,17 +209,96 @@ namespace RakeMultiplayer
             }
         }
 
+        // ---------------------------------------------------------------- camera
+
         /// <summary>
-        /// Compute the eye position in head-bone space and the rotation offset that maps the
-        /// head bone's orientation to the body's forward, so the camera looks where the
-        /// character looks no matter how the head bone is oriented in the rig.
+        /// Parent the camera to the head bone through an anchor placed at eye height, so the
+        /// position is exact by construction (no per-frame maths, no drift, no offset).
         /// </summary>
-        private void CaptureHeadAttachment()
+        private void AttachHeadCamera()
         {
-            Vector3 eyeWorld = _head.position + transform.forward * 0.09f + Vector3.up * 0.05f;
-            _headLocalEye = _head.InverseTransformPoint(eyeWorld);
-            _headRotationOffset = Quaternion.Inverse(_head.rotation) * transform.rotation;
+            var headNub = FindNode("Bip01 HeadNub");
+
+            Vector3 headPos = _head.position;
+            Vector3 crown = headNub != null ? headNub.position : headPos + Vector3.up * 0.15f;
+            Vector3 up = crown - headPos;
+            float skull = up.magnitude;
+            if (skull < 0.01f) { up = Vector3.up; skull = 0.15f; }
+            else up /= skull;
+
+            Vector3 eyeWorld = headPos + up * (skull * 0.55f) + transform.forward * (skull * 0.35f);
+
+            var anchor = new GameObject("RagdollHeadAnchor").transform;
+            anchor.SetParent(_head, false);
+            anchor.position = eyeWorld;
+            anchor.rotation = transform.rotation; // body forward; follows the head from now on
+            _headAnchor = anchor;
+
+            var go = new GameObject("RagdollHeadCamera");
+            go.transform.SetParent(anchor, false);
+            go.transform.localPosition = Vector3.zero;
+            go.transform.localRotation = Quaternion.identity;
+
+            _camera = go.AddComponent<Camera>();
+            if (_originalCamera != null)
+            {
+                _camera.CopyFrom(_originalCamera);
+                _camera.depth = _originalCamera.depth + 1f;
+            }
+            _camera.nearClipPlane = 0.03f;
+            _camera.enabled = true;
         }
+
+        private void DisablePlayerCameras(Transform player)
+        {
+            _disabledCameras.Clear();
+
+            var cameras = player.GetComponentsInChildren<Camera>();
+            for (int i = 0; i < cameras.Length; i++)
+            {
+                var cam = cameras[i];
+                if (cam == null || !cam.enabled) continue;
+                if (_originalCamera == null) _originalCamera = cam;
+                cam.enabled = false;
+                _disabledCameras.Add(cam);
+            }
+
+            if (_originalCamera == null) _originalCamera = Camera.main;
+        }
+
+        private void RestorePlayerCameras()
+        {
+            for (int i = 0; i < _disabledCameras.Count; i++)
+            {
+                if (_disabledCameras[i] != null) _disabledCameras[i].enabled = true;
+            }
+            _disabledCameras.Clear();
+        }
+
+        private void HideRenderers(Transform player)
+        {
+            _hiddenRenderers.Clear();
+
+            var renderers = player.GetComponentsInChildren<Renderer>(true);
+            for (int i = 0; i < renderers.Length; i++)
+            {
+                var r = renderers[i];
+                if (r == null || !r.enabled) continue;
+                r.enabled = false;
+                _hiddenRenderers.Add(r);
+            }
+        }
+
+        private void RestoreRenderers()
+        {
+            for (int i = 0; i < _hiddenRenderers.Count; i++)
+            {
+                if (_hiddenRenderers[i] != null) _hiddenRenderers[i].enabled = true;
+            }
+            _hiddenRenderers.Clear();
+        }
+
+        // ---------------------------------------------------------------- physics
 
         private bool AddPhysics()
         {
@@ -350,19 +449,12 @@ namespace RakeMultiplayer
                 pelvisBody.AddTorque(UnityEngine.Random.insideUnitSphere * LaunchSpin, ForceMode.VelocityChange);
             }
 
-            RakeMultiplayerPlugin.Log?.LogInfo("[Ragdoll] Hit reaction started (dir=" + dir.ToString("F2") + ")");
+            RakeMultiplayerPlugin.Log?.LogInfo("[Ragdoll] " + (_isLocal ? "local" : "remote") +
+                                               " reaction started (dir=" + dir.ToString("F2") + ")");
         }
 
         private void LateUpdate()
         {
-            // First-person view from the ragdoll's head: it tumbles with the body so the
-            // hit is felt, and the world spins around the player.
-            if (_camera != null && _head != null)
-            {
-                _camera.transform.position = _head.TransformPoint(_headLocalEye);
-                _camera.transform.rotation = _head.rotation * _headRotationOffset;
-            }
-
             _timer += Time.deltaTime;
             if (_timer >= Duration && !_restored) Restore();
         }
@@ -370,74 +462,28 @@ namespace RakeMultiplayer
         private void Restore()
         {
             _restored = true;
-            _instance = null;
 
-            RestorePlayerCameras();
+            if (_isLocal)
+            {
+                RestorePlayerCameras();
+                if (_controller != null) _controller.enabled = true;
+                PlayerInputLock.SetRagdoll(false);
+            }
+            else
+            {
+                RestoreRenderers();
+            }
 
             if (_camera != null) UnityEngine.Object.Destroy(_camera.gameObject);
             _camera = null;
 
-            if (_controller != null) _controller.enabled = true;
-            PlayerInputLock.SetRagdoll(false);
-
-            RakeMultiplayerPlugin.Log?.LogInfo("[Ragdoll] Hit reaction finished");
+            RakeMultiplayerPlugin.Log?.LogInfo("[Ragdoll] " + (_isLocal ? "local" : "remote") + " reaction finished");
             UnityEngine.Object.Destroy(gameObject);
         }
 
         private void OnDestroy()
         {
-            if (_instance == this) _instance = null;
-        }
-
-        // ---------------------------------------------------------------- cameras
-
-        private void DisablePlayerCameras(Transform player)
-        {
-            _disabledCameras.Clear();
-
-            var cameras = player.GetComponentsInChildren<Camera>();
-            for (int i = 0; i < cameras.Length; i++)
-            {
-                var cam = cameras[i];
-                if (cam == null || !cam.enabled) continue;
-                if (_originalCamera == null) _originalCamera = cam;
-                cam.enabled = false;
-                _disabledCameras.Add(cam);
-            }
-
-            if (_originalCamera == null) _originalCamera = Camera.main;
-        }
-
-        private void RestorePlayerCameras()
-        {
-            for (int i = 0; i < _disabledCameras.Count; i++)
-            {
-                if (_disabledCameras[i] != null) _disabledCameras[i].enabled = true;
-            }
-            _disabledCameras.Clear();
-        }
-
-        private void CreateCamera()
-        {
-            var go = new GameObject("RagdollHeadCamera");
-            go.hideFlags = HideFlags.HideAndDontSave;
-
-            _camera = go.AddComponent<Camera>();
-            if (_originalCamera != null)
-            {
-                _camera.CopyFrom(_originalCamera);
-                _camera.depth = _originalCamera.depth + 1f;
-            }
-
-            // The camera sits inside the head, so pull the near plane in
-            _camera.nearClipPlane = 0.03f;
-            _camera.enabled = true;
-
-            if (_head != null)
-            {
-                _camera.transform.position = _head.TransformPoint(_headLocalEye);
-                _camera.transform.rotation = _head.rotation * _headRotationOffset;
-            }
+            if (_localInstance == this) _localInstance = null;
         }
     }
 }
