@@ -420,7 +420,7 @@ namespace RakeMultiplayer
             // Detach the agent, move the transform, then re-attach: Warp alone can fail
             // and the agent would snap the body back to its old position next frame.
             var agent = GetEnemyAgent();
-            if (agent != null)
+            if (agent != null && agent.enabled && !_playerControlled)
             {
                 bool wasEnabled = agent.enabled;
                 if (wasEnabled) agent.enabled = false;
@@ -451,9 +451,7 @@ namespace RakeMultiplayer
         {
             string[] names = { "mestorake", "rake place", "rakeplace", "rakespawn", "rake spawn", "foresttrigger" };
 
-            // Include inactive objects: the level keeps its markers disabled.
             Transform[] all = Resources.FindObjectsOfTypeAll<Transform>();
-
             for (int n = 0; n < names.Length; n++)
             {
                 for (int i = 0; i < all.Length; i++)
@@ -464,9 +462,10 @@ namespace RakeMultiplayer
                     string name = candidate.gameObject.name.ToLowerInvariant();
                     if (!name.Contains(names[n])) continue;
 
-                    // Skip markers outside the playable map (the staging platform).
+                    // Only markers inside the playable area near the players. The level
+                    // markers sit on void platforms far outside the map.
                     float distance = NearestPlayerDistance(candidate.position);
-                    if (distance > 0f && distance > 1000f) continue;
+                    if (distance <= 0f || distance > 400f) continue;
 
                     position = candidate.position;
                     source = candidate.gameObject.name;
@@ -475,18 +474,48 @@ namespace RakeMultiplayer
             }
 
             MapSettings settings = MapSettings.Current;
+
+            Vector3 origin;
+            string originName;
+
+            if (settings != null && settings.hasSafehouse)
+            {
+                origin = settings.safehousePosition;
+                originName = "safehouse";
+            }
+            else if (settings != null && settings.spawnPoints != null && settings.spawnPoints.Length > 0)
+            {
+                origin = settings.spawnPoints[0];
+                originName = "player spawn";
+            }
+            else
+            {
+                var spawner = PlayerSpawner.Instance;
+                var local = spawner != null ? spawner.LocalPlayer : null;
+                if (local != null)
+                {
+                    origin = local.transform.position;
+                    originName = "player";
+                }
+                else
+                {
+                    origin = transform.position;
+                    originName = "current position";
+                }
+            }
+
+            Vector3 nearby;
+            if (TryNearbyPoint(origin, out nearby))
+            {
+                position = nearby;
+                source = originName + " + offset";
+                return true;
+            }
+
             if (settings != null && settings.hasCave)
             {
                 position = settings.cavePosition;
                 source = "MapSettings cave";
-                return true;
-            }
-
-            // Interior of the map, away from the player spawn.
-            if (settings != null && settings.spawnPoints != null && settings.spawnPoints.Length > 0)
-            {
-                position = settings.spawnPoints[0] + new Vector3(60f, 0f, 60f);
-                source = "player spawn + 60m";
                 return true;
             }
 
@@ -500,6 +529,34 @@ namespace RakeMultiplayer
 
             position = transform.position;
             source = "current position";
+            return false;
+        }
+
+        private bool TryNearbyPoint(Vector3 origin, out Vector3 point)
+        {
+            Vector3[] offsets =
+            {
+                new Vector3(75f, 0f, 75f),
+                new Vector3(-75f, 0f, 75f),
+                new Vector3(75f, 0f, -75f),
+                new Vector3(-75f, 0f, -75f),
+                new Vector3(100f, 0f, 0f),
+                new Vector3(-100f, 0f, 0f),
+                new Vector3(0f, 0f, 100f),
+                new Vector3(0f, 0f, -100f)
+            };
+
+            for (int i = 0; i < offsets.Length; i++)
+            {
+                NavMeshHit hit;
+                if (NavMesh.SamplePosition(origin + offsets[i], out hit, 30f, NavMesh.AllAreas))
+                {
+                    point = hit.position;
+                    return true;
+                }
+            }
+
+            point = origin;
             return false;
         }
         private void FindCaveTransform()

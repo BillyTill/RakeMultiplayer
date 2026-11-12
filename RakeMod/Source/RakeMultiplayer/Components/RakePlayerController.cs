@@ -65,6 +65,7 @@ namespace RakeMultiplayer
         private bool _hunterInventoryWasEnabled;
         private bool _enemyWasEnabled;
         private bool _agentRotationWas = true;
+        private bool _agentWasEnabled = true;
         private bool _rootMotionWas = true;
 
         private readonly List<Camera> _hiddenCameras = new List<Camera>();
@@ -181,11 +182,16 @@ namespace RakeMultiplayer
 
             if (_agent != null)
             {
-                _agent.enabled = true;
+                _agentWasEnabled = _agent.enabled;
                 _agentRotationWas = _agent.updateRotation;
                 _agent.updateRotation = false; // we rotate the body ourselves
                 _agent.Stop();
                 _agent.ResetPath();
+
+                // The level NavMesh only covers the staging platform; with the agent
+                // enabled it snaps the body back to the nearest platform point. Move
+                // the Rake by transform instead.
+                _agent.enabled = false;
             }
 
             _rakeAI.SetPlayerControlled(true);
@@ -330,7 +336,11 @@ namespace RakeMultiplayer
             if (_enemyAI != null) _enemyAI.enabled = _enemyWasEnabled;
             if (_animator != null) _animator.applyRootMotion = _rootMotionWas;
             if (_rakeAI != null) _rakeAI.SetPlayerControlled(false);
-            if (_agent != null) _agent.updateRotation = _agentRotationWas;
+            if (_agent != null)
+            {
+                _agent.updateRotation = _agentRotationWas;
+                _agent.enabled = _agentWasEnabled;
+            }
 
             _hunter = null;
             LocalHunter = null;
