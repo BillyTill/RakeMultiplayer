@@ -24,6 +24,7 @@ namespace RakeMultiplayer
         internal static ConfigEntry<bool> UseSteamP2P;
         internal static ConfigEntry<string> SteamAppId;
         internal static ConfigEntry<bool> RunInBackground;
+        internal static ConfigEntry<bool> ControlLighting;
 
         // Network state (managed by RakeNetworkManager)
         internal static bool isServer = false;
@@ -59,6 +60,11 @@ namespace RakeMultiplayer
             GameSceneName = Config.Bind("Network", "GameSceneName", "level1", "Name of the game scene to load (must match build settings, e.g. level1)");
             RunInBackground = Config.Bind("General", "RunInBackground", true,
                 "Keep simulating while the game window is not focused (lets you host and play on one machine)");
+
+            // The game levels ship their own day/night lighting; overriding it makes
+            // night look like day under a black sky. Off by default.
+            ControlLighting = Config.Bind("General", "ControlLighting", false,
+                "Let the mod drive scene ambient light and sun intensity (off = keep the level lighting)");
 
             // Two instances on one machine are unusable otherwise: the unfocused
             // window freezes, so the host stops simulating for the client.

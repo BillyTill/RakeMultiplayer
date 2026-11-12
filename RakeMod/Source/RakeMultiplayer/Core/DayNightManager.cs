@@ -22,20 +22,31 @@ namespace RakeMultiplayer
         [Header("Lighting")]
         [Tooltip("Directional light to animate (sun/moon)")]
         public Light DirectionalLight;
-        [Tooltip("Day light intensity")]
-        public float DayIntensity = 1.0f;
-        [Tooltip("Night light intensity")]
-        public float NightIntensity = 0.15f;
-        [Tooltip("Day light color")]
-        public Color DayColor = Color.white;
-        [Tooltip("Night light color")]
+
+        [Tooltip("Let the mod drive ambient light and sun intensity. Disabled by default: the " +
+                 "game levels ship their own lighting (night levels use a very dark flat " +
+                 "ambient), and overriding it makes night look like day under a black sky.")]
+        public bool ControlLighting = false;
+
+        [Tooltip("Ambient multiplier during the day, relative to the scene ambient")]
+        public float DayAmbientScale = 1f;
+        [Tooltip("Ambient multiplier during the night, relative to the scene ambient")]
+        public float NightAmbientScale = 0.25f;
+
+        [Tooltip("Sun intensity multiplier during the day")]
+        public float DaySunScale = 1f;
+        [Tooltip("Sun intensity multiplier during the night")]
+        public float NightSunScale = 0.2f;
+
+        [Tooltip("Tint blended into the sun colour at night")]
         public Color NightColor = new Color(0.3f, 0.3f, 0.5f);
 
-        [Header("Ambient (multiplayer consistency)")]
-        [Tooltip("Ambient light color during the day")]
-        public Color DayAmbient = new Color(0.45f, 0.45f, 0.45f, 1f);
-        [Tooltip("Ambient light color during the night")]
-        public Color NightAmbient = new Color(0.04f, 0.05f, 0.08f, 1f);
+        // Baseline captured from the loaded scene; phase changes are relative to it.
+        private bool _hasBaseline;
+        private Color _baseAmbient = Color.white;
+        private float _baseSunIntensity = 1f;
+        private Color _baseSunColor = Color.white;
+        private bool _baseSunEnabled = true;
 
         [Header("Fog")]
         [Tooltip("Enable fog animation")]
@@ -80,6 +91,11 @@ namespace RakeMultiplayer
         /// </summary>
         public void Initialize()
         {
+            if (RakeMultiplayerPlugin.ControlLighting != null)
+            {
+                ControlLighting = RakeMultiplayerPlugin.ControlLighting.Value;
+            }
+
             if (_initialized) return;
 
             // Find directional light if not assigned
@@ -305,6 +321,8 @@ namespace RakeMultiplayer
 
         private void LateUpdate()
         {
+            if (!ControlLighting) return;
+
             // Smooth lighting transition
             if (_lightTransitionTimer < LightTransitionDuration)
             {
@@ -317,40 +335,24 @@ namespace RakeMultiplayer
         }
 
         /// <summary>
-        /// Apply lighting based on current phase and transition progress
+        /// Apply phase lighting relative to the scene baseline. Does nothing unless
+        /// <see cref="ControlLighting"/> is enabled, so the level keeps its authored look.
         /// </summary>
         private void ApplyLighting(Phase targetPhase, float transitionProgress)
         {
-            // Level reloads destroy the old sun; re-acquire it
-            if (DirectionalLight == null)
-            {
-                var lights = FindObjectsOfType<Light>();
-                foreach (var l in lights)
-                {
-                    if (l != null && l.type == LightType.Directional) { DirectionalLight = l; break; }
-                }
-            }
-
-            // Ambient follows the phase even if the scene has no active directional light
-            Color targetAmbient = (targetPhase == Phase.Day) ? DayAmbient : NightAmbient;
-            Color startAmbient = (targetPhase == Phase.Day) ? NightAmbient : DayAmbient;
-            RenderSettings.ambientLight = Color.Lerp(startAmbient, targetAmbient, transitionProgress);
-
+            if (!ControlLighting) return;
+            if (!_hasBaseline) CaptureBaseline();
             if (DirectionalLight == null) return;
 
-            if (!DirectionalLight.enabled) DirectionalLight.enabled = true;
+            // 0 = fully night, 1 = fully day
+            float dayFactor = (targetPhase == Phase.Day) ? transitionProgress : 1f - transitionProgress;
 
-            // Interpolate intensity
-            float targetIntensity = (targetPhase == Phase.Day) ? DayIntensity : NightIntensity;
-            float startIntensity = (targetPhase == Phase.Day) ? NightIntensity : DayIntensity;
-            DirectionalLight.intensity = Mathf.Lerp(startIntensity, targetIntensity, transitionProgress);
+            RenderSettings.ambientLight = _baseAmbient * Mathf.Lerp(NightAmbientScale, DayAmbientScale, dayFactor);
 
-            // Interpolate color
-            Color targetColor = (targetPhase == Phase.Day) ? DayColor : NightColor;
-            Color startColor = (targetPhase == Phase.Day) ? NightColor : DayColor;
-            DirectionalLight.color = Color.Lerp(startColor, targetColor, transitionProgress);
+            DirectionalLight.enabled = _baseSunEnabled;
+            DirectionalLight.intensity = _baseSunIntensity * Mathf.Lerp(NightSunScale, DaySunScale, dayFactor);
+            DirectionalLight.color = Color.Lerp(Color.Lerp(_baseSunColor, NightColor, 0.5f), _baseSunColor, dayFactor);
 
-            // Interpolate fog
             if (AnimateFog && RenderSettings.fog)
             {
                 float targetFog = (targetPhase == Phase.Day) ? DayFogDensity : NightFogDensity;
@@ -359,9 +361,40 @@ namespace RakeMultiplayer
             }
         }
 
+        /// <summary>Remember the lighting the loaded scene was authored with.</summary>
+        private void CaptureBaseline()
+        {
+            _baseAmbient = RenderSettings.ambientLight;
+
+            if (DirectionalLight != null)
+            {
+                _baseSunIntensity = DirectionalLight.intensity;
+                _baseSunColor = DirectionalLight.color;
+                _baseSunEnabled = DirectionalLight.enabled;
+            }
+
+            _hasBaseline = true;
+        }
+
+        /// <summary>Put the scene lighting back exactly as it was authored.</summary>
+        private void RestoreBaseline()
+        {
+            if (!_hasBaseline) return;
+
+            RenderSettings.ambientLight = _baseAmbient;
+
+            if (DirectionalLight != null)
+            {
+                DirectionalLight.intensity = _baseSunIntensity;
+                DirectionalLight.color = _baseSunColor;
+                DirectionalLight.enabled = _baseSunEnabled;
+            }
+        }
+
         /// <summary>
-        /// Re-acquire the scene light and force the current phase lighting/ambient.
-        /// Called on every gameplay scene load (the old light was destroyed).
+        /// Re-acquire the scene light, remember the authored lighting and (only when
+        /// <see cref="ControlLighting"/> is on) force the current phase lighting.
+        /// Called on every gameplay scene load.
         /// </summary>
         public void RefreshSceneLighting()
         {
@@ -376,11 +409,22 @@ namespace RakeMultiplayer
                 }
             }
 
-            ApplyLighting(_currentPhase, 1f);
+            CaptureBaseline();
+
+            if (ControlLighting)
+            {
+                ApplyLighting(_currentPhase, 1f);
+            }
+            else
+            {
+                RestoreBaseline();
+            }
+
             _lightTransitionTimer = LightTransitionDuration; // no interpolation on load
 
             RakeMultiplayerPlugin.Log?.LogInfo(
-                $"[DayNight] Scene lighting refreshed: phase={_currentPhase}, light={(DirectionalLight != null ? DirectionalLight.name : "null")}, ambient={RenderSettings.ambientLight}");
+                $"[DayNight] Scene lighting refreshed: phase={_currentPhase}, control={ControlLighting}, " +
+                $"light={(DirectionalLight != null ? DirectionalLight.name : "null")}, ambient={RenderSettings.ambientLight}");
         }
 
         // Public getters
