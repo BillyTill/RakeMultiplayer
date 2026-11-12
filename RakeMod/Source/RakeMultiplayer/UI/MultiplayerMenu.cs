@@ -65,6 +65,17 @@ namespace RakeMultiplayer.UI
                 PlayerHierarchyDiagnostics.Dump("F9 pressed");
             }
 
+            // Debug: preview the baked remote player body without a second game instance
+            if (Input.GetKeyDown(KeyCode.F10))
+            {
+                RemotePlayerPreview.Next();
+            }
+
+            if (Input.GetKeyDown(KeyCode.F11))
+            {
+                RemotePlayerPreview.Remove();
+            }
+
             // Ждем подключения клиента перед показом лобби
             if (_waitingForConnection)
             {

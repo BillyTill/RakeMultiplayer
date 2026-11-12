@@ -30,6 +30,7 @@ namespace RakeMultiplayer
 
         private NetworkedPlayer _networked;
         private bool _loggedBounds;
+        private bool _manualClip;
 
         /// <summary>
         /// Create the body under <paramref name="parent"/>, tracking <paramref name="tracked"/>
@@ -162,6 +163,16 @@ namespace RakeMultiplayer
 
         private void UpdateClip()
         {
+            if (_manualClip)
+            {
+                _time += Time.deltaTime * _rate;
+                if (_clip != null && _clip.Length > 0.001f && _time > _clip.Length * 4f)
+                {
+                    _time -= _clip.Length * Mathf.Floor(_time / _clip.Length);
+                }
+                return;
+            }
+
             bool moving = _speed > 0.25f;
             bool running = moving && IsRunning();
 
@@ -259,6 +270,17 @@ namespace RakeMultiplayer
                 t.localPosition = Vector3.Lerp(clip.Positions[base0 + k], clip.Positions[base1 + k], blend);
                 t.localRotation = Quaternion.Slerp(clip.Rotations[base0 + k], clip.Rotations[base1 + k], blend);
             }
+        }
+
+        /// <summary>Force a specific clip (used by the F10 debug preview).</summary>
+        public void PlayClip(string name, float rate)
+        {
+            _manualClip = true;
+            _rate = rate <= 0f ? 1f : rate;
+            _clipName = null; // force SetClip to actually switch
+            SetClip(name);
+            _time = 0f;
+            ApplyPose();
         }
 
         /// <summary>Name of the clip currently playing (diagnostics).</summary>

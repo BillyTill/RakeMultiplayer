@@ -23,6 +23,7 @@ namespace RakeMultiplayer
         internal static ConfigEntry<bool> IsServer;
         internal static ConfigEntry<bool> UseSteamP2P;
         internal static ConfigEntry<string> SteamAppId;
+        internal static ConfigEntry<bool> RunInBackground;
 
         // Network state (managed by RakeNetworkManager)
         internal static bool isServer = false;
@@ -56,6 +57,13 @@ namespace RakeMultiplayer
             UseSteamP2P = Config.Bind("Network", "UseSteamP2P", false, "Use Steam P2P networking (not implemented)");
             SteamAppId = Config.Bind("Network", "SteamAppId", "480", "Steam App ID for P2P");
             GameSceneName = Config.Bind("Network", "GameSceneName", "level1", "Name of the game scene to load (must match build settings, e.g. level1)");
+            RunInBackground = Config.Bind("General", "RunInBackground", true,
+                "Keep simulating while the game window is not focused (lets you host and play on one machine)");
+
+            // Two instances on one machine are unusable otherwise: the unfocused
+            // window freezes, so the host stops simulating for the client.
+            Application.runInBackground = RunInBackground.Value;
+            Log.LogInfo($"[Multiplayer] runInBackground = {Application.runInBackground}");
 
             // Initialize Harmony — ВСЕГДА (для F1 меню)
             // Diagnostic: verify that every type in this assembly can be loaded by the
@@ -368,6 +376,11 @@ namespace RakeMultiplayer
         private void Update()
         {
             if (!Enabled.Value) return;
+            if (Application.runInBackground != RunInBackground.Value)
+            {
+                Application.runInBackground = RunInBackground.Value;
+            }
+
             // Networking is event-driven via RakeNetworkManager
         }
 
