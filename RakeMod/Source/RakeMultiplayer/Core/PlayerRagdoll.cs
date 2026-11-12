@@ -49,6 +49,7 @@ namespace RakeMultiplayer
         private Transform[] _nodes;
         private Transform _pelvis;
         private Transform _head;
+        private Rigidbody[] _bodies;
 
         private Camera _camera;
         private Camera _originalCamera;
@@ -176,7 +177,12 @@ namespace RakeMultiplayer
                 Transform t;
                 if (i == 0)
                 {
-                    t = transform;
+                    // Node 0 must be a CHILD of the ragdoll root: the canonical placement
+                    // is a local offset, and writing it onto the root itself would move
+                    // the whole ragdoll to the world origin.
+                    var bodyRoot = new GameObject(node.Name);
+                    t = bodyRoot.transform;
+                    t.SetParent(transform, false);
                 }
                 else
                 {
@@ -392,6 +398,9 @@ namespace RakeMultiplayer
 
             if (rigidbodies.Count < 4) return false;
 
+            _bodies = new Rigidbody[rigidbodies.Count];
+            rigidbodies.Values.CopyTo(_bodies, 0);
+
             foreach (var kv in rigidbodies)
             {
                 Transform bone = kv.Key;
@@ -410,8 +419,16 @@ namespace RakeMultiplayer
                 joint.connectedBody = parentBody;
                 joint.anchor = Vector3.zero;
                 joint.connectedAnchor = parentBody.transform.InverseTransformPoint(bone.position);
-                joint.axis = Vector3.right;
-                joint.swingAxis = Vector3.up;
+                // The twist axis must run along the bone (towards its main child),
+                // otherwise every limb twists around an arbitrary direction and the
+                // ragdoll tears itself apart on the first frame.
+                Vector3 axis = BoneAxis(bone);
+                Vector3 swingDir = Vector3.Cross(axis, Vector3.forward);
+                if (swingDir.sqrMagnitude < 0.01f) swingDir = Vector3.Cross(axis, Vector3.up);
+                swingDir.Normalize();
+
+                joint.axis = axis;
+                joint.swingAxis = swingDir;
 
                 var low = new SoftJointLimit(); low.limit = -45f;
                 var high = new SoftJointLimit(); high.limit = 45f;
@@ -490,6 +507,17 @@ namespace RakeMultiplayer
             return best;
         }
 
+        /// <summary>Direction of the bone in its own local space (towards its main child).</summary>
+        private static Vector3 BoneAxis(Transform bone)
+        {
+            Transform child = MainChild(bone);
+            if (child == null) return Vector3.up;
+
+            Vector3 local = child.localPosition;
+            if (local.sqrMagnitude < 0.0001f) return Vector3.up;
+            return local.normalized;
+        }
+
         private void Launch(Vector3 awayFromHit)
         {
             Vector3 dir = awayFromHit;
@@ -527,6 +555,37 @@ namespace RakeMultiplayer
         {
             _timer += Time.deltaTime;
             if (_timer >= Duration && !_restored) Restore();
+        }
+
+        /// <summary>
+        /// Keeps the simulation sane: a joint that starts fighting can otherwise
+        /// accelerate a limb to hundreds of m/s and launch the whole body across
+        /// the level.
+        /// </summary>
+        private void FixedUpdate()
+        {
+            if (_bodies == null) return;
+
+            const float maxSpeed = 8f;
+            const float maxSpin = 14f;
+
+            for (int i = 0; i < _bodies.Length; i++)
+            {
+                var rb = _bodies[i];
+                if (rb == null) continue;
+
+                Vector3 v = rb.velocity;
+                if (v.sqrMagnitude > maxSpeed * maxSpeed) rb.velocity = v.normalized * maxSpeed;
+
+                Vector3 w = rb.angularVelocity;
+                if (w.sqrMagnitude > maxSpin * maxSpin) rb.angularVelocity = w.normalized * maxSpin;
+
+                if (rb.position.y < _spawnPosition.y - 30f)
+                {
+                    if (!_restored) Restore();
+                    return;
+                }
+            }
         }
 
         private void Restore()
