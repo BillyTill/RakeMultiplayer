@@ -44,5 +44,6 @@ namespace RakeMultiplayer.Networking
         PlayerDamaged = 35,
         PlayerRagdoll = 36,
         PlayerRagdollRequest = 37,
+        DoorAction = 38,
     }
 }

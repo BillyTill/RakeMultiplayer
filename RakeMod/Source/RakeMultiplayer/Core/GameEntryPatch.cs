@@ -136,6 +136,8 @@ namespace RakeMultiplayer
             }
             RakeMultiplayerPlugin.Log?.LogInfo($"[GameEntry] Networked Rake instances: {rakeCount}");
 
+            DoorSync.RegisterAll();
+
             manager.RegisterCameras();
             manager.RegisterAnimals();
         }

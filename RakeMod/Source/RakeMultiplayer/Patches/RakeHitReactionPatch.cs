@@ -25,9 +25,22 @@ namespace RakeMultiplayer.Patches
             return damageType == "RakeKick" || damageType == "RakeUppercut" || damageType == "RakeAttack";
         }
 
+        /// <summary>
+        /// Remote clones also carry an FPSController (disabled). A hit on a clone must
+        /// never ragdoll the local player.
+        /// </summary>
+        private static bool IsLocalPlayer(FPSController fps)
+        {
+            if (fps == null) return false;
+            var spawner = PlayerSpawner.Instance;
+            var local = spawner != null ? spawner.LocalPlayer : null;
+            return local != null && local.gameObject == fps.gameObject;
+        }
+
         private static bool Prefix(FPSController __instance, string damageType)
         {
             if (__instance == null || !IsRakeDamage(damageType)) return true;
+            if (!IsLocalPlayer(__instance)) return true;
 
             // Drop a duplicate hit from the other damage source
             if (Time.time - _lastRakeHit < DedupWindow) return false;
@@ -40,6 +53,7 @@ namespace RakeMultiplayer.Patches
             try
             {
                 if (__instance == null || !IsRakeDamage(damageType)) return;
+                if (!IsLocalPlayer(__instance)) return;
                 if (RakeMultiplayerPlugin.HitReaction != null && !RakeMultiplayerPlugin.HitReaction.Value) return;
                 if (PlayerRagdoll.IsActive) return;
 

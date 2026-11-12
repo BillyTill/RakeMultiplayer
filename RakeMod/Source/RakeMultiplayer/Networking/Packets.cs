@@ -185,6 +185,30 @@ namespace RakeMultiplayer.Networking
         }
     }
 
+    /// <summary>
+    /// A door was used. Client -> server, then server -> all.
+    /// </summary>
+    public class DoorActionPacket : NetworkPacket
+    {
+        public override PacketType Type => PacketType.DoorAction;
+
+        public int DoorId;
+        public int SenderId;
+
+        public override void Write(BinaryWriter writer)
+        {
+            writer.Write(DoorId);
+            writer.Write(SenderId);
+        }
+
+        public override void Read(BinaryReader reader)
+        {
+            DoorId = reader.ReadInt32();
+            SenderId = reader.ReadInt32();
+        }
+    }
+
+
     public class PlayerConnectedPacket : NetworkPacket
     {
         public override PacketType Type => PacketType.PlayerConnected;

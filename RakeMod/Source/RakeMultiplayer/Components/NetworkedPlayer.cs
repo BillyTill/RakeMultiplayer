@@ -281,7 +281,7 @@ namespace RakeMultiplayer
         private byte GetCurrentAnimState()
         {
             // Bitmask: bit0=running, bit1=crouching, bit2=aiming, bit3=grounded,
-            //          bit4=weapon out
+            //          bit4=weapon out, bit5=flashlight on
             byte state = 0;
             if (_cachedAnimator != null)
             {
@@ -293,14 +293,32 @@ namespace RakeMultiplayer
             var wm = GetWeaponManager();
             if (wm != null)
             {
-                // currentWeaponID is 0 while the weapon is holstered
-                if (wm.currentWeaponID > 0) state |= 1 << 4;
+                if (HasWeaponOut(wm)) state |= 1 << 4;
 
                 // aiming is the sight key (Fire2 / right mouse) handled by the weapon script
                 if (ReadSight(wm.weaponSelect)) state |= 1 << 2;
             }
 
+            var fps = GetComponent<FPSController>();
+            if (fps != null && fps.flashlight != null && fps.flashlight.enabled) state |= 1 << 5;
+
             return state;
+        }
+
+        /// <summary>
+        /// True while a real weapon is out. currentWeaponID alone was unreliable: the game
+        /// leaves it at 0 in some pickup paths while the weapon model is still held, so the
+        /// remote body never got its rifle.
+        /// </summary>
+        private static bool HasWeaponOut(WeaponManager wm)
+        {
+            if (wm.currentWeaponID > 0) return true;
+
+            var selected = wm.weaponSelect;
+            if (selected == null || !selected.gameObject.activeInHierarchy) return false;
+
+            var weapon = selected.GetComponent<Weapon>();
+            return weapon != null && weapon.weaponID > 0;
         }
 
         private WeaponManager GetWeaponManager()
@@ -386,6 +404,7 @@ namespace RakeMultiplayer
                     anim.SetBool("Crouch", (animState & (1 << 1)) != 0);
                     anim.SetBool("Aim", (animState & (1 << 2)) != 0);
                     anim.SetBool("Grounded", (animState & (1 << 3)) != 0);
+                    ApplyFlashlight((animState & (1 << 5)) != 0);
                 }
             }
         }
@@ -402,7 +421,13 @@ namespace RakeMultiplayer
 
         public void ApplyFlashlight(bool enabled)
         {
-            // Apply flashlight state
+            if (isLocalPlayer) return;
+
+            var fps = GetComponent<FPSController>();
+            if (fps == null || fps.flashlight == null) return;
+            if (fps.flashlight.enabled == enabled) return;
+
+            fps.flashlight.enabled = enabled;
         }
     }
 }

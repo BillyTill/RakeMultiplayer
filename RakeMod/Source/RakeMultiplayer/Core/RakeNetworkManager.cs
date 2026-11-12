@@ -480,6 +480,9 @@ namespace RakeMultiplayer
                     case PacketType.PlayerRagdollRequest:
                         HandleServerPlayerRagdollRequest(connectionId, (PlayerRagdollRequestPacket)packet);
                         break;
+                    case PacketType.DoorAction:
+                        DoorSync.HandleServerRequest((DoorActionPacket)packet);
+                        break;
                     case PacketType.ItemPickup:
                         HandleServerItemPickup(connectionId, (ItemPickupPacket)packet, data);
                         break;
@@ -1322,6 +1325,9 @@ namespace RakeMultiplayer
                         break;
                     case PacketType.PlayerRagdoll:
                         HandleClientPlayerRagdoll((PlayerRagdollPacket)packet);
+                        break;
+                    case PacketType.DoorAction:
+                        DoorSync.HandleBroadcast((DoorActionPacket)packet);
                         break;
                     case PacketType.FireVisuals:
                         HandleClientFireVisuals((FireVisualsPacket)packet);

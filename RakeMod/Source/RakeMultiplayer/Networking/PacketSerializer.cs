@@ -56,6 +56,7 @@ namespace RakeMultiplayer.Networking
                     PacketType.PlayerDamaged => new PlayerDamagedPacket(),
                     PacketType.PlayerRagdoll => new PlayerRagdollPacket(),
                     PacketType.PlayerRagdollRequest => new PlayerRagdollRequestPacket(),
+                    PacketType.DoorAction => new DoorActionPacket(),
                     _ => throw new InvalidOperationException($"Unknown packet type: {type} (byte value: {(byte)type})")
                 };
                 packet.Read(reader);

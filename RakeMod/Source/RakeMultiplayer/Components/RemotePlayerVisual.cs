@@ -219,23 +219,10 @@ namespace RakeMultiplayer
             }
         }
 
-        private void LateUpdate()
-        {
-            // Keep the visual's feet on the ground even if the player root sits at eye
-            // height, and on stairs/slopes. The visual has no colliders of its own.
-            var root = transform.parent;
-            if (root == null) return;
-
-            Vector3 origin = root.position + Vector3.up * 0.3f;
-            RaycastHit hit;
-            if (Physics.Raycast(origin, Vector3.down, out hit, 10f))
-            {
-                float targetY = hit.point.y - root.position.y;
-                Vector3 local = transform.localPosition;
-                local.y = Mathf.Lerp(local.y, targetY, Time.deltaTime * 12f);
-                transform.localPosition = local;
-            }
-        }
+        // The feet offset comes from the CharacterController once, in Build(). A per-frame
+        // ground raycast was tried before: it misses floors, props and the trailer interior,
+        // so the body snapped up and down and hovered in places the ray did not hit.
+        // The player root already follows the controller, so a constant offset is exact.
 
         /// <summary>Update the visual colour / identity (kept for future team colours).</summary>
         public void SetPlayerId(int playerId)

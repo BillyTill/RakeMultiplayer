@@ -360,7 +360,14 @@ namespace RakeMultiplayer
             }
 
             // Prefer isolated hunter for Follow/Stealth targeting
-            currentTarget = isolatedHunter ?? nearestHunter;
+            currentTarget = nearestHunter ?? isolatedHunter;
+
+            // The vanilla AI still runs on the host and only knows one player. Point it at
+            // whoever we are hunting, otherwise it keeps dragging the Rake to the host.
+            if (enemyAI != null && enemyAI.enabled && currentTarget != null)
+            {
+                enemyAI.playerTarget = currentTarget;
+            }
         }
 
         private void UpdateStateMachine()
@@ -433,32 +440,27 @@ namespace RakeMultiplayer
 
             // Silent movement - no footstep sounds
             // Maintain 15-25m distance from nearest hunter
-            float distToNearest = Vector3.Distance(transform.position, nearestHunter.position);
+            float distToNearest = Vector3.Distance(transform.position, currentTarget.position);
             
             Vector3 targetPos;
             if (distToNearest < followMinDistance)
             {
                 // Too close - move away
-                Vector3 awayDir = (transform.position - nearestHunter.position).normalized;
-                targetPos = nearestHunter.position + awayDir * followMaxDistance;
+                Vector3 awayDir = (transform.position - currentTarget.position).normalized;
+                targetPos = currentTarget.position + awayDir * followMaxDistance;
             }
             else if (distToNearest > followMaxDistance)
             {
                 // Too far - move closer
-                Vector3 towardDir = (nearestHunter.position - transform.position).normalized;
+                Vector3 towardDir = (currentTarget.position - transform.position).normalized;
                 targetPos = transform.position + towardDir * (distToNearest - followMaxDistance * 0.5f);
             }
             else
             {
-                // In range - circle around isolated hunter
-                if (isolatedHunter == null)
-                {
-                    // No isolated hunter - stay in place or move to nearest
-                    return;
-                }
-                Vector3 toIsolated = (isolatedHunter.position - transform.position).normalized;
-                Vector3 perpendicular = Vector3.Cross(toIsolated, Vector3.up).normalized;
-                targetPos = isolatedHunter.position + perpendicular * followMinDistance;
+                // In range - circle around the current target
+                Vector3 toTarget = (currentTarget.position - transform.position).normalized;
+                Vector3 perpendicular = Vector3.Cross(toTarget, Vector3.up).normalized;
+                targetPos = currentTarget.position + perpendicular * followMinDistance;
             }
 
             // Avoid line of sight using raycasts
@@ -473,10 +475,10 @@ namespace RakeMultiplayer
             // Move towards target position silently
             MoveToTarget(targetPos, silent: true);
 
-            // Face the isolated hunter
-            if (isolatedHunter != null)
+            // Face the current target
+            if (currentTarget != null)
             {
-                Vector3 lookDir = (isolatedHunter.position - transform.position).normalized;
+                Vector3 lookDir = (currentTarget.position - transform.position).normalized;
                 lookDir.y = 0;
                 if (lookDir != Vector3.zero)
                 {
@@ -485,11 +487,11 @@ namespace RakeMultiplayer
             }
 
             // Transition checks
-            float distToIsolated = isolatedHunter != null ? 
-                Vector3.Distance(transform.position, isolatedHunter.position) : float.MaxValue;
+            float distToIsolated = currentTarget != null ?
+                Vector3.Distance(transform.position, currentTarget.position) : float.MaxValue;
 
             // Follow -> Stealth: close enough (< 20m) and not seen
-            if (distToIsolated < stealthTransitionDistance && !IsHunterLookingAtRake(isolatedHunter))
+            if (distToIsolated < stealthTransitionDistance && !IsHunterLookingAtRake(currentTarget))
             {
                 TransitionToState(RakeState.Stealth);
                 return;
