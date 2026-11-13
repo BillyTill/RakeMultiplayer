@@ -358,6 +358,23 @@ namespace RakeMultiplayer.Networking
             Rotation = new Quaternion(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
         }
     }
+
+    /// <summary>Server -> all: build the floating test arena at this point.</summary>
+    public class TestArenaPacket : NetworkPacket
+    {
+        public override PacketType Type => PacketType.TestArena;
+        public Vector3 Center;
+
+        public override void Write(BinaryWriter writer)
+        {
+            writer.Write(Center.x); writer.Write(Center.y); writer.Write(Center.z);
+        }
+
+        public override void Read(BinaryReader reader)
+        {
+            Center = new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
+        }
+    }
     public class PlayerConnectedPacket : NetworkPacket
     {
         public override PacketType Type => PacketType.PlayerConnected;

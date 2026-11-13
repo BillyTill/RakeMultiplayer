@@ -49,7 +49,14 @@ namespace RakeMultiplayer
         private GUIStyle _labelStyle;
         private GUIStyle _inputStyle;
         private GUIStyle _boxStyle;
+        private GUIStyle _headerStyle;
+        private GUIStyle _hintStyle;
+        private GUIStyle _suggestionStyle;
         private Texture2D _background;
+        private Texture2D _accent;
+
+        private readonly List<Command> _suggestions = new List<Command>();
+        private string _suggestionQuery = null;
 
         // ---------------------------------------------------------------- lifecycle
 
@@ -528,6 +535,13 @@ namespace RakeMultiplayer
                        " lobbies=" + SteamLobbyManager.Lobbies.Count +
                        (string.IsNullOrEmpty(SteamLobbyManager.LastError) ? "" : " | " + SteamLobbyManager.LastError);
             });
+            Register("test arena", "test arena", "Build the floating damage-test arena (host), teleport everyone, spawn weapons/ammo and an AFK Rake", args =>
+            {
+                if (RakeMultiplayerPlugin.isConnected && !RakeMultiplayerPlugin.isServer)
+                    return "test arena: only the host can build it";
+                TestArena.CreateOnHost();
+                return "test arena: building at " + TestArena.Center.ToString("F0");
+            });
             Register("cams", "cams", "Open/close the camera monitor from anywhere (same as Tab)", args =>
             {
                 if (RakePlayerController.IsActive) return "cams: not while playing the Rake";
@@ -689,20 +703,89 @@ namespace RakeMultiplayer
             if (_labelStyle != null) return;
 
             _background = new Texture2D(1, 1);
-            _background.SetPixel(0, 0, new Color(0.02f, 0.02f, 0.03f, 0.88f));
+            _background.SetPixel(0, 0, new Color(0.025f, 0.025f, 0.035f, 0.94f));
             _background.Apply();
             _background.hideFlags = HideFlags.HideAndDontSave;
 
+            _accent = new Texture2D(1, 1);
+            _accent.SetPixel(0, 0, new Color(0.62f, 0.12f, 0.09f, 1f));
+            _accent.Apply();
+            _accent.hideFlags = HideFlags.HideAndDontSave;
+
             _boxStyle = new GUIStyle(GUI.skin.box);
             _boxStyle.normal.background = _background;
+            _boxStyle.border = new RectOffset(1, 1, 1, 1);
 
             _labelStyle = new GUIStyle(GUI.skin.label);
-            _labelStyle.fontSize = 12;
-            _labelStyle.normal.textColor = new Color(0.85f, 0.92f, 0.85f);
+            _labelStyle.fontSize = 13;
+            _labelStyle.normal.textColor = new Color(0.82f, 0.86f, 0.80f);
             _labelStyle.wordWrap = false;
 
             _inputStyle = new GUIStyle(GUI.skin.textField);
-            _inputStyle.fontSize = 13;
+            _inputStyle.fontSize = 14;
+            _inputStyle.normal.background = _background;
+            _inputStyle.normal.textColor = new Color(0.95f, 0.92f, 0.84f);
+            _inputStyle.padding = new RectOffset(8, 8, 5, 5);
+
+            _headerStyle = new GUIStyle(GUI.skin.label);
+            _headerStyle.fontSize = 12;
+            _headerStyle.fontStyle = FontStyle.Bold;
+            _headerStyle.normal.textColor = new Color(0.85f, 0.30f, 0.22f);
+
+            _hintStyle = new GUIStyle(GUI.skin.label);
+            _hintStyle.fontSize = 11;
+            _hintStyle.alignment = TextAnchor.MiddleRight;
+            _hintStyle.normal.textColor = new Color(0.52f, 0.50f, 0.45f);
+
+            _suggestionStyle = new GUIStyle(GUI.skin.button);
+            _suggestionStyle.fontSize = 12;
+            _suggestionStyle.alignment = TextAnchor.MiddleLeft;
+            _suggestionStyle.padding = new RectOffset(10, 10, 2, 2);
+            _suggestionStyle.normal.background = _background;
+            _suggestionStyle.normal.textColor = new Color(0.88f, 0.86f, 0.78f);
+            _suggestionStyle.hover.background = _background;
+            _suggestionStyle.hover.textColor = new Color(0.95f, 0.42f, 0.30f);
+            _suggestionStyle.active.background = _background;
+            _suggestionStyle.active.textColor = new Color(1f, 0.55f, 0.35f);
+        }
+
+        private void RebuildSuggestions()
+        {
+            _suggestions.Clear();
+
+            string query = _input.TrimStart();
+            if (query.Length == 0) return;
+
+            int space = query.IndexOf(' ');
+            string prefix = space > 0 ? query.Substring(0, space) : query;
+
+            foreach (var command in Commands.Values)
+            {
+                if (command.Name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                {
+                    _suggestions.Add(command);
+                }
+            }
+
+            if (_suggestions.Count == 0)
+            {
+                foreach (var command in Commands.Values)
+                {
+                    if (command.Name.IndexOf(prefix, StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        _suggestions.Add(command);
+                    }
+                }
+            }
+
+            _suggestions.Sort((a, b) => string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private void CompleteSuggestion()
+        {
+            if (_suggestions.Count == 0) return;
+            _input = _suggestions[0].Name + " ";
+            _suggestionQuery = null;
         }
 
         private void OnGUI()
@@ -710,9 +793,22 @@ namespace RakeMultiplayer
             if (!_open) return;
             EnsureStyles();
 
+            if (_suggestionQuery == null || _suggestionQuery != _input)
+            {
+                RebuildSuggestions();
+                _suggestionQuery = _input;
+            }
+
             Event e = Event.current;
             if (e != null && e.type == EventType.KeyDown)
             {
+                if (e.keyCode == KeyCode.Tab)
+                {
+                    CompleteSuggestion();
+                    e.Use();
+                    GUI.FocusControl("rakeConsoleInput");
+                    return;
+                }
                 if (e.keyCode == KeyCode.Return || e.keyCode == KeyCode.KeypadEnter)
                 {
                     Submit();
@@ -737,11 +833,24 @@ namespace RakeMultiplayer
                 }
             }
 
-            float height = Mathf.Clamp(Screen.height * 0.45f, 200f, Screen.height - 60f);
+            float height = Mathf.Clamp(Screen.height * 0.48f, 220f, Screen.height - 60f);
             var area = new Rect(8f, Screen.height - height - 8f, Screen.width - 16f, height);
             GUI.Box(area, GUIContent.none, _boxStyle);
+            GUI.DrawTexture(new Rect(area.x, area.y, area.width, 3f), _accent, ScaleMode.StretchToFill);
 
-            GUILayout.BeginArea(new Rect(area.x + 10f, area.y + 8f, area.width - 20f, area.height - 16f));
+            GUILayout.BeginArea(new Rect(area.x + 12f, area.y + 10f, area.width - 24f, area.height - 18f));
+
+            GUILayout.BeginHorizontal();
+            GUILayout.Label("RAKE // CONSOLE", _headerStyle, GUILayout.Width(220f));
+            GUILayout.FlexibleSpace();
+            GUILayout.Label("TAB autocomplete   .   Up/Down history   .   ENTER run   .   ESC close",
+                _hintStyle, GUILayout.Width(430f));
+            GUILayout.EndHorizontal();
+
+            int suggestionCount = Mathf.Min(6, _suggestions.Count);
+            float suggestionHeight = suggestionCount * 22f;
+            float logHeight = area.height - 30f - 36f - suggestionHeight - 8f;
+            if (logHeight < 40f) logHeight = 40f;
 
             if (_scrollToBottom)
             {
@@ -749,24 +858,39 @@ namespace RakeMultiplayer
                 _scrollToBottom = false;
             }
 
-            _scroll = GUILayout.BeginScrollView(_scroll, false, true);
+            _scroll = GUILayout.BeginScrollView(_scroll, false, true, GUILayout.Height(logHeight));
             for (int i = 0; i < _log.Count; i++)
             {
                 GUILayout.Label(_log[i], _labelStyle);
             }
             GUILayout.EndScrollView();
 
+            for (int i = 0; i < suggestionCount; i++)
+            {
+                var command = _suggestions[i];
+                string label = command.Usage;
+                if (!string.IsNullOrEmpty(command.Description))
+                {
+                    label += "   -   " + command.Description;
+                }
+
+                if (GUILayout.Button(label, _suggestionStyle, GUILayout.Height(20f)))
+                {
+                    _input = command.Name + " ";
+                    _suggestionQuery = null;
+                }
+            }
+
             GUILayout.BeginHorizontal();
-            GUILayout.Label(">", _labelStyle, GUILayout.Width(12f));
+            GUILayout.Label(">", _labelStyle, GUILayout.Width(14f));
             GUI.SetNextControlName("rakeConsoleInput");
-            _input = GUILayout.TextField(_input, _inputStyle);
+            _input = GUILayout.TextField(_input, _inputStyle, GUILayout.Height(26f));
             GUILayout.EndHorizontal();
 
             GUILayout.EndArea();
 
             GUI.FocusControl("rakeConsoleInput");
         }
-
         private void Submit()
         {
             string line = _input;

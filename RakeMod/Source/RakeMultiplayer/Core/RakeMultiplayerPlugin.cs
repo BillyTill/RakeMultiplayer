@@ -179,6 +179,11 @@ namespace RakeMultiplayer
             UnityEngine.Object.DontDestroyOnLoad(steamLobbyObj);
             steamLobbyObj.AddComponent<SteamLobbyManager>();
 
+            // Headless smoke test driver (-autotest); inert otherwise.
+            var batchTestObj = new UnityEngine.GameObject("BatchTestDriver");
+            UnityEngine.Object.DontDestroyOnLoad(batchTestObj);
+            batchTestObj.AddComponent<BatchTestDriver>();
+
             // InitializeNetworking() УБРАН — сеть только через UI
             // Если Enabled = false, сеть не стартует, но патчи применены (F1 работает)
 

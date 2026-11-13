@@ -51,7 +51,20 @@ namespace RakeMultiplayer.Patches
         static void Postfix(CameraMouseLook __instance)
         {
             if (!RakeMultiplayerPlugin.Enabled.Value) return;
-            // Rotation sync handled by NetworkedPlayer
+            if (__instance == null || !__instance.bControl) return;
+
+            // The vanilla look uses Slerp(..., smoothTime * dt), which reads as a floating
+            // camera with a delay. Hunters asked for direct 1:1 mouse look: snap both the
+            // body and the camera to the rotation that was already computed this frame.
+            if (__instance.character != null)
+            {
+                __instance.character.localRotation = __instance.m_CharacterTargetRot;
+            }
+
+            if (__instance.camera != null)
+            {
+                __instance.camera.localRotation = __instance.m_CameraTargetRot;
+            }
         }
     }
 
@@ -216,6 +229,8 @@ namespace RakeMultiplayer.Patches
                 Direction = caster.forward
             };
 
+            BulletVisuals.Spawn(caster.position, caster.forward);
+
             if (RakeMultiplayerPlugin.isServer) manager.ServerBroadcast(visual.Serialize());
             else manager.ClientSend(visual.Serialize());
 
@@ -291,6 +306,8 @@ namespace RakeMultiplayer.Patches
                 Origin = caster.position,
                 Direction = caster.forward
             };
+
+            BulletVisuals.Spawn(caster.position, caster.forward);
 
             if (RakeMultiplayerPlugin.isServer) manager.ServerBroadcast(visual.Serialize());
             else manager.ClientSend(visual.Serialize());

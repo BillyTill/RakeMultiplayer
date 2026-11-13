@@ -252,7 +252,9 @@ namespace RakeMultiplayer
                     return;
                 }
 
-                UpdateDaySpawn();
+                // Player-controlled Rakes (and the AFK test-arena Rake) must not be teleported
+                // to the forest by the day spawn logic.
+                if (!_playerControlled) UpdateDaySpawn();
 
                 if (!RakeMultiplayerPlugin.isConnected) return;
 

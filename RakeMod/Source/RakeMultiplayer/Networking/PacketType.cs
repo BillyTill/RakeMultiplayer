@@ -52,5 +52,6 @@ namespace RakeMultiplayer.Networking
         RakeAttackRequest = 43,
         RakeSound = 44,
         RakeDied = 45,
+        TestArena = 46,
     }
 }

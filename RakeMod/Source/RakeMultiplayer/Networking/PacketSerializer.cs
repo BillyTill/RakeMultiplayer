@@ -64,6 +64,7 @@ namespace RakeMultiplayer.Networking
                     PacketType.RakeAttackRequest => new RakeAttackRequestPacket(),
                     PacketType.RakeSound => new RakeSoundPacket(),
                     PacketType.RakeDied => new RakeDiedPacket(),
+                    PacketType.TestArena => new TestArenaPacket(),
                     _ => throw new InvalidOperationException($"Unknown packet type: {type} (byte value: {(byte)type})")
                 };
                 packet.Read(reader);

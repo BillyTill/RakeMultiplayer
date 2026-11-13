@@ -1460,6 +1460,9 @@ namespace RakeMultiplayer
                     case PacketType.RakeDied:
                         HandleClientRakeDied((RakeDiedPacket)packet);
                         break;
+                    case PacketType.TestArena:
+                        HandleClientTestArena((TestArenaPacket)packet);
+                        break;
                     case PacketType.FireVisuals:
                         HandleClientFireVisuals((FireVisualsPacket)packet);
                         break;
@@ -1876,6 +1879,61 @@ namespace RakeMultiplayer
         /// Server: teleport every player to a position (safehouse respawn, Task 4.6).
         /// The host moves locally; each client receives a targeted teleport packet.
         /// </summary>
+        public void BroadcastTestArena(Vector3 center)
+        {
+            if (!RakeMultiplayerPlugin.isServer) return;
+            ServerBroadcast(new TestArenaPacket { Center = center }.Serialize());
+        }
+
+        private void HandleClientTestArena(TestArenaPacket packet)
+        {
+            RakeMultiplayerPlugin.Log?.LogInfo("[Arena] building test arena at " + packet.Center.ToString("F0"));
+            LobbyState.RakeOwnerId = 0;
+            RakeControlSync.Apply("test arena");
+            TestArena.Build(packet.Center);
+            TestArena.SpawnItems(packet.Center);
+        }
+
+        /// <summary>Server: teleport one player (host or a specific client) and its proxies.</summary>
+        public void ServerTeleportPlayer(int playerId, Vector3 position, Quaternion rotation)
+        {
+            if (!RakeMultiplayerPlugin.isServer) return;
+
+            var spawner = PlayerSpawner.Instance;
+            int hostId = spawner != null && spawner.LocalPlayer != null ? spawner.LocalPlayer.PlayerId : 1;
+
+            if (playerId == hostId)
+            {
+                if (spawner != null && spawner.LocalPlayer != null)
+                {
+                    spawner.LocalPlayer.transform.position = position;
+                    spawner.LocalPlayer.transform.rotation = rotation;
+                }
+                return;
+            }
+
+            if (spawner != null)
+            {
+                NetworkedPlayer remote;
+                if (spawner.TryGetRemotePlayer(playerId, out remote) && remote != null)
+                {
+                    remote.transform.position = position;
+                    remote.transform.rotation = rotation;
+                }
+            }
+
+            int connectionId = playerId - 1;
+            if (_server != null && _connectedClients.Contains(connectionId))
+            {
+                var packet = new PlayerTeleportPacket
+                {
+                    PlayerId = playerId,
+                    Position = position,
+                    Rotation = rotation
+                };
+                _server.Send(connectionId, packet.Serialize());
+            }
+        }
         public void ServerTeleportAllPlayers(Vector3 position, Quaternion rotation)
         {
             if (!RakeMultiplayerPlugin.isServer) return;
@@ -2598,13 +2656,18 @@ namespace RakeMultiplayer
         {
             RakeMultiplayerPlugin.Log?.LogInfo($"[3.5] Client received FireVisuals: shooterId={packet.ShooterId}, weaponType={packet.WeaponType}");
 
-            // Our own shot already plays the vanilla sound locally.
+            // Remote shot: visible tracer from the shooter to wherever it lands.
             if (PlayerSpawner.Instance == null) return;
             if (PlayerSpawner.Instance.LocalPlayer != null &&
                 PlayerSpawner.Instance.LocalPlayer.PlayerId == packet.ShooterId) return;
 
             // Find remote player by shooterId
             if (!PlayerSpawner.Instance.TryGetRemotePlayer(packet.ShooterId, out var shooter)) return;
+
+            if (packet.Origin != Vector3.zero)
+            {
+                BulletVisuals.Spawn(packet.Origin, packet.Direction);
+            }
 
             try
             {
