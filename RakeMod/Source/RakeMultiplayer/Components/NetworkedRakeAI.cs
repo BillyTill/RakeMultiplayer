@@ -402,18 +402,27 @@ namespace RakeMultiplayer
             if (value)
             {
                 if (enemyAI != null) enemyAI.enabled = false;
+
+                // A player-driven Rake is moved by its own controller (or by the test
+                // arena); the NavMeshAgent must not snap it back onto the NavMesh.
                 var agent = GetEnemyAgent();
                 if (agent != null)
                 {
                     agent.Stop();
                     agent.ResetPath();
+                    agent.enabled = false;
                 }
+
                 currentState = RakeState.Chase;
                 RakeMultiplayerPlugin.Log?.LogInfo("[RakePlay] Rake switched to player control");
             }
             else
             {
                 if (RakeMultiplayerPlugin.isServer && enemyAI != null) enemyAI.enabled = true;
+
+                var agent = GetEnemyAgent();
+                if (agent != null && RakeMultiplayerPlugin.isServer) agent.enabled = true;
+
                 RakeMultiplayerPlugin.Log?.LogInfo("[RakePlay] Rake returned to AI");
             }
         }

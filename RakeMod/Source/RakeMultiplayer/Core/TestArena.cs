@@ -51,8 +51,10 @@ namespace RakeMultiplayer
                 }
 
                 SessionManager.Instance?.UpdateRakeHealth(ai != null ? ai.MaxHealth : 2500f);
+                foreach (var arenaAgent in rake.GetComponentsInChildren<NavMeshAgent>(true)) arenaAgent.enabled = false;
                 rake.position = center + new Vector3(0f, 0.7f, 10f);
                 rake.rotation = Quaternion.Euler(0f, 180f, 0f);
+                RakeMultiplayerPlugin.Log?.LogInfo("[Arena] rake now at " + rake.position.ToString("F1"));
             }
 
             Build(center);

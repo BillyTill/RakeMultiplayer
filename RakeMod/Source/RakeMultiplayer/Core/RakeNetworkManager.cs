@@ -593,18 +593,34 @@ namespace RakeMultiplayer
                 return;
             }
 
-            // A client's misses must not damage the Rake (or trigger its attack lockout):
-            // validate aim direction, range and line of sight first.
-            if (!ValidateClientShot(packet, _cachedEnemyAI))
+            int shooterId = connectionId + 1;
+            if (packet.ShooterId <= 0) packet.ShooterId = shooterId;
+            if (packet.ShooterId != shooterId)
             {
-                RakeMultiplayerPlugin.Log?.LogInfo("[3.4] Client shot missed the Rake: " +
-                                                   "from " + packet.ShooterPosition.ToString("F1") +
-                                                   " dir " + packet.Direction.ToString("F2"));
+                RakeMultiplayerPlugin.Log?.LogWarning("[Ballistics] spoofed shooter id from C" + connectionId);
                 return;
             }
 
-            // Apply damage via reflection (TakeDamage method or health field)
-            float newHealth = ApplyDamageToEnemy(_cachedEnemyAI, packet.Amount, packet.DamageType, packet.ShooterPosition);
+            Vector3 origin = packet.ShooterPosition;
+            Vector3 direction = packet.Direction;
+            if (direction.sqrMagnitude < 0.001f)
+            {
+                direction = _cachedEnemyAI.transform.position + Vector3.up * 1.2f - origin;
+            }
+            direction.Normalize();
+
+            Transform shooter = FindPlayerTransform(shooterId);
+            if (shooter != null && Vector3.Distance(origin, shooter.position) > 8f)
+            {
+                RakeMultiplayerPlugin.Log?.LogWarning("[Ballistics] rejected shot: origin too far from the shooter");
+                return;
+            }
+
+            int amount = Mathf.Clamp(packet.Amount, 1, 300);
+            string damageType = string.IsNullOrEmpty(packet.DamageType) ? "SniperShot" : packet.DamageType;
+
+            // Real ballistics: the server simulates the bullet and applies damage on impact.
+            ProjectileSystem.SpawnServerProjectile(origin, direction, amount, damageType, shooterId);
 
             // ===== КРИТИЧЕСКИЙ ФИКС: Заставляем Рейка среагировать на выстрел (Danger state) =====
             // Enemy_AI.Start() подписывается на NotificationsManager.Instance.AddListener("Event_PlayerFire")
@@ -635,13 +651,7 @@ namespace RakeMultiplayer
                 RakeMultiplayerPlugin.Log?.LogError($"[3.4] Failed to trigger Rake Event_PlayerFire: {ex.Message}");
             }
 
-            // Broadcast DamageApplied to all clients
-            var appliedPacket = new DamageAppliedPacket
-            {
-                TargetId = packet.TargetId,
-                NewHealth = newHealth
-            };
-            ServerBroadcast(appliedPacket.Serialize());
+
         }
 
         /// <summary>

@@ -204,7 +204,6 @@ namespace RakeMultiplayer.Patches
         static void Postfix(Rifle_weapon __instance, int __state)
         {
             if (!RakeMultiplayerPlugin.Enabled.Value) return;
-            if (!RakeMultiplayerPlugin.isConnected) return;
 
             var netPlayer = __instance.GetComponentInParent<NetworkedPlayer>();
             if (netPlayer == null || !netPlayer.isLocalPlayer) return;
@@ -215,11 +214,21 @@ namespace RakeMultiplayer.Patches
             var caster = GetCaster(__instance);
             if (caster == null) return;
 
-            var manager = RakeNetworkManager.Instance;
-            if (manager == null) return;
-
             int shooterId = PlayerSpawner.Instance != null && PlayerSpawner.Instance.LocalPlayer != null
                 ? PlayerSpawner.Instance.LocalPlayer.PlayerId : 1;
+
+            // Visual bullet/tracer and muzzle light are local and identical on every peer.
+            BulletVisuals.Spawn(caster.position, caster.forward);
+
+            if (!RakeMultiplayerPlugin.isConnected)
+            {
+                // Single-player: the projectile is authoritative here too.
+                ProjectileSystem.SpawnServerProjectile(caster.position, caster.forward, 100, "Bullet", shooterId);
+                return;
+            }
+
+            var manager = RakeNetworkManager.Instance;
+            if (manager == null) return;
 
             var visual = new FireVisualsPacket
             {
@@ -229,12 +238,16 @@ namespace RakeMultiplayer.Patches
                 Direction = caster.forward
             };
 
-            BulletVisuals.Spawn(caster.position, caster.forward);
-
             if (RakeMultiplayerPlugin.isServer) manager.ServerBroadcast(visual.Serialize());
             else manager.ClientSend(visual.Serialize());
 
-            if (RakeMultiplayerPlugin.isServer) return; // host damage already applied by vanilla
+            if (RakeMultiplayerPlugin.isServer)
+            {
+                // Host: spawn the authoritative projectile; the vanilla raycast damage
+                // is cancelled by EnemyTakeDamageAuthorityPatch.
+                ProjectileSystem.SpawnServerProjectile(caster.position, caster.forward, 100, "Bullet", shooterId);
+                return;
+            }
 
             var packet = new DamageRequestPacket
             {
@@ -282,7 +295,6 @@ namespace RakeMultiplayer.Patches
         static void Postfix(SniperRifle_weapon __instance, int __state)
         {
             if (!RakeMultiplayerPlugin.Enabled.Value) return;
-            if (!RakeMultiplayerPlugin.isConnected) return;
 
             var netPlayer = __instance.GetComponentInParent<NetworkedPlayer>();
             if (netPlayer == null || !netPlayer.isLocalPlayer) return;
@@ -293,11 +305,19 @@ namespace RakeMultiplayer.Patches
             var caster = GetCaster(__instance);
             if (caster == null) return;
 
-            var manager = RakeNetworkManager.Instance;
-            if (manager == null) return;
-
             int shooterId = PlayerSpawner.Instance != null && PlayerSpawner.Instance.LocalPlayer != null
                 ? PlayerSpawner.Instance.LocalPlayer.PlayerId : 1;
+
+            BulletVisuals.Spawn(caster.position, caster.forward);
+
+            if (!RakeMultiplayerPlugin.isConnected)
+            {
+                ProjectileSystem.SpawnServerProjectile(caster.position, caster.forward, 200, "SniperShot", shooterId);
+                return;
+            }
+
+            var manager = RakeNetworkManager.Instance;
+            if (manager == null) return;
 
             var visual = new FireVisualsPacket
             {
@@ -307,12 +327,14 @@ namespace RakeMultiplayer.Patches
                 Direction = caster.forward
             };
 
-            BulletVisuals.Spawn(caster.position, caster.forward);
-
             if (RakeMultiplayerPlugin.isServer) manager.ServerBroadcast(visual.Serialize());
             else manager.ClientSend(visual.Serialize());
 
-            if (RakeMultiplayerPlugin.isServer) return;
+            if (RakeMultiplayerPlugin.isServer)
+            {
+                ProjectileSystem.SpawnServerProjectile(caster.position, caster.forward, 200, "SniperShot", shooterId);
+                return;
+            }
 
             var packet = new DamageRequestPacket
             {
@@ -748,7 +770,7 @@ namespace RakeMultiplayer.Patches
         private static Quaternion _deathRotation;
 
         [HarmonyPrefix]
-        static bool Prefix(Enemy_AI __instance)
+        static bool Prefix(Enemy_AI __instance, int amount, string damageType)
         {
             if (__instance != null && __instance.transform != null)
             {
@@ -757,6 +779,16 @@ namespace RakeMultiplayer.Patches
             }
 
             if (!RakeMultiplayerPlugin.Enabled.Value) return true;
+
+            // Weapon hits are resolved by the authoritative projectile, not by the
+            // vanilla instant raycast. The projectile sets ApplyingImpact around its
+            // own TakeDamage call so this does not block the real hit.
+            if (!ProjectileSystem.ApplyingImpact &&
+                (damageType == "SniperShot" || damageType == "Bullet"))
+            {
+                return false;
+            }
+
             if (!RakeMultiplayerPlugin.isConnected) return true; // single-player
             return RakeMultiplayerPlugin.isServer;
         }

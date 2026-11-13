@@ -3,44 +3,22 @@ using UnityEngine;
 namespace RakeMultiplayer
 {
     /// <summary>
-    /// Visual-only projectile: a bright tracer and a short muzzle light for every shot.
-    ///
-    /// Damage/hit registration stays exactly as before (hitscan on the shooter, validated
-    /// by the server for clients), so this never changes hit results - it only makes the
-    /// bullet visible in flight and lights up the surroundings for a split second.
+    /// Visible bullet for every shot: a glowing head and a tracer that follow the same
+    /// ballistic path as the authoritative server projectile (speed + gravity), stopping
+    /// at whatever the bullet hits. Damage is applied separately by ServerProjectile.
     /// </summary>
     public static class BulletVisuals
     {
-        private const float MaxDistance = 400f;
-        private const float Speed = 320f;
-        private const float TrailLinger = 0.08f;
-
         public static void Spawn(Vector3 origin, Vector3 direction)
         {
             if (direction.sqrMagnitude < 0.0001f) return;
             direction.Normalize();
 
-            float distance = MaxDistance;
-            Vector3 end = origin + direction * distance;
-
-            // Visual ray only: find where the tracer should stop (world geometry or a body).
-            RaycastHit[] hits = Physics.RaycastAll(origin, direction, MaxDistance);
-            float best = MaxDistance;
-            for (int i = 0; i < hits.Length; i++)
-            {
-                RaycastHit hit = hits[i];
-                if (hit.collider == null || hit.collider.isTrigger) continue;
-                if (IsLocalPlayerCollider(hit.collider)) continue;
-                if (hit.distance >= best) continue;
-                best = hit.distance;
-                end = hit.point;
-            }
-
-            SpawnTracer(origin, end, distance: best);
+            SpawnTracer(origin, direction);
             SpawnMuzzleLight(origin);
         }
 
-        private static bool IsLocalPlayerCollider(Collider collider)
+        internal static bool IsLocalPlayerCollider(Collider collider)
         {
             var spawner = PlayerSpawner.Instance;
             if (spawner == null || spawner.LocalPlayer == null) return false;
@@ -48,12 +26,11 @@ namespace RakeMultiplayer
             Transform local = spawner.LocalPlayer.transform;
             if (collider.transform == local || collider.transform.IsChildOf(local)) return true;
 
-            // The weapon/viewmodel colliders may be parented to the camera, not the body.
             var net = collider.GetComponentInParent<NetworkedPlayer>();
             return net != null && net.isLocalPlayer;
         }
 
-        private static void SpawnTracer(Vector3 start, Vector3 end, float distance)
+        private static void SpawnTracer(Vector3 origin, Vector3 direction)
         {
             var go = new GameObject("RakeBulletTracer");
             var line = go.AddComponent<LineRenderer>();
@@ -64,7 +41,11 @@ namespace RakeMultiplayer
             Shader lineShader = Shader.Find("Sprites/Default");
             if (lineShader == null) lineShader = Shader.Find("Diffuse");
             if (lineShader == null) lineShader = Shader.Find("Unlit/Color");
-            if (lineShader == null) return;
+            if (lineShader == null)
+            {
+                Object.Destroy(go);
+                return;
+            }
 
             var material = new Material(lineShader);
             material.name = "RakeTracer";
@@ -75,7 +56,7 @@ namespace RakeMultiplayer
             head.name = "RakeBulletHead";
             var headCollider = head.GetComponent<Collider>();
             if (headCollider != null) Object.Destroy(headCollider);
-            head.transform.position = start;
+            head.transform.position = origin;
             head.transform.localScale = Vector3.one * 0.13f;
 
             Shader headShader = Shader.Find("Unlit/Color");
@@ -88,11 +69,11 @@ namespace RakeMultiplayer
             var renderer = head.GetComponent<Renderer>();
             if (renderer != null) renderer.material = headMaterial;
 
-            line.SetPosition(0, start);
-            line.SetPosition(1, start);
+            line.SetPosition(0, origin);
+            line.SetPosition(1, origin);
 
             var mover = go.AddComponent<BulletTracerMover>();
-            mover.Init(start, end, line, head, Mathf.Max(0.02f, distance / Speed));
+            mover.Init(origin, direction, line, head);
         }
 
         private static void SpawnMuzzleLight(Vector3 origin)
@@ -114,40 +95,80 @@ namespace RakeMultiplayer
     public sealed class BulletTracerMover : MonoBehaviour
     {
         private Vector3 _start;
-        private Vector3 _end;
+        private Vector3 _position;
+        private Vector3 _velocity;
         private LineRenderer _line;
         private GameObject _head;
-        private float _travel;
-        private float _elapsed;
+        private float _life;
         private float _linger;
         private bool _arrived;
 
-        public void Init(Vector3 start, Vector3 end, LineRenderer line, GameObject head, float travelTime)
+        public void Init(Vector3 origin, Vector3 direction, LineRenderer line, GameObject head)
         {
-            _start = start;
-            _end = end;
+            _start = origin;
+            _position = origin;
+            _velocity = direction.normalized * Ballistics.Speed;
             _line = line;
             _head = head;
-            _travel = Mathf.Max(0.001f, travelTime);
         }
 
         private void Update()
         {
             if (!_arrived)
             {
-                _elapsed += Time.deltaTime;
-                float t = Mathf.Clamp01(_elapsed / _travel);
-                Vector3 pos = Vector3.Lerp(_start, _end, t);
+                float dt = Time.deltaTime;
+                if (dt <= 0f) return;
 
-                if (_head != null) _head.transform.position = pos;
+                _life += dt;
+                if (_life > Ballistics.MaxLifetime)
+                {
+                    _arrived = true;
+                }
+                else
+                {
+                    Vector3 previous = _position;
+                    _velocity += Vector3.up * (-Ballistics.Gravity * dt);
+                    Vector3 next = previous + _velocity * dt;
+                    Vector3 segment = next - previous;
+                    float distance = segment.magnitude;
+
+                    if (distance < 0.0001f)
+                    {
+                        _position = next;
+                    }
+                    else
+                    {
+                        Vector3 direction = segment / distance;
+                        RaycastHit[] hits = Physics.RaycastAll(previous, direction, distance);
+                        float best = distance;
+                        bool found = false;
+                        Vector3 point = next;
+
+                        for (int i = 0; i < hits.Length; i++)
+                        {
+                            RaycastHit hit = hits[i];
+                            if (hit.collider == null || hit.collider.isTrigger) continue;
+                            if (BulletVisuals.IsLocalPlayerCollider(hit.collider)) continue;
+                            if (hit.distance >= best) continue;
+
+                            best = hit.distance;
+                            point = hit.point;
+                            found = true;
+                        }
+
+                        _position = point;
+                        if (found) _arrived = true;
+                    }
+                }
+
+                if (_head != null) _head.transform.position = _position;
                 if (_line != null)
                 {
                     _line.SetPosition(0, _start);
-                    _line.SetPosition(1, pos);
+                    _line.SetPosition(1, _position);
                 }
 
-                if (t >= 1f) _arrived = true;
-                return;
+                if (!_arrived) return;
             }
 
             _linger += Time.deltaTime;

@@ -79,6 +79,30 @@ namespace RakeMultiplayer
                 RakeMultiplayerPlugin.Log?.LogWarning("[AutoTest] no local player for the tracer");
             }
 
+            // Authoritative projectile damage check against the AFK Rake.
+            var rake = RakeHighlight.FindRake();
+            Enemy_AI rakeEnemy = rake != null ? rake.GetComponent<Enemy_AI>() : null;
+            float before = rakeEnemy != null ? rakeEnemy.Health : -1f;
+
+
+
+            if (rake != null && local != null && rakeEnemy != null)
+            {
+                RakeMultiplayerPlugin.Log?.LogInfo("[AutoTest] rake pos=" + rake.position.ToString("F1") + " local=" + local.transform.position.ToString("F1"));
+
+                Vector3 origin = local.transform.position + Vector3.up * 1.5f;
+                Vector3 target = rake.position + Vector3.up * 1.2f;
+                ProjectileSystem.SpawnServerProjectile(origin, (target - origin).normalized,
+                    100, "SniperShot", 1);
+                RakeMultiplayerPlugin.Log?.LogInfo("[AutoTest] projectile fired at the Rake");
+            }
+
+            yield return new WaitForSeconds(1.5f);
+
+            float after = rakeEnemy != null ? rakeEnemy.Health : -1f;
+            RakeMultiplayerPlugin.Log?.LogInfo("[AutoTest] projectile damage: before=" + before +
+                                               " after=" + after);
+
             yield return new WaitForSeconds(2f);
             RakeMultiplayerPlugin.Log?.LogInfo("[AutoTest] done");
             Application.Quit();
