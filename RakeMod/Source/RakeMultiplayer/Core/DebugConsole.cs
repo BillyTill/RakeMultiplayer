@@ -605,6 +605,19 @@ namespace RakeMultiplayer
                 return "Rake stunned for " + seconds.ToString("F1") + "s";
             });
 
+            Register("rake ai", "rake ai [lurk|flee]",
+                "Show the stalk AI state, or force a lurk/flee cycle (host only)", args =>
+            {
+                var rake = UnityEngine.Object.FindObjectOfType<NetworkedRakeAI>();
+                if (rake == null) return "rake: not found in this scene";
+                if (!rake.IsAiActive) return "rake ai: inactive (host a match, do not control the Rake)";
+
+                string mode = args.Length > 0 ? args[0].ToLowerInvariant() : "";
+                if (mode == "lurk") { rake.ForceLurk(); return "rake ai: lurk forced"; }
+                if (mode == "flee") { rake.ForceFlee(); return "rake ai: flee forced"; }
+                return rake.GetAiDebugInfo();
+            });
+
             Register("noclip", "noclip", "Toggle CharacterController collision for the local player", args =>
             {
                 var player = LocalPlayer();

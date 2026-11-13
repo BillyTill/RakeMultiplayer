@@ -44,6 +44,42 @@ namespace RakeMultiplayer
         public float attackRange = 3f;
         public float chaseVocalizationInterval = 3f;
 
+        [Header("Stalk Cycle (pack 2)")]
+        [Tooltip("The Rake walks to this distance from the hunter and watches.")]
+        public float lurkStandoffDistance = 60f;
+
+        [Tooltip("How long it stands still and watches before repositioning.")]
+        public float lurkWatchDuration = 20f;
+
+        [Tooltip("Pause between two lurk cycles.")]
+        public float lurkIntervalMin = 10f;
+        public float lurkIntervalMax = 22f;
+
+        [Tooltip("Below this distance the Rake starts the crouched approach.")]
+        public float sneakStartDistance = 30f;
+
+        [Tooltip("Below this distance the crouched approach becomes a charge.")]
+        public float chargeStartDistance = 20f;
+
+        [Tooltip("Fleeing ends when the hunter is farther than this.")]
+        public float fleeStopDistance = 100f;
+
+        [Tooltip("How far from the hunter the flee destination is placed.")]
+        public float fleeDestinationDistance = 130f;
+
+        [Tooltip("The hunter must aim this close to the Rake's centre to count as seeing it.")]
+        public float seenConeAngle = 10f;
+
+        [Tooltip("Maximum distance at which a hunter can notice the Rake.")]
+        public float seenRange = 120f;
+
+        [Tooltip("A gunshot within this range can start a lurk cycle.")]
+        public float noiseHearRange = 300f;
+
+        [Range(0f, 1f)]
+        [Tooltip("Chance the Rake uses the crouched (frozen) pose while watching.")]
+        public float lurkCrouchChance = 0.7f;
+
         private Enemy_AI enemyAI;
         private Animator animator;
         private AudioSource audioSource;
@@ -108,7 +144,9 @@ namespace RakeMultiplayer
             Follow = 7,
             Stealth = 8,
             Blocking = 9,
-            FeignedRetreat = 10
+            FeignedRetreat = 10,
+            Lurk = 11,
+            Flee = 12
         }
 
         // Current state tracking
@@ -126,6 +164,24 @@ namespace RakeMultiplayer
         private float blockingEndTime = 0f;
         private Vector3 lastDamageDirection;
         private float lastDamageTime = 0f;
+
+        // Pack 2: lurk / sneak / charge / flee cycle
+        private Vector3 _lurkPoint;
+        private bool _lurkPointValid;
+        private bool _lurkArrived;
+        private bool _lurkCrouch;
+        private float _lurkWatchTimer;
+        private float _lurkCooldownTimer;
+        private float _lurkFreezeTimer;
+        private float _repathTimer = -999f;
+        private Vector3 _lastDestination;
+        private float _seenTimer;
+        private bool _seenCached;
+        private float _noiseCooldown;
+        private float _fleeRepathTimer;
+
+        private float _clientLurkFreezeTimer;
+
 
         // Hunter tracking
         private List<Transform> hunters = new List<Transform>();
@@ -188,7 +244,8 @@ namespace RakeMultiplayer
 
             enemyHealthField = type.GetField("Health", flags);
             enemyMaxHealthField = type.GetField("MaxHealth", flags);
-            enemyAgentField = type.GetField("agent", flags);
+            // Enemy_AI exposes the NavMeshAgent as "nav"; keep the old name as a fallback.
+            enemyAgentField = type.GetField("nav", flags) ?? type.GetField("agent", flags);
             enemyChaseVocalsField = type.GetField("chaseVocals", flags);
             enemyAttackMethod = type.GetMethod("Attack", flags);
             enemyTakeDamageMethod = type.GetMethod("TakeDamage", flags);
@@ -197,9 +254,13 @@ namespace RakeMultiplayer
             if (enemyAgentField != null)
             {
                 var agent = enemyAgentField.GetValue(enemyAI) as NavMeshAgent;
-                if (agent != null)
+                if (agent != null && agent.speed > 0.1f)
                 {
                     originalAgentSpeed = agent.speed;
+                }
+                else if (enemyAI != null && enemyAI.runSpeed > 0.1f)
+                {
+                    originalAgentSpeed = enemyAI.runSpeed;
                 }
             }
         }
@@ -222,10 +283,13 @@ namespace RakeMultiplayer
                 animator.applyRootMotion = false;
             }
 
-            // Initial state: Follow at session start
+            // Initial state: the stalk cycle starts from Idle after a short pause.
             if (RakeMultiplayerPlugin.isServer)
             {
-                TransitionToState(RakeState.Follow);
+                // First cycle starts soon so the opening read is "the Rake is watching
+                // from the tree line", not "it stands in the spawn forever".
+                _lurkCooldownTimer = UnityEngine.Random.Range(3f, 8f);
+                TransitionToState(RakeState.Idle);
             }
 
             _initialized = true;
@@ -256,10 +320,18 @@ namespace RakeMultiplayer
                 // to the forest by the day spawn logic.
                 if (!_playerControlled) UpdateDaySpawn();
 
-                if (!RakeMultiplayerPlugin.isConnected) return;
+                if (!RakeMultiplayerPlugin.isConnected)
+                {
+                    // Single-player: the vanilla Enemy_AI is the brain, leave it alone.
+                    RestoreVanillaBrain();
+                    return;
+                }
 
                 if (!_playerControlled)
                 {
+                    // The stalking cycle is the only brain while the AI owns the Rake.
+                    EnforceAiAuthority();
+
                     // Update hunter list
                     UpdateHunterList();
 
@@ -276,6 +348,8 @@ namespace RakeMultiplayer
 
                     // Run state machine
                     UpdateStateMachine();
+                    UpdateAiAnimation();
+                    UpdateClientAudio();
                 }
 
                 // Sync at 15Hz
@@ -330,6 +404,16 @@ namespace RakeMultiplayer
 
         /// <summary>True while a human is driving the Rake instead of the AI.</summary>
         public bool IsPlayerControlled { get { return _playerControlled; } }
+
+        /// <summary>True while this server runs the stalk AI (mod brain owns the Rake).</summary>
+        public bool IsAiActive
+        {
+            get
+            {
+                return RakeMultiplayerPlugin.isServer && RakeMultiplayerPlugin.isConnected &&
+                       !_playerControlled && !_remoteOwner;
+            }
+        }
 
         /// <summary>This peer drives the Rake and publishes its state to the server.</summary>
         public bool IsLocalOwner { get { return _localOwner; } }
@@ -754,8 +838,11 @@ namespace RakeMultiplayer
 
         private void UpdateStateMachine()
         {
-            stateTimer += Time.deltaTime;
-            feignedRetreatCooldownTimer = Mathf.Max(0f, feignedRetreatCooldownTimer - Time.deltaTime);
+            float dt = Time.deltaTime;
+            stateTimer += dt;
+            feignedRetreatCooldownTimer = Mathf.Max(0f, feignedRetreatCooldownTimer - dt);
+            _lurkCooldownTimer = Mathf.Max(0f, _lurkCooldownTimer - dt);
+            _noiseCooldown = Mathf.Max(0f, _noiseCooldown - dt);
 
             // Check for death
             float health = GetCurrentHealth();
@@ -764,9 +851,6 @@ namespace RakeMultiplayer
                 TransitionToState(RakeState.Dead);
                 return;
             }
-
-            // Check for stunned (trap trigger) - could be expanded with actual trap detection
-            // For now, we'll assume external code sets a stunned flag on Enemy_AI
 
             // State-specific updates
             switch (currentState)
@@ -777,6 +861,9 @@ namespace RakeMultiplayer
                 case RakeState.Follow:
                     UpdateFollow();
                     break;
+                case RakeState.Lurk:
+                    UpdateLurk();
+                    break;
                 case RakeState.Stealth:
                     UpdateStealth();
                     break;
@@ -785,6 +872,9 @@ namespace RakeMultiplayer
                     break;
                 case RakeState.Attack:
                     UpdateAttack();
+                    break;
+                case RakeState.Flee:
+                    UpdateFlee();
                     break;
                 case RakeState.Blocking:
                     UpdateBlocking();
@@ -802,138 +892,236 @@ namespace RakeMultiplayer
                     UpdateDead();
                     break;
             }
-
-            // Animator is driven by the game's own Enemy_AI parameters (WalkType/Speed/bCrouch).
         }
 
+        /// <summary>
+        /// Idle is the pause between lurk cycles. A hunter who walks right into the
+        /// Rake interrupts it: close range means stalk, very close range means charge.
+        /// </summary>
         private void UpdateIdle()
         {
-            // Idle -> Follow (session start)
-            TransitionToState(RakeState.Follow);
-        }
+            if (currentTarget == null) return;
 
-        private void UpdateFollow()
-        {
-            if (currentTarget == null)
-            {
-                // No hunters found, stay idle
-                return;
-            }
+            float distance = Vector3.Distance(transform.position, currentTarget.position);
 
-            // Silent movement - no footstep sounds
-            // Maintain 15-25m distance from nearest hunter
-            float distToNearest = Vector3.Distance(transform.position, currentTarget.position);
-            
-            Vector3 targetPos;
-            if (distToNearest < followMinDistance)
-            {
-                // Too close - move away
-                Vector3 awayDir = (transform.position - currentTarget.position).normalized;
-                targetPos = currentTarget.position + awayDir * followMaxDistance;
-            }
-            else if (distToNearest > followMaxDistance)
-            {
-                // Too far - move closer
-                Vector3 towardDir = (currentTarget.position - transform.position).normalized;
-                targetPos = transform.position + towardDir * (distToNearest - followMaxDistance * 0.5f);
-            }
-            else
-            {
-                // In range - circle around the current target
-                Vector3 toTarget = (currentTarget.position - transform.position).normalized;
-                Vector3 perpendicular = Vector3.Cross(toTarget, Vector3.up).normalized;
-                targetPos = currentTarget.position + perpendicular * followMinDistance;
-            }
-
-            // Avoid line of sight using raycasts
-            if (Physics.Raycast(transform.position, (targetPos - transform.position).normalized, 
-                out RaycastHit hit, Vector3.Distance(transform.position, targetPos), 
-                LayerMask.GetMask("Default", "Terrain")))
-            {
-                // Obstacle in way - adjust path
-                targetPos = hit.point + hit.normal * 2f;
-            }
-
-            // Move towards target position silently
-            MoveToTarget(targetPos, silent: true);
-
-            // Face the current target
-            if (currentTarget != null)
-            {
-                Vector3 lookDir = (currentTarget.position - transform.position).normalized;
-                lookDir.y = 0;
-                if (lookDir != Vector3.zero)
-                {
-                    FaceTarget(lookDir, 5f);
-                }
-            }
-
-            // Transition checks
-            float distToIsolated = currentTarget != null ?
-                Vector3.Distance(transform.position, currentTarget.position) : float.MaxValue;
-
-            // Follow -> Stealth: close enough (< 20m) and not seen
-            if (distToIsolated < stealthTransitionDistance && !IsHunterLookingAtRake(currentTarget))
-            {
-                TransitionToState(RakeState.Stealth);
-                return;
-            }
-
-            // Follow -> Chase: spotted by any hunter
-            foreach (var hunter in hunters)
-            {
-                if (IsHunterLookingAtRake(hunter))
-                {
-                    TransitionToState(RakeState.Chase);
-                    return;
-                }
-            }
-        }
-
-        private void UpdateStealth()
-        {
-            // Cache currentTarget to avoid race condition with UpdateHunterList
-            var target = currentTarget;
-            if (target == null)
-            {
-                TransitionToState(RakeState.Follow);
-                return;
-            }
-
-            // Maintain stealth position behind/around target
-            Vector3 toTarget = (target.position - transform.position).normalized;
-            Vector3 stealthPos = target.position - toTarget * 10f + Vector3.up * 0.5f;
-            
-            // Silent movement
-            MoveToTarget(stealthPos, silent: true);
-
-            // Face target
-            Vector3 lookDir = (target.position - transform.position).normalized;
-            lookDir.y = 0;
-            if (lookDir != Vector3.zero)
-            {
-                FaceTarget(lookDir, 3f);
-            }
-
-            // Hunter look detection: raycast from Camera.main, 30° cone, 20m range
-            if (IsHunterLookingAtRake(currentTarget))
+            // Point blank: even between cycles the Rake will not ignore a hunter
+            // standing in its face. Otherwise the lurk cycle owns the decision.
+            if (distance < 6f)
             {
                 TransitionToState(RakeState.Chase);
                 return;
             }
 
-            // Stealth -> Follow: losing track of hunters
-            if (currentTarget == null || Vector3.Distance(transform.position, currentTarget.position) > stealthLookRange * 1.5f)
+            if (_lurkCooldownTimer > 0f) return;
+            BeginLurk();
+        }
+
+        /// <summary>Legacy state: behave like a new lurk cycle.</summary>
+        private void UpdateFollow()
+        {
+            BeginLurk();
+        }
+
+        /// <summary>
+        /// Lurk: walk to a vantage point about 60 m from the hunter (on the line
+        /// between them), stand still, freeze the idle/crawl animation and watch.
+        /// After lurkWatchDuration it repositions or goes back to Idle.
+        /// </summary>
+        private void UpdateLurk()
+        {
+            var target = currentTarget;
+            if (target == null)
             {
-                TransitionToState(RakeState.Follow);
+                _lurkCooldownTimer = UnityEngine.Random.Range(lurkIntervalMin, lurkIntervalMax);
+                TransitionToState(RakeState.Idle);
                 return;
             }
 
-            // Stealth -> Chase: close enough to attack
-            if (Vector3.Distance(transform.position, currentTarget.position) < attackRange)
+            float distance = Vector3.Distance(transform.position, target.position);
+
+            // During the watch, a hunter closing to 30 m starts the silent approach.
+            // While still walking to the vantage point the Rake keeps going.
+            if (_lurkArrived && distance < sneakStartDistance)
             {
-                TransitionToState(RakeState.Attack);
+                TransitionToState(RakeState.Stealth);
                 return;
+            }
+
+            // The hunter is actually looking at the Rake: break contact.
+            if (IsRakeSeenCached())
+            {
+                TransitionToState(RakeState.Flee);
+                return;
+            }
+
+            if (!_lurkArrived)
+            {
+                if (!_lurkPointValid)
+                {
+                    ArriveAtLurk();
+                }
+                else
+                {
+                    float speed = Vector3.Distance(transform.position, _lurkPoint) > 35f
+                        ? GetRunSpeed() : GetWalkSpeed();
+                    MoveToTarget(_lurkPoint, false, speed);
+
+                    var agent = GetEnemyAgent();
+                    bool arrived = agent != null && !agent.pathPending && agent.remainingDistance <= 2.5f;
+                    if (arrived || Vector3.Distance(transform.position, _lurkPoint) < 2.5f || stateTimer > 60f)
+                    {
+                        ArriveAtLurk();
+                    }
+                }
+            }
+
+            if (_lurkArrived)
+            {
+                FaceLook(target.position, 2.5f);
+                _lurkWatchTimer += Time.deltaTime;
+                if (_lurkWatchTimer >= lurkWatchDuration)
+                {
+                    _lurkCooldownTimer = UnityEngine.Random.Range(lurkIntervalMin, lurkIntervalMax);
+                    TransitionToState(RakeState.Idle);
+                }
+            }
+        }
+
+        /// <summary>Stop at the vantage point and start the watch timer.</summary>
+        private void ArriveAtLurk()
+        {
+            _lurkArrived = true;
+            _lurkWatchTimer = 0f;
+            _lurkFreezeTimer = 0.35f;
+            _lurkCrouch = UnityEngine.Random.value < lurkCrouchChance;
+
+            var agent = GetEnemyAgent();
+            if (agent != null && agent.isOnNavMesh)
+            {
+                agent.Stop();
+                agent.ResetPath();
+            }
+        }
+
+        /// <summary>Pick a standoff point ~60 m from the hunter, reachable and in the open.</summary>
+        private bool TryFindLurkPoint(Transform target, out Vector3 point)
+        {
+            point = transform.position;
+            if (target == null) return false;
+
+            float currentDistance = Vector3.Distance(transform.position, target.position);
+            if (currentDistance >= sneakStartDistance && currentDistance <= lurkStandoffDistance + 10f &&
+                HasLineOfSight(transform.position + Vector3.up * 1.4f, target.position + Vector3.up * 1.2f))
+            {
+                // Already at a good watching distance with a clear view: stay put.
+                return true;
+            }
+
+            Vector3 toRake = transform.position - target.position;
+            toRake.y = 0f;
+            if (toRake.sqrMagnitude < 1f) toRake = -target.forward;
+            toRake.y = 0f;
+            if (toRake.sqrMagnitude < 0.001f) toRake = Vector3.forward;
+            toRake.Normalize();
+
+            float[] angles = { 0f, 15f, -15f, 30f, -30f, 45f, -45f, 60f, -60f, 90f, -90f };
+            Vector3 fallback = transform.position;
+            bool hasFallback = false;
+
+            for (int i = 0; i < angles.Length; i++)
+            {
+                Vector3 dir = Quaternion.Euler(0f, angles[i], 0f) * toRake;
+                Vector3 candidate = target.position + dir * lurkStandoffDistance;
+
+                NavMeshHit hit;
+                if (!NavMesh.SamplePosition(candidate, out hit, 12f, NavMesh.AllAreas)) continue;
+                candidate = hit.position;
+
+                NavMeshPath path = new NavMeshPath();
+                if (!NavMesh.CalculatePath(transform.position, candidate, NavMesh.AllAreas, path)) continue;
+                if (path.status != NavMeshPathStatus.PathComplete) continue;
+
+                // Prefer a spot from which the hunter is actually visible: the whole
+                // point of the watch is to be seen at a distance, not to stare at a hill.
+                if (HasLineOfSight(candidate + Vector3.up * 1.4f, target.position + Vector3.up * 1.2f))
+                {
+                    point = candidate;
+                    return true;
+                }
+
+                if (!hasFallback)
+                {
+                    fallback = candidate;
+                    hasFallback = true;
+                }
+            }
+
+            if (hasFallback)
+            {
+                point = fallback;
+                return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>Clear physical line between two points (triggers are ignored).</summary>
+        private static bool HasLineOfSight(Vector3 from, Vector3 to)
+        {
+            Vector3 delta = to - from;
+            float distance = delta.magnitude;
+            if (distance < 0.5f) return true;
+
+            RaycastHit[] hits = Physics.RaycastAll(from, delta / distance, distance - 0.4f);
+            for (int i = 0; i < hits.Length; i++)
+            {
+                if (hits[i].collider == null) continue;
+                if (hits[i].collider.isTrigger) continue;
+                return false;
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// Stealth: crouch and close the distance. Being noticed here does not make
+        /// the Rake flee: it charges instead.
+        /// </summary>
+        private void UpdateStealth()
+        {
+            var target = currentTarget;
+            if (target == null)
+            {
+                TransitionToState(RakeState.Idle);
+                return;
+            }
+
+            float distance = Vector3.Distance(transform.position, target.position);
+
+            if (distance <= chargeStartDistance)
+            {
+                TransitionToState(RakeState.Chase);
+                return;
+            }
+
+            if (IsRakeSeenCached())
+            {
+                TransitionToState(RakeState.Chase);
+                return;
+            }
+
+            if (distance > fleeStopDistance)
+            {
+                BeginLurk();
+                return;
+            }
+
+            MoveToTarget(target.position, true, GetSneakSpeed());
+
+            Vector3 lookDir = target.position - transform.position;
+            lookDir.y = 0f;
+            if (lookDir.sqrMagnitude > 0.01f)
+            {
+                FaceTarget(lookDir.normalized, 4f);
             }
         }
 
@@ -950,57 +1138,37 @@ namespace RakeMultiplayer
             if (currentTarget == null)
             {
                 noTargetTimer += Time.deltaTime;
-                
-                // FeignedRetreat trigger: health < 30% AND no target for 3s
-                float health = GetCurrentHealth();
-                float maxHealth = GetMaxHealth();
-                if (maxHealth > 0f && health / maxHealth < feignedRetreatHealthThreshold && noTargetTimer >= feignedRetreatNoTargetTime)
-                {
-                    if (feignedRetreatCooldownTimer <= 0f)
-                    {
-                        TransitionToState(RakeState.FeignedRetreat);
-                        return;
-                    }
-                }
-                
-                // Search for target
                 if (noTargetTimer > 5f)
                 {
-                    TransitionToState(RakeState.Search);
+                    _lurkCooldownTimer = UnityEngine.Random.Range(lurkIntervalMin, lurkIntervalMax);
+                    TransitionToState(RakeState.Idle);
                 }
                 return;
             }
-            else
-            {
-                noTargetTimer = 0f;
-            }
+            noTargetTimer = 0f;
 
-            // Direct pathfinding to target
-            MoveToTarget(currentTarget.position, silent: false);
+            float distance = Vector3.Distance(transform.position, currentTarget.position);
 
-            // Face target
+            MoveToTarget(currentTarget.position, false, GetRunSpeed());
+
             Vector3 lookDir = (currentTarget.position - transform.position).normalized;
-            lookDir.y = 0;
+            lookDir.y = 0f;
             if (lookDir != Vector3.zero)
             {
                 FaceTarget(lookDir, 10f);
             }
 
-            // Check for frontal damage (Blocking trigger)
-            if (WasHitFromFront())
-            {
-                TransitionToState(RakeState.Blocking);
-                return;
-            }
-
-            // Chase -> Attack: close to target
-            if (Vector3.Distance(transform.position, currentTarget.position) < attackRange)
+            if (distance <= attackRange)
             {
                 TransitionToState(RakeState.Attack);
                 return;
             }
 
-            // Chase -> FeignedRetreat: health < 30% & no target for 3s (handled above)
+            if (distance > fleeStopDistance)
+            {
+                _lurkCooldownTimer = UnityEngine.Random.Range(lurkIntervalMin, lurkIntervalMax);
+                TransitionToState(RakeState.Idle);
+            }
         }
 
         private void UpdateAttack()
@@ -1013,7 +1181,7 @@ namespace RakeMultiplayer
 
             // Face target
             Vector3 lookDir = (currentTarget.position - transform.position).normalized;
-            lookDir.y = 0;
+            lookDir.y = 0f;
             if (lookDir != Vector3.zero)
             {
                 FaceTarget(lookDir, 15f);
@@ -1033,12 +1201,22 @@ namespace RakeMultiplayer
                 animator.SetBool("bAttack", true);
             }
 
-            // One hit per AttackInterval while the target stays in range
+            // One hit per AttackInterval while the target stays in range and in front.
             _attackCooldown -= Time.deltaTime;
             if (_attackCooldown <= 0f)
             {
                 _attackCooldown = AttackInterval;
-                DealRakeDamage(currentTarget);
+
+                Vector3 toTarget = currentTarget.position - transform.position;
+                float distance = toTarget.magnitude;
+                toTarget.y = 0f;
+                bool inFront = toTarget.sqrMagnitude < 0.01f ||
+                               Vector3.Dot(transform.forward, toTarget.normalized) > 0.2f;
+
+                if (distance <= attackRange + 1.5f && inFront)
+                {
+                    DealRakeDamage(currentTarget);
+                }
             }
 
             // Attack -> Chase: target escaped (moved out of range)
@@ -1049,6 +1227,234 @@ namespace RakeMultiplayer
             }
         }
 
+        /// <summary>
+        /// Flee: run directly away from the hunter until it is farther than
+        /// fleeStopDistance, then pause before the next lurk cycle.
+        /// </summary>
+        private void UpdateFlee()
+        {
+            var target = currentTarget;
+            if (target == null)
+            {
+                _lurkCooldownTimer = UnityEngine.Random.Range(lurkIntervalMin, lurkIntervalMax);
+                TransitionToState(RakeState.Idle);
+                return;
+            }
+
+            float distance = Vector3.Distance(transform.position, target.position);
+            if (distance > fleeStopDistance)
+            {
+                _lurkCooldownTimer = UnityEngine.Random.Range(lurkIntervalMin, lurkIntervalMax);
+                TransitionToState(RakeState.Idle);
+                return;
+            }
+
+            _fleeRepathTimer -= Time.deltaTime;
+            if (_fleeRepathTimer <= 0f || !_lurkPointValid)
+            {
+                _fleeRepathTimer = 1.2f;
+
+                Vector3 away = transform.position - target.position;
+                away.y = 0f;
+                if (away.sqrMagnitude < 0.01f) away = -target.forward;
+                away.y = 0f;
+                if (away.sqrMagnitude < 0.001f) away = Vector3.forward;
+                away.Normalize();
+
+                Vector3 desired = target.position + away * fleeDestinationDistance;
+                Vector3 sampled;
+                if (!TrySampleNavMesh(desired, 18f, out sampled)) sampled = desired;
+                _lurkPoint = sampled;
+                _lurkPointValid = true;
+            }
+
+            if (_lurkPointValid)
+            {
+                MoveToTarget(_lurkPoint, false, GetRunSpeed());
+            }
+        }
+
+        /// <summary>Start a lurk cycle against the current hunter.</summary>
+        private void BeginLurk()
+        {
+            var target = currentTarget;
+            if (target == null) return;
+
+            Vector3 point = transform.position;
+            _lurkPointValid = TryFindLurkPoint(target, out point);
+            _lurkPoint = point;
+            _lurkArrived = false;
+            _lurkWatchTimer = 0f;
+            _lurkFreezeTimer = 0f;
+            _lurkCrouch = UnityEngine.Random.value < lurkCrouchChance;
+
+            if (currentState != RakeState.Lurk)
+            {
+                TransitionToState(RakeState.Lurk);
+            }
+            else
+            {
+                stateTimer = 0f;
+                ResetAgentPath();
+            }
+        }
+
+        private static bool TrySampleNavMesh(Vector3 desired, float radius, out Vector3 result)
+        {
+            NavMeshHit hit;
+            if (NavMesh.SamplePosition(desired, out hit, radius, NavMesh.AllAreas))
+            {
+                result = hit.position;
+                return true;
+            }
+
+            result = desired;
+            return false;
+        }
+
+        /// <summary>Turn the whole body towards a world point (only used while standing).</summary>
+        private void FaceLook(Vector3 worldPoint, float speed)
+        {
+            Vector3 direction = worldPoint - transform.position;
+            direction.y = 0f;
+            if (direction.sqrMagnitude < 0.01f) return;
+
+            transform.rotation = Quaternion.Slerp(transform.rotation,
+                Quaternion.LookRotation(direction), Time.deltaTime * speed);
+        }
+
+        private bool IsRakeSeenCached()
+        {
+            _seenTimer -= Time.deltaTime;
+            if (_seenTimer <= 0f)
+            {
+                _seenTimer = 0.2f;
+                _seenCached = RakeIsSeenByAnyHunter();
+            }
+            return _seenCached;
+        }
+
+        private bool RakeIsSeenByAnyHunter()
+        {
+            for (int i = 0; i < hunters.Count; i++)
+            {
+                if (hunters[i] != null && IsRakeSeenByHunter(hunters[i])) return true;
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// A hunter sees the Rake when the screen centre is aimed at it and a ray from
+        /// the camera reaches the Rake before anything else. Body facing is used for
+        /// remote players whose camera is not simulated on this peer.
+        /// </summary>
+        private bool IsRakeSeenByHunter(Transform hunter)
+        {
+            if (hunter == null) return false;
+
+            var fps = hunter.GetComponent<FPSController>();
+            if (fps != null && fps.bHide) return false;
+
+            Vector3 eye;
+            Vector3 forward;
+            float range = seenRange;
+
+            Camera cam = null;
+            var spawner = PlayerSpawner.Instance;
+            bool isLocal = spawner != null && spawner.LocalPlayer != null &&
+                           spawner.LocalPlayer.transform == hunter;
+
+            if (isLocal)
+            {
+                // CameraMouseLook knows the real first-person camera (it is not always
+                // Camera.main, e.g. while a scope camera is active).
+                var look = hunter.GetComponentInChildren<CameraMouseLook>();
+                if (look == null) look = hunter.GetComponentInParent<CameraMouseLook>();
+                if (look != null && look.camera != null) cam = look.camera.GetComponent<Camera>();
+                if (cam == null || !cam.isActiveAndEnabled) cam = Camera.main;
+            }
+
+            if (cam == null || !cam.isActiveAndEnabled) cam = hunter.GetComponentInChildren<Camera>();
+
+            if (cam != null && cam.isActiveAndEnabled)
+            {
+                eye = cam.transform.position;
+                forward = cam.transform.forward;
+            }
+            else
+            {
+                eye = hunter.position + Vector3.up * 1.6f;
+                forward = hunter.forward;
+                range = Mathf.Min(range, 80f);
+            }
+
+            Vector3 rakePoint = transform.position + Vector3.up * 1.2f;
+            Vector3 toRake = rakePoint - eye;
+            float distance = toRake.magnitude;
+            if (distance < 0.05f || distance > range) return false;
+
+            Vector3 direction = toRake / distance;
+            if (Vector3.Angle(forward, direction) > seenConeAngle) return false;
+
+            // Unity 5.x has no RaycastNonAlloc: use RaycastAll and filter afterwards.
+            RaycastHit[] hits = Physics.RaycastAll(eye, direction, distance + 2f);
+
+            Collider nearest = null;
+            float nearestDistance = float.MaxValue;
+            for (int i = 0; i < hits.Length; i++)
+            {
+                var hit = hits[i];
+                var collider = hit.collider;
+                if (collider == null) continue;
+                if (collider.transform == hunter || collider.transform.IsChildOf(hunter)) continue;
+                if (collider.isTrigger) continue; // only solid geometry blocks the view
+                if (hit.distance < nearestDistance)
+                {
+                    nearestDistance = hit.distance;
+                    nearest = collider;
+                }
+            }
+
+            return nearest != null && IsRakeCollider(nearest);
+        }
+
+        private bool IsRakeCollider(Collider collider)
+        {
+            if (collider == null) return false;
+            if (collider.transform == transform || collider.transform.IsChildOf(transform)) return true;
+            return enemyAI != null && collider.GetComponentInParent<Enemy_AI>() == enemyAI;
+        }
+
+        private float GetWalkSpeed()
+        {
+            if (enemyAI != null && enemyAI.walkSpeed > 0.1f) return enemyAI.walkSpeed;
+            return 1.6f;
+        }
+
+        private float GetRunSpeed()
+        {
+            if (enemyAI != null && enemyAI.runSpeed > 0.1f) return enemyAI.runSpeed;
+            if (originalAgentSpeed > 0.1f) return originalAgentSpeed;
+            return 5f;
+        }
+
+        private float GetSneakSpeed()
+        {
+            if (enemyAI != null && enemyAI.hauntSpeed > 0.1f) return Mathf.Clamp(enemyAI.hauntSpeed, 1f, 2.2f);
+            return 1.6f;
+        }
+
+        private void ResetAgentPath()
+        {
+            var agent = GetEnemyAgent();
+            if (agent != null && agent.isOnNavMesh)
+            {
+                agent.Stop();
+                agent.ResetPath();
+            }
+            _repathTimer = -999f;
+            _lastDestination = Vector3.zero;
+        }
         /// <summary>
         /// Apply one Rake hit. The host damages its own player directly; for a client the
         /// victim gets a PlayerDamaged packet and applies it locally, so the vanilla
@@ -1164,10 +1570,10 @@ namespace RakeMultiplayer
 
         private void UpdateSearch()
         {
-            // Simple search pattern - could be expanded
             if (stateTimer > 10f)
             {
-                TransitionToState(RakeState.Follow);
+                _lurkCooldownTimer = UnityEngine.Random.Range(lurkIntervalMin, lurkIntervalMax);
+                TransitionToState(RakeState.Idle);
             }
         }
 
@@ -1177,7 +1583,8 @@ namespace RakeMultiplayer
             if (stateTimer > stunDuration)
             {
                 SetStunnedPhysics(false);
-                TransitionToState(RakeState.Follow);
+                _lurkCooldownTimer = UnityEngine.Random.Range(lurkIntervalMin, lurkIntervalMax);
+                TransitionToState(RakeState.Idle);
             }
         }
 
@@ -1187,11 +1594,20 @@ namespace RakeMultiplayer
             var agent = GetEnemyAgent();
             if (agent != null && agent.isOnNavMesh)
             {
-                if (stunned) agent.Stop();
-                else agent.Resume();
+                if (stunned)
+                {
+                    agent.Stop();
+                    agent.ResetPath();
+                }
+                else
+                {
+                    agent.Resume();
+                }
             }
 
-            if (enemyAI != null)
+            // The mod brain owns the Rake while the AI is active; never switch the
+            // vanilla brain back on from here (it would fight the state machine).
+            if (enemyAI != null && !IsAiActive)
             {
                 enemyAI.enabled = !stunned;
             }
@@ -1199,8 +1615,16 @@ namespace RakeMultiplayer
 
         private NavMeshAgent GetEnemyAgent()
         {
-            if (enemyAI == null || enemyAgentField == null) return null;
-            return enemyAgentField.GetValue(enemyAI) as NavMeshAgent;
+            if (enemyAI != null && enemyAI.nav != null) return enemyAI.nav;
+            if (enemyAI != null && enemyAgentField != null)
+            {
+                var cached = enemyAgentField.GetValue(enemyAI) as NavMeshAgent;
+                if (cached != null) return cached;
+            }
+
+            var own = GetComponent<NavMeshAgent>();
+            if (own != null) return own;
+            return GetComponentInChildren<NavMeshAgent>();
         }
 
         private bool _clientFrozeSimulation;
@@ -1276,6 +1700,78 @@ namespace RakeMultiplayer
         /// code fed the animator a speed derived from the AI state (Follow = 1,
         /// Chase = 2), which is never 0, so the Rake walked in place forever.
         /// </summary>
+        /// <summary>
+        /// Host-side animation for the mod brain. The vanilla Enemy_AI is disabled, so
+        /// the stalk/crouch/freeze poses are driven from the state machine.
+        /// </summary>
+        private void UpdateAiAnimation()
+        {
+            if (animator == null) return;
+
+            switch (currentState)
+            {
+                case RakeState.Lurk:
+                    animator.speed = 1f;
+                    animator.SetBool("bAttack", false);
+                    animator.SetInteger("WalkType", 1);
+                    if (!_lurkArrived)
+                    {
+                        animator.SetBool("bCrouch", false);
+                        var agent = GetEnemyAgent();
+                        bool running = agent != null && agent.speed >= GetRunSpeed() - 0.5f;
+                        animator.SetFloat("Speed", running ? 2f : 1f);
+                        _lurkFreezeTimer = 0f;
+                    }
+                    else
+                    {
+                        animator.SetBool("bCrouch", _lurkCrouch);
+                        animator.SetFloat("Speed", 0f);
+                        if (_lurkFreezeTimer > 0f)
+                        {
+                            _lurkFreezeTimer -= Time.deltaTime;
+                        }
+                        else
+                        {
+                            animator.speed = 0f; // fully frozen watching pose
+                        }
+                    }
+                    break;
+
+                case RakeState.Stealth:
+                    animator.speed = 1f;
+                    animator.SetBool("bCrouch", true);
+                    animator.SetBool("bAttack", false);
+                    animator.SetInteger("WalkType", 1);
+                    animator.SetFloat("Speed", 1f);
+                    break;
+
+                case RakeState.Chase:
+                case RakeState.Flee:
+                    animator.speed = 1f;
+                    animator.SetBool("bCrouch", false);
+                    animator.SetBool("bAttack", false);
+                    animator.SetInteger("WalkType", 1);
+                    animator.SetFloat("Speed", 2f);
+                    break;
+
+                case RakeState.Attack:
+                    animator.speed = 1f;
+                    animator.SetBool("bCrouch", false);
+                    animator.SetBool("bAttack", true);
+                    animator.SetInteger("WalkType", 1);
+                    animator.SetFloat("Speed", 0f);
+                    break;
+
+                case RakeState.Idle:
+                    animator.speed = 1f;
+                    animator.SetBool("bCrouch", false);
+                    animator.SetBool("bAttack", false);
+                    animator.SetInteger("WalkType", 1);
+                    animator.SetFloat("Speed", 0f);
+                    break;
+            }
+        }
+
         private void UpdateClientAnimation()
         {
             if (animator == null) return;
@@ -1300,6 +1796,22 @@ namespace RakeMultiplayer
                 animator.SetBool("bAttack", currentState == RakeState.Attack);
                 return;
             }
+
+            // The host freezes the crawl/idle pose while it watches from a distance.
+            // Freeze after a short settle so the crouch transition is not cut in half.
+            if (currentState == RakeState.Lurk && targetAnimSpeed < 0.1f)
+            {
+                _clientLurkFreezeTimer += dt;
+                animator.SetBool("bCrouch", (targetAnimFlags & 1) != 0);
+                animator.SetBool("bAttack", (targetAnimFlags & 2) != 0);
+                animator.SetInteger("WalkType", targetWalkType);
+                animator.SetFloat("Speed", 0f);
+                animator.speed = _clientLurkFreezeTimer > 0.35f ? 0f : 1f;
+                return;
+            }
+
+            animator.speed = 1f;
+            _clientLurkFreezeTimer = 0f;
 
             // Mirror the host animator exactly: the crouch/sneak used while hunting
             // animals lives only in the vanilla parameters, not in our state enum.
@@ -1357,6 +1869,10 @@ namespace RakeMultiplayer
             {
                 _clientStepTimer = 0f;
             }
+
+            // On the host the state machine already handles chase vocalisations;
+            // this mirror only adds the attack roars there.
+            if (RakeMultiplayerPlugin.isServer && currentState == RakeState.Chase) return;
 
             if (currentState != _clientAudioState)
             {
@@ -1420,6 +1936,101 @@ namespace RakeMultiplayer
             RakeMultiplayerPlugin.Log?.LogInfo($"[3.11] Rake stunned for {stunDuration:F1}s");
         }
 
+        /// <summary>
+        /// The mod state machine is the only brain while the AI owns the Rake. The
+        /// vanilla Enemy_AI keeps its own Patrol/PlayerHount/Escape logic and would
+        /// fight every destination we set, so disable its Update.
+        /// </summary>
+        private void EnforceAiAuthority()
+        {
+            if (enemyAI != null && enemyAI.enabled)
+            {
+                enemyAI.enabled = false;
+                RakeMultiplayerPlugin.Log?.LogInfo("[AI] Vanilla Enemy_AI disabled; stalk AI owns the Rake");
+            }
+
+            var agent = GetEnemyAgent();
+            if (agent != null && !agent.enabled) agent.enabled = true;
+        }
+
+        /// <summary>Single-player: let the vanilla Rake AI run unchanged.</summary>
+        private void RestoreVanillaBrain()
+        {
+            if (_playerControlled || _remoteOwner || RakeMultiplayerPlugin.isConnected) return;
+
+            if (enemyAI != null && !enemyAI.enabled)
+            {
+                enemyAI.enabled = true;
+                RakeMultiplayerPlugin.Log?.LogInfo("[AI] Vanilla Enemy_AI restored (no multiplayer match)");
+            }
+        }
+
+        /// <summary>
+        /// A shot was fired within earshot. While waiting between lurk cycles the Rake
+        /// comes out to look; it does not interrupt a charge or a retreat.
+        /// </summary>
+        public void NotifyNoise(Vector3 position)
+        {
+            if (!IsAiActive) return;
+            if (_noiseCooldown > 0f) return;
+            if (Vector3.Distance(transform.position, position) > noiseHearRange) return;
+
+            if (currentState == RakeState.Chase || currentState == RakeState.Attack ||
+                currentState == RakeState.Flee || currentState == RakeState.Stunned ||
+                currentState == RakeState.Dead)
+            {
+                return;
+            }
+
+            _noiseCooldown = 6f;
+
+            if (currentState == RakeState.Idle)
+            {
+                _lurkCooldownTimer = 0f;
+                BeginLurk();
+            }
+            else if (currentState == RakeState.Lurk && _lurkArrived)
+            {
+                // Something happened: look towards it and keep watching.
+                _lurkWatchTimer = 0f;
+                FaceLook(position, 3f);
+            }
+
+            RakeMultiplayerPlugin.Log?.LogInfo("[AI] Heard a shot at " + position.ToString("F0"));
+        }
+
+        /// <summary>One-line state dump for the "rake ai" console command.</summary>
+        public string GetAiDebugInfo()
+        {
+            var target = currentTarget;
+            float distance = target != null ? Vector3.Distance(transform.position, target.position) : -1f;
+            var agent = GetEnemyAgent();
+
+            return "state=" + currentState + " prev=" + previousState +
+                   " target=" + (target != null ? target.name : "-") +
+                   " dist=" + distance.ToString("F1") +
+                   " seen=" + _seenCached +
+                   " lurkArrived=" + _lurkArrived +
+                   " watch=" + _lurkWatchTimer.ToString("F1") + "/" + lurkWatchDuration.ToString("F0") +
+                   " cooldown=" + _lurkCooldownTimer.ToString("F1") +
+                   " ai=" + IsAiActive +
+                   " agent=" + (agent == null ? "null" : (agent.isOnNavMesh ? "onMesh" : "offMesh")) +
+                   " path=" + (agent == null ? "-" : agent.pathStatus.ToString());
+        }
+
+        public void ForceLurk()
+        {
+            if (!IsAiActive) return;
+            _lurkCooldownTimer = 0f;
+            BeginLurk();
+        }
+
+        public void ForceFlee()
+        {
+            if (!IsAiActive || currentTarget == null) return;
+            TransitionToState(RakeState.Flee);
+        }
+
         private void UpdateDead()
         {
             // Dead state - disable AI
@@ -1436,6 +2047,11 @@ namespace RakeMultiplayer
             previousState = currentState;
             currentState = newState;
             stateTimer = 0f;
+            _seenTimer = 0f;
+
+            // Leaving a frozen lurk pose: let the animator run again.
+            if (animator != null) animator.speed = 1f;
+            ResetAgentPath();
 
             // State entry actions
             switch (newState)
@@ -1443,11 +2059,31 @@ namespace RakeMultiplayer
                 case RakeState.Stealth:
                     if (animator != null) animator.SetBool("bCrouch", true);
                     break;
+
+                case RakeState.Lurk:
+                    if (animator != null) animator.SetBool("bCrouch", false);
+                    _lurkArrived = false;
+                    _lurkWatchTimer = 0f;
+                    _lurkFreezeTimer = 0f;
+                    break;
+
+                case RakeState.Flee:
+                    if (animator != null) animator.SetBool("bCrouch", false);
+                    _fleeRepathTimer = 0f;
+                    _lurkPointValid = false;
+                    break;
+
+                case RakeState.Attack:
+                    if (animator != null) animator.SetBool("bCrouch", false);
+                    // A short wind-up so the first hit is not applied on the same frame
+                    // the state is entered.
+                    _attackCooldown = 0.5f;
+                    break;
+
                 case RakeState.Follow:
                 case RakeState.Idle:
                 case RakeState.Patrol:
                 case RakeState.Chase:
-                case RakeState.Attack:
                 case RakeState.Search:
                 case RakeState.Stunned:
                 case RakeState.Blocking:
@@ -1472,30 +2108,23 @@ namespace RakeMultiplayer
 
             RakeMultiplayerPlugin.Log?.LogInfo($"[AI] State transition: {previousState} -> {currentState}");
         }
-
-        private void MoveToTarget(Vector3 targetPos, bool silent)
+        private void MoveToTarget(Vector3 targetPos, bool silent, float speed = -1f)
         {
-            if (enemyAI == null) return;
+            var agent = GetEnemyAgent();
+            if (agent == null || !agent.isOnNavMesh) return;
 
-            // Use Enemy_AI's movement system via reflection (cached)
-            if (enemyAgentField != null)
+            float desired = speed > 0f ? speed : (silent ? GetSneakSpeed() : GetRunSpeed());
+            agent.speed = desired;
+            agent.stoppingDistance = 0.5f;
+
+            // Do not re-issue the path every frame: that cuts corners and makes the
+            // agent stutter. Repath on a timer or when the destination really moved.
+            bool destinationMoved = (targetPos - _lastDestination).sqrMagnitude > 4f;
+            if (_repathTimer < 0f || Time.time - _repathTimer > 0.45f || destinationMoved)
             {
-                var agent = enemyAgentField.GetValue(enemyAI) as NavMeshAgent;
-                if (agent != null && agent.isOnNavMesh)
-                {
-                    agent.SetDestination(targetPos);
-                    
-                    // Silent movement: reduce speed to minimize footstep sounds
-                    if (silent)
-                    {
-                        agent.speed = Mathf.Min(originalAgentSpeed, 2f); // Slow, quiet movement
-                    }
-                    else
-                    {
-                        // Restore original speed from Enemy_AI
-                        agent.speed = originalAgentSpeed;
-                    }
-                }
+                agent.SetDestination(targetPos);
+                _lastDestination = targetPos;
+                _repathTimer = Time.time;
             }
         }
 
@@ -1591,13 +2220,25 @@ namespace RakeMultiplayer
 
         private void PlayChaseVocalization()
         {
-            if (audioSource != null && enemyChaseVocalsField != null)
+            var src = audioSource != null ? audioSource : (enemyAI != null ? enemyAI.audioSource : null);
+            if (src == null) return;
+
+            AudioClip[] clips = null;
+            if (enemyChaseVocalsField != null)
             {
-                var clips = enemyChaseVocalsField.GetValue(enemyAI) as AudioClip[];
-                if (clips != null && clips.Length > 0)
-                {
-                    audioSource.PlayOneShot(clips[UnityEngine.Random.Range(0, clips.Length)]);
-                }
+                clips = enemyChaseVocalsField.GetValue(enemyAI) as AudioClip[];
+            }
+
+            // Enemy_AI has no "chaseVocals" field; idle sounds are the closest
+            // vanilla set and make the Rake audible while it stalks.
+            if ((clips == null || clips.Length == 0) && enemyAI != null)
+            {
+                clips = enemyAI.idleSounds;
+            }
+
+            if (clips != null && clips.Length > 0)
+            {
+                src.PlayOneShot(clips[UnityEngine.Random.Range(0, clips.Length)], 0.7f);
             }
         }
 
@@ -1619,13 +2260,19 @@ namespace RakeMultiplayer
                 RakeMultiplayerPlugin.Log?.LogInfo($"[AI] Blocking frontal damage! Reduction: {reduction * 100}%");
             }
 
-            // Stealth -> Chase on damage
-            if (currentState == RakeState.Stealth)
+            // Being hurt while watching from cover means the hunter spotted us:
+            // break contact. Sneaking or already charging means attack instead.
+            if (currentState == RakeState.Lurk)
             {
-                TransitionToState(RakeState.Chase);
+                TransitionToState(RakeState.Flee);
             }
-            // Follow -> Chase on damage
-            else if (currentState == RakeState.Follow)
+            else if (currentState == RakeState.Idle)
+            {
+                float distance = currentTarget != null
+                    ? Vector3.Distance(transform.position, currentTarget.position) : 0f;
+                TransitionToState(distance > sneakStartDistance ? RakeState.Flee : RakeState.Chase);
+            }
+            else if (currentState == RakeState.Stealth || currentState == RakeState.Follow)
             {
                 TransitionToState(RakeState.Chase);
             }
@@ -1823,6 +2470,16 @@ namespace RakeMultiplayer
                         isBlocking = true;
                         break;
                     case RakeState.FeignedRetreat:
+                        if (animator != null) animator.SetBool("bCrouch", false);
+                        isBlocking = false;
+                        break;
+                    case RakeState.Lurk:
+                        // The real pose comes from the animator flags in the snapshot;
+                        // this is only the entry default.
+                        if (animator != null) animator.SetBool("bCrouch", true);
+                        isBlocking = false;
+                        break;
+                    case RakeState.Flee:
                         if (animator != null) animator.SetBool("bCrouch", false);
                         isBlocking = false;
                         break;

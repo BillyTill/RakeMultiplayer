@@ -622,34 +622,11 @@ namespace RakeMultiplayer
             // Real ballistics: the server simulates the bullet and applies damage on impact.
             ProjectileSystem.SpawnShot(origin, direction, packet.Pellets, packet.Spread, amount, damageType, shooterId);
 
-            // ===== КРИТИЧЕСКИЙ ФИКС: Заставляем Рейка среагировать на выстрел (Danger state) =====
-            // Enemy_AI.Start() подписывается на NotificationsManager.Instance.AddListener("Event_PlayerFire")
-            // При получении уведомления он вызывает Event_PlayerFire(Component sender)
-            // который проверяет дистанцию до sender и вызывает SetDangerState()
-            // Мы создаём временный GameObject на позиции стрелка и вызываем Event_PlayerFire через рефлексию
-            try
-            {
-                var fakeShooter = new GameObject("FakeShooter_ForRakeReaction");
-                fakeShooter.transform.position = packet.ShooterPosition;
-                var fakeComponent = fakeShooter.AddComponent<Component>(); // Component is abstract, use a dummy MonoBehaviour
-                
-                // Actually we need a Component that has a Transform. Let's use a different approach:
-                // Create a MonoBehaviour on the fake object
-                var dummyBehaviour = fakeShooter.AddComponent<MonoBehaviour>();
-                
-                var eventMethod = typeof(Enemy_AI).GetMethod("Event_PlayerFire", 
-                    System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-                if (eventMethod != null)
-                {
-                    eventMethod.Invoke(_cachedEnemyAI, new object[] { dummyBehaviour });
-                    RakeMultiplayerPlugin.Log?.LogInfo($"[3.4] Forced Rake to react to shot from {packet.ShooterPosition} (Danger state)");
-                }
-                UnityEngine.Object.Destroy(fakeShooter);
-            }
-            catch (Exception ex)
-            {
-                RakeMultiplayerPlugin.Log?.LogError($"[3.4] Failed to trigger Rake Event_PlayerFire: {ex.Message}");
-            }
+            // The shot is heard: let the mod AI decide (start a lurk cycle, turn
+            // towards the noise). The vanilla "danger" escape is suppressed by
+            // RakeNoisePatch so it cannot fight the stalk state machine.
+            var rakeAI = _cachedEnemyAI != null ? _cachedEnemyAI.GetComponent<NetworkedRakeAI>() : null;
+            if (rakeAI != null) rakeAI.NotifyNoise(packet.ShooterPosition);
 
 
         }
