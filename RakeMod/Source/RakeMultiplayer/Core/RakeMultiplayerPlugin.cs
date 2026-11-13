@@ -169,6 +169,12 @@ namespace RakeMultiplayer
             cameraViewObj.AddComponent<CameraViewHotkey>();
             Log.LogInfo("[RakeMultiplayer] Camera view hotkey created (Tab)");
 
+            // Detailed Rake AI overlay (F7).
+            var rakeStatusObj = new UnityEngine.GameObject("RakeStatusPanel");
+            UnityEngine.Object.DontDestroyOnLoad(rakeStatusObj);
+            rakeStatusObj.AddComponent<UI.RakeStatusPanel>();
+            Log.LogInfo("[RakeMultiplayer] Rake status panel created (F7)");
+
             // Steam (Spacewar app 480) - optional; LAN keeps working without it.
             var steamObj = new UnityEngine.GameObject("SteamIntegration");
             UnityEngine.Object.DontDestroyOnLoad(steamObj);

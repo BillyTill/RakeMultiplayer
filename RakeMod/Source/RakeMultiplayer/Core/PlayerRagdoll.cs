@@ -21,6 +21,9 @@ namespace RakeMultiplayer
         /// <summary>Seconds the body stays down before everything is restored.</summary>
         public static float Duration = 4.0f;
 
+        /// <summary>Seconds after death before the corpse physics is switched off.</summary>
+        public static float CorpseDelay = 5.0f;
+
         /// <summary>Horizontal launch speed (m/s). ~3.5 gives a 2-3 m fall.</summary>
         public static float LaunchSpeed = 3.0f;
 
@@ -43,6 +46,7 @@ namespace RakeMultiplayer
         private static PhysicMaterial _friction;
 
         public static bool IsActive { get { return _localInstance != null; } }
+        public bool IsCorpseFrozen { get { return _frozen; } }
 
         private static readonly string[] PhysicsBones =
         {
@@ -74,6 +78,8 @@ namespace RakeMultiplayer
         private Vector3 _playerPosition;
         private float _timer;
         private bool _restored;
+        private bool _dead;
+        private bool _frozen;
 
         // ---------------------------------------------------------------- public API
 
@@ -106,7 +112,9 @@ namespace RakeMultiplayer
 
             bool applied = ApplyFor(playerId, direction);
 
-            if (RakeMultiplayerPlugin.isServer)
+            // Do not broadcast a hit reaction when the victim already has a death
+            // ragdoll: the death packet handles the permanent corpse.
+            if (RakeMultiplayerPlugin.isServer && applied)
             {
                 var packet = new PlayerRagdollPacket { PlayerId = playerId, Direction = direction };
                 RakeNetworkManager.Instance?.ServerBroadcast(packet.Serialize());
@@ -167,6 +175,74 @@ namespace RakeMultiplayer
 
             ragdoll.Launch(awayFromHit);
             return true;
+        }
+
+        /// <summary>Fatal local hit: the body never gets up again.</summary>
+        public static bool TriggerDeathLocal(Vector3 awayFromHit)
+        {
+            if (_localInstance != null)
+            {
+                _localInstance._dead = true;
+                return true;
+            }
+
+            if (!Trigger(awayFromHit)) return false;
+            if (_localInstance != null)
+            {
+                _localInstance._dead = true;
+                _localInstance._timer = 0f;
+            }
+            return true;
+        }
+
+        /// <summary>Fatal hit on another player: convert the hit reaction or build a corpse.</summary>
+        public static bool TriggerDeathRemote(int playerId, Transform remotePlayer, Vector3 awayFromHit)
+        {
+            if (playerId > 0)
+            {
+                PlayerRagdoll existing;
+                if (_remoteInstances.TryGetValue(playerId, out existing) && existing != null)
+                {
+                    existing._dead = true;
+                    return true;
+                }
+            }
+
+            if (!TriggerRemote(playerId, remotePlayer, awayFromHit)) return false;
+
+            if (playerId > 0)
+            {
+                PlayerRagdoll created;
+                if (_remoteInstances.TryGetValue(playerId, out created) && created != null)
+                {
+                    created._dead = true;
+                    created._timer = 0f;
+                }
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// Local player respawns: put the first-person camera/controller back and leave
+        /// the old body behind as a frozen corpse.
+        /// </summary>
+        public static void ReviveLocal()
+        {
+            if (_localInstance == null) return;
+            _localInstance.ReviveAsCorpse();
+            _localInstance = null;
+        }
+
+        /// <summary>Another player respawns: show their normal body again, keep the corpse.</summary>
+        public static void ReviveRemote(int playerId)
+        {
+            if (playerId <= 0) return;
+
+            PlayerRagdoll ragdoll;
+            if (!_remoteInstances.TryGetValue(playerId, out ragdoll) || ragdoll == null) return;
+
+            ragdoll.ReviveAsCorpse();
+            _remoteInstances.Remove(playerId);
         }
 
         /// <summary>
@@ -668,7 +744,76 @@ namespace RakeMultiplayer
         private void LateUpdate()
         {
             _timer += Time.deltaTime;
+
+            if (_dead)
+            {
+                if (!_frozen && _timer >= CorpseDelay) BecomeCorpse();
+                return;
+            }
+
             if (_timer >= Duration && !_restored) Restore();
+        }
+
+        /// <summary>
+        /// Freeze the body once it has settled: no more rigidbody work, no colliders.
+        /// The GameObject stays in the scene until the level ends.
+        /// </summary>
+        private void BecomeCorpse()
+        {
+            if (_frozen) return;
+            _frozen = true;
+
+            var bodies = _bodies != null ? _bodies : GetComponentsInChildren<Rigidbody>();
+            if (bodies != null)
+            {
+                for (int i = 0; i < bodies.Length; i++)
+                {
+                    var rb = bodies[i];
+                    if (rb == null) continue;
+                    rb.velocity = Vector3.zero;
+                    rb.angularVelocity = Vector3.zero;
+                    rb.isKinematic = true;
+                }
+            }
+
+            var colliders = GetComponentsInChildren<Collider>(true);
+            for (int i = 0; i < colliders.Length; i++)
+            {
+                if (colliders[i] != null) colliders[i].enabled = false;
+            }
+
+            RakeMultiplayerPlugin.Log?.LogInfo("[Corpse] physics disabled" +
+                                               (_isLocal ? " (local body)" : " (remote body)"));
+
+            // Nothing else will move this body: stop the per-frame simulation code too.
+            enabled = false;
+        }
+
+        /// <summary>Detach the corpse from the living player and restore the player body.</summary>
+        private void ReviveAsCorpse()
+        {
+            _dead = false;
+            _restored = true;
+
+            if (_isLocal)
+            {
+                RestorePlayerCameras();
+                if (_controller != null) _controller.enabled = true;
+                PlayerInputLock.ReleaseRagdoll();
+
+                if (_camera != null) UnityEngine.Object.Destroy(_camera.gameObject);
+                _camera = null;
+
+                // The victim's camera is no longer inside the body: show the corpse.
+                var smr = GetComponentInChildren<SkinnedMeshRenderer>();
+                if (smr != null) smr.enabled = true;
+            }
+            else
+            {
+                RestoreRenderers();
+            }
+
+            BecomeCorpse();
         }
 
         /// <summary>
@@ -678,7 +823,7 @@ namespace RakeMultiplayer
         /// </summary>
         private void FixedUpdate()
         {
-            if (_bodies == null) return;
+            if (_bodies == null || _frozen) return;
 
             const float maxSpeed = 8f;
             const float maxSpin = 14f;

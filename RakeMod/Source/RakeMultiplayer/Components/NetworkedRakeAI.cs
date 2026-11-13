@@ -51,9 +51,9 @@ namespace RakeMultiplayer
         [Tooltip("How long it stands still and watches before repositioning.")]
         public float lurkWatchDuration = 20f;
 
-        [Tooltip("Pause between two lurk cycles.")]
-        public float lurkIntervalMin = 10f;
-        public float lurkIntervalMax = 22f;
+        [Tooltip("Pause between two stalk tasks. The timer starts when a task ENDS.")]
+        public float lurkIntervalMin = 60f;
+        public float lurkIntervalMax = 90f;
 
         [Tooltip("Below this distance the Rake starts the crouched approach.")]
         public float sneakStartDistance = 30f;
@@ -179,6 +179,9 @@ namespace RakeMultiplayer
         private bool _seenCached;
         private float _noiseCooldown;
         private float _fleeRepathTimer;
+        private bool _encounterActive;
+        private string _lastFinishReason = "";
+        private int _finishedTasks;
 
         private float _clientLurkFreezeTimer;
 
@@ -286,9 +289,9 @@ namespace RakeMultiplayer
             // Initial state: the stalk cycle starts from Idle after a short pause.
             if (RakeMultiplayerPlugin.isServer)
             {
-                // First cycle starts soon so the opening read is "the Rake is watching
-                // from the tree line", not "it stands in the spawn forever".
-                _lurkCooldownTimer = UnityEngine.Random.Range(3f, 8f);
+                // First task starts soon; every later task waits lurkIntervalMin/Max
+                // AFTER the previous one has actually finished.
+                _lurkCooldownTimer = UnityEngine.Random.Range(5f, 10f);
                 TransitionToState(RakeState.Idle);
             }
 
@@ -774,7 +777,11 @@ namespace RakeMultiplayer
             // Local player (host)
             if (PlayerSpawner.Instance != null && PlayerSpawner.Instance.LocalPlayer != null)
             {
-                hunters.Add(PlayerSpawner.Instance.LocalPlayer.transform);
+                var localNet = PlayerSpawner.Instance.LocalPlayer.GetComponent<NetworkedPlayer>();
+                if (localNet == null || !localNet.IsDead)
+                {
+                    hunters.Add(PlayerSpawner.Instance.LocalPlayer.transform);
+                }
             }
 
             // Remote players - use public API instead of reflection
@@ -782,6 +789,8 @@ namespace RakeMultiplayer
             {
                 foreach (var transform in PlayerSpawner.Instance.GetAllRemotePlayerTransforms())
                 {
+                    var net = transform != null ? transform.GetComponent<NetworkedPlayer>() : null;
+                    if (net != null && net.IsDead) continue;
                     hunters.Add(transform);
                 }
             }
@@ -895,8 +904,40 @@ namespace RakeMultiplayer
         }
 
         /// <summary>
-        /// Idle is the pause between lurk cycles. A hunter who walks right into the
-        /// Rake interrupts it: close range means stalk, very close range means charge.
+        /// Marks the start of a full stalk encounter (lurk, approach, charge, retreat).
+        /// </summary>
+        private void BeginEncounter()
+        {
+            if (_encounterActive) return;
+            _encounterActive = true;
+            _lastFinishReason = "";
+            RakeMultiplayerPlugin.Log?.LogInfo("[AI] Encounter started");
+        }
+
+        /// <summary>
+        /// The ONLY place that starts the long pause. It is called when the current
+        /// task is really over (watched out, fled far enough, lost the hunter, stunned),
+        /// never when the task begins.
+        /// </summary>
+        private void FinishEncounter(string reason)
+        {
+            _encounterActive = false;
+            _finishedTasks++;
+            _lastFinishReason = reason;
+            _lurkCooldownTimer = UnityEngine.Random.Range(lurkIntervalMin, lurkIntervalMax);
+
+            if (currentState != RakeState.Idle)
+            {
+                TransitionToState(RakeState.Idle);
+            }
+
+            RakeMultiplayerPlugin.Log?.LogInfo("[AI] Encounter finished (" + reason +
+                                               "), next task in " + _lurkCooldownTimer.ToString("F0") + "s");
+        }
+
+        /// <summary>
+        /// Idle is the pause between stalk tasks. A hunter who walks right into the
+        /// Rake interrupts it: very close range means charge.
         /// </summary>
         private void UpdateIdle()
         {
@@ -932,8 +973,7 @@ namespace RakeMultiplayer
             var target = currentTarget;
             if (target == null)
             {
-                _lurkCooldownTimer = UnityEngine.Random.Range(lurkIntervalMin, lurkIntervalMax);
-                TransitionToState(RakeState.Idle);
+                FinishEncounter("target lost during lurk");
                 return;
             }
 
@@ -981,8 +1021,7 @@ namespace RakeMultiplayer
                 _lurkWatchTimer += Time.deltaTime;
                 if (_lurkWatchTimer >= lurkWatchDuration)
                 {
-                    _lurkCooldownTimer = UnityEngine.Random.Range(lurkIntervalMin, lurkIntervalMax);
-                    TransitionToState(RakeState.Idle);
+                    FinishEncounter("watch complete");
                 }
             }
         }
@@ -1072,7 +1111,7 @@ namespace RakeMultiplayer
             float distance = delta.magnitude;
             if (distance < 0.5f) return true;
 
-            RaycastHit[] hits = Physics.RaycastAll(from, delta / distance, distance - 0.4f);
+            RaycastHit[] hits = Physics.RaycastAll(from, delta / distance, distance - 0.4f, ~0);
             for (int i = 0; i < hits.Length; i++)
             {
                 if (hits[i].collider == null) continue;
@@ -1091,7 +1130,7 @@ namespace RakeMultiplayer
             var target = currentTarget;
             if (target == null)
             {
-                TransitionToState(RakeState.Idle);
+                FinishEncounter("target lost during stealth");
                 return;
             }
 
@@ -1111,7 +1150,7 @@ namespace RakeMultiplayer
 
             if (distance > fleeStopDistance)
             {
-                BeginLurk();
+                FinishEncounter("hunter escaped the approach");
                 return;
             }
 
@@ -1140,8 +1179,7 @@ namespace RakeMultiplayer
                 noTargetTimer += Time.deltaTime;
                 if (noTargetTimer > 5f)
                 {
-                    _lurkCooldownTimer = UnityEngine.Random.Range(lurkIntervalMin, lurkIntervalMax);
-                    TransitionToState(RakeState.Idle);
+                    FinishEncounter("lost the hunter");
                 }
                 return;
             }
@@ -1166,8 +1204,7 @@ namespace RakeMultiplayer
 
             if (distance > fleeStopDistance)
             {
-                _lurkCooldownTimer = UnityEngine.Random.Range(lurkIntervalMin, lurkIntervalMax);
-                TransitionToState(RakeState.Idle);
+                FinishEncounter("hunter escaped the charge");
             }
         }
 
@@ -1236,16 +1273,14 @@ namespace RakeMultiplayer
             var target = currentTarget;
             if (target == null)
             {
-                _lurkCooldownTimer = UnityEngine.Random.Range(lurkIntervalMin, lurkIntervalMax);
-                TransitionToState(RakeState.Idle);
+                FinishEncounter("target lost during retreat");
                 return;
             }
 
             float distance = Vector3.Distance(transform.position, target.position);
             if (distance > fleeStopDistance)
             {
-                _lurkCooldownTimer = UnityEngine.Random.Range(lurkIntervalMin, lurkIntervalMax);
-                TransitionToState(RakeState.Idle);
+                FinishEncounter("fled far enough");
                 return;
             }
 
@@ -1397,7 +1432,7 @@ namespace RakeMultiplayer
             if (Vector3.Angle(forward, direction) > seenConeAngle) return false;
 
             // Unity 5.x has no RaycastNonAlloc: use RaycastAll and filter afterwards.
-            RaycastHit[] hits = Physics.RaycastAll(eye, direction, distance + 2f);
+            RaycastHit[] hits = Physics.RaycastAll(eye, direction, distance + 2f, ~0);
 
             Collider nearest = null;
             float nearestDistance = float.MaxValue;
@@ -1471,6 +1506,7 @@ namespace RakeMultiplayer
 
             var net = victim.GetComponent<NetworkedPlayer>();
             if (net == null) return;
+            if (PlayerDeathSystem.IsDead(net.PlayerId)) return;
 
             Vector3 away = victim.position - transform.position;
             away.y = 0f;
@@ -1478,6 +1514,7 @@ namespace RakeMultiplayer
             if (net.isLocalPlayer)
             {
                 // The TakeDamage patch spawns our own ragdoll; observers need the packet.
+                PlayerDeathSystem.SetLastHitDirection(away);
                 var fps = victim.GetComponent<FPSController>();
                 if (fps != null) fps.TakeDamage(damage, damageType);
 
@@ -1572,8 +1609,7 @@ namespace RakeMultiplayer
         {
             if (stateTimer > 10f)
             {
-                _lurkCooldownTimer = UnityEngine.Random.Range(lurkIntervalMin, lurkIntervalMax);
-                TransitionToState(RakeState.Idle);
+                FinishEncounter("search timed out");
             }
         }
 
@@ -1583,8 +1619,7 @@ namespace RakeMultiplayer
             if (stateTimer > stunDuration)
             {
                 SetStunnedPhysics(false);
-                _lurkCooldownTimer = UnityEngine.Random.Range(lurkIntervalMin, lurkIntervalMax);
-                TransitionToState(RakeState.Idle);
+                FinishEncounter("stun recovered");
             }
         }
 
@@ -1986,8 +2021,9 @@ namespace RakeMultiplayer
 
             if (currentState == RakeState.Idle)
             {
-                _lurkCooldownTimer = 0f;
-                BeginLurk();
+                // The shot is only an extra trigger: it never shortens the 60-90 s
+                // pause that started when the previous task finished.
+                if (_lurkCooldownTimer <= 0f) BeginLurk();
             }
             else if (currentState == RakeState.Lurk && _lurkArrived)
             {
@@ -1997,6 +2033,52 @@ namespace RakeMultiplayer
             }
 
             RakeMultiplayerPlugin.Log?.LogInfo("[AI] Heard a shot at " + position.ToString("F0"));
+        }
+
+        /// <summary>Full multi-line state dump for the F7 status panel.</summary>
+        public string GetAiStatusReport()
+        {
+            var target = currentTarget;
+            float distance = target != null ? Vector3.Distance(transform.position, target.position) : -1f;
+            var agent = GetEnemyAgent();
+            var sb = new System.Text.StringBuilder(512);
+
+            sb.AppendLine("STATE      " + currentState + "   (prev " + previousState + ", " + stateTimer.ToString("F1") + " s)");
+            sb.AppendLine("ROLE       " + (IsAiActive ? "AI ACTIVE" : "inactive") +
+                          "   player=" + _playerControlled + "   remote=" + _remoteOwner + "   server=" + RakeMultiplayerPlugin.isServer);
+            sb.AppendLine("TARGET     " + (target != null ? target.name : "-") +
+                          "   dist=" + (distance >= 0f ? distance.ToString("F1") + " m" : "-") +
+                          "   seen=" + (_seenCached ? "YES" : "no"));
+            sb.AppendLine("ENCOUNTER  " + (_encounterActive ? "RUNNING" : "idle") +
+                          "   finished=" + _finishedTasks +
+                          "   last=" + (string.IsNullOrEmpty(_lastFinishReason) ? "-" : _lastFinishReason));
+            sb.AppendLine("NEXT TASK  " + (_lurkCooldownTimer > 0f ? _lurkCooldownTimer.ToString("F1") + " s" : "READY") +
+                          "   (" + lurkIntervalMin.ToString("F0") + "-" + lurkIntervalMax.ToString("F0") + " s after a task)");
+            sb.AppendLine("LURK       arrived=" + _lurkArrived +
+                          "   watch=" + _lurkWatchTimer.ToString("F1") + "/" + lurkWatchDuration.ToString("F0") + " s" +
+                          "   crouch=" + _lurkCrouch);
+            sb.AppendLine("POINT      " + _lurkPoint.ToString("F1") +
+                          "   valid=" + _lurkPointValid +
+                          "   toPoint=" + Vector3.Distance(transform.position, _lurkPoint).ToString("F1") + " m");
+
+            if (agent != null)
+            {
+                sb.AppendLine("AGENT      onMesh=" + agent.isOnNavMesh +
+                              "   path=" + agent.pathStatus +
+                              "   speed=" + agent.speed.ToString("F1") +
+                              "   remain=" + agent.remainingDistance.ToString("F1") + " m");
+                sb.AppendLine("DEST       " + agent.destination.ToString("F1") +
+                              "   vel=" + agent.velocity.ToString("F1"));
+            }
+            else
+            {
+                sb.AppendLine("AGENT      null");
+            }
+
+            sb.AppendLine("HEALTH     " + GetCurrentHealth().ToString("F0") + "/" + MaxHealth.ToString("F0"));
+            sb.AppendLine("ATTACK     cooldown=" + _attackCooldown.ToString("F2") + " s   range=" + attackRange.ToString("F1") + " m");
+            sb.AppendLine("NOISE      cooldown=" + _noiseCooldown.ToString("F1") + " s   hearRange=" + noiseHearRange.ToString("F0") + " m");
+            return sb.ToString();
         }
 
         /// <summary>One-line state dump for the "rake ai" console command.</summary>
@@ -2048,6 +2130,18 @@ namespace RakeMultiplayer
             currentState = newState;
             stateTimer = 0f;
             _seenTimer = 0f;
+
+            // A stalk encounter starts when the Rake leaves Idle for a hunting state.
+            if (newState == RakeState.Lurk || newState == RakeState.Stealth ||
+                newState == RakeState.Chase || newState == RakeState.Attack ||
+                newState == RakeState.Flee)
+            {
+                BeginEncounter();
+            }
+            else if (newState == RakeState.Idle || newState == RakeState.Dead)
+            {
+                _encounterActive = false;
+            }
 
             // Leaving a frozen lurk pose: let the animator run again.
             if (animator != null) animator.speed = 1f;

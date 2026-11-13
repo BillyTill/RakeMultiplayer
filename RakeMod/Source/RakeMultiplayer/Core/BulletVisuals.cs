@@ -210,7 +210,7 @@ namespace RakeMultiplayer
                     else
                     {
                         Vector3 direction = segment / distance;
-                        RaycastHit[] hits = Physics.RaycastAll(previous, direction, distance);
+                        RaycastHit[] hits = Physics.RaycastAll(previous, direction, distance, ~0);
                         float best = distance;
                         bool found = false;
                         Vector3 point = next;

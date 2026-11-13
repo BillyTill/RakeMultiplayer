@@ -13,6 +13,7 @@ namespace RakeMultiplayer
     {
         private bool _enabled;
         private bool _aiTest;
+        private bool _deathTest;
 
         private void Awake()
         {
@@ -20,12 +21,14 @@ namespace RakeMultiplayer
             var args = Environment.GetCommandLineArgs();
             _enabled = Array.IndexOf(args, "-autotest") >= 0;
             _aiTest = Array.IndexOf(args, "-aitest") >= 0;
+            _deathTest = Array.IndexOf(args, "-deathtest") >= 0;
         }
 
         private void Start()
         {
             if (_enabled) StartCoroutine(Run());
             else if (_aiTest) StartCoroutine(RunAiTest());
+            else if (_deathTest) StartCoroutine(RunDeathTest());
         }
 
         private float _heart;
@@ -124,6 +127,109 @@ namespace RakeMultiplayer
         }
 
         /// <summary>
+        /// Headless death check: host, build the arena, kill the host with a PvP bullet,
+        /// log the corpse and wait for the server respawn. Run with -deathtest.
+        /// </summary>
+        private IEnumerator RunDeathTest()
+        {
+            RakeMultiplayerPlugin.Log?.LogInfo("[DeathTest] starting");
+            yield return new WaitForSeconds(3f);
+
+            var menu = FindObjectOfType<UI.MultiplayerMenu>();
+            if (menu != null) menu.OnHostGame();
+            yield return new WaitForSeconds(1.5f);
+            if (menu != null) menu.OnStartGame();
+
+            yield return new WaitForSeconds(14f);
+            TestArena.CreateOnHost();
+            yield return new WaitForSeconds(1.5f);
+
+            var rakeForReport = RakeHighlight.FindRake();
+            var aiForReport = rakeForReport != null ? rakeForReport.GetComponent<NetworkedRakeAI>() : null;
+            if (aiForReport != null)
+            {
+                RakeMultiplayerPlugin.Log?.LogInfo("[DeathTest] AI report:\n" + aiForReport.GetAiStatusReport());
+            }
+
+            var spawner = PlayerSpawner.Instance;
+            var local = spawner != null ? spawner.LocalPlayer : null;
+            if (local == null)
+            {
+                RakeMultiplayerPlugin.Log?.LogError("[DeathTest] no local player");
+                Application.Quit();
+                yield break;
+            }
+
+            var fps = local.GetComponent<FPSController>();
+            RakeMultiplayerPlugin.Log?.LogInfo("[DeathTest] before: health=" +
+                (fps != null ? fps.Health.ToString() : "?") +
+                " id=" + local.PlayerId +
+                " pos=" + local.transform.position.ToString("F1"));
+
+            var cc = local.GetComponent<CharacterController>();
+            if (cc != null)
+            {
+                RakeMultiplayerPlugin.Log?.LogInfo("[DeathTest] controller center=" + cc.center +
+                    " height=" + cc.height + " radius=" + cc.radius +
+                    " step=" + cc.stepOffset);
+            }
+
+            var playerColliders = local.GetComponentsInChildren<Collider>(true);
+            for (int i = 0; i < playerColliders.Length; i++)
+            {
+                var c = playerColliders[i];
+                RakeMultiplayerPlugin.Log?.LogInfo("[DeathTest] collider " + c.GetType().Name +
+                    " on " + c.name + " trigger=" + c.isTrigger + " enabled=" + c.enabled +
+                    " layer=" + c.gameObject.layer);
+            }
+
+            // Give the hunter a rifle so the loot drop has a real pickup template.
+            var wm = local.GetComponentInChildren<WeaponManager>();
+            if (wm != null && !wm.CheckWeapon(1)) wm.AddWeapon(1, 2, true);
+
+            Vector3 origin = local.transform.position + Vector3.up * 1.5f + local.transform.forward * 8f;
+            Vector3 direction = (local.transform.position + Vector3.up * 0.6f - origin).normalized;
+
+            // 1) A non-lethal PvP hit: the victim must ragdoll with the shot impulse.
+            ProjectileSystem.SpawnServerProjectile(origin, direction, 10, "SniperShot", 2);
+            yield return new WaitForSeconds(1.2f);
+            RakeMultiplayerPlugin.Log?.LogInfo("[DeathTest] non-lethal: health=" +
+                (fps != null ? fps.Health.ToString() : "?") +
+                " ragdollActive=" + PlayerRagdoll.IsActive);
+            yield return new WaitForSeconds(3.4f);
+            RakeMultiplayerPlugin.Log?.LogInfo("[DeathTest] non-lethal restored: ragdollActive=" +
+                PlayerRagdoll.IsActive);
+
+            // 2) A lethal PvP bullet: permanent corpse, loot, respawn, no LoadLevel(0).
+            ProjectileSystem.SpawnServerProjectile(origin, direction, 200, "SniperShot", 2);
+
+            yield return new WaitForSeconds(1.5f);
+            RakeMultiplayerPlugin.Log?.LogInfo("[DeathTest] after hit: health=" +
+                (fps != null ? fps.Health.ToString() : "?") +
+                " dead=" + PlayerDeathSystem.IsDead(local.PlayerId) +
+                " ragdolls=" + UnityEngine.Object.FindObjectsOfType<PlayerRagdoll>().Length +
+                " pos=" + local.transform.position.ToString("F1"));
+
+            yield return new WaitForSeconds(5f);
+            var ragdolls = UnityEngine.Object.FindObjectsOfType<PlayerRagdoll>();
+            int frozen = 0;
+            for (int i = 0; i < ragdolls.Length; i++) if (ragdolls[i].IsCorpseFrozen) frozen++;
+            RakeMultiplayerPlugin.Log?.LogInfo("[DeathTest] t+6.5: ragdolls=" + ragdolls.Length +
+                                               " frozen=" + frozen);
+
+            yield return new WaitForSeconds(9f);
+            RakeMultiplayerPlugin.Log?.LogInfo("[DeathTest] after respawn: health=" +
+                (fps != null ? fps.Health.ToString() : "?") +
+                " dead=" + PlayerDeathSystem.IsDead(local.PlayerId) +
+                " pos=" + local.transform.position.ToString("F1") +
+                " ragdolls=" + UnityEngine.Object.FindObjectsOfType<PlayerRagdoll>().Length);
+
+            yield return new WaitForSeconds(2f);
+            RakeMultiplayerPlugin.Log?.LogInfo("[DeathTest] done, scene=" + Application.loadedLevelName);
+            Application.Quit();
+        }
+
+        /// <summary>
         /// Headless stalk-cycle check: host a match, move the hunter 120 m away,
         /// force a lurk and log the state until the Rake closes in and charges.
         /// Run with -aitest.
@@ -216,6 +322,22 @@ namespace RakeMultiplayer
                 RakeMultiplayerPlugin.Log?.LogInfo("[AITest] " + ai.GetAiDebugInfo() +
                                                    " rakePos=" + rake.position.ToString("F1"));
             }
+
+            // Escape: the charge is lost, the encounter must finish and the next task
+            // must be scheduled 60-90 s later (not at the start of the task).
+            Vector3 runAway = local.transform.position - rake.position;
+            runAway.y = 0f;
+            runAway.Normalize();
+            Vector3 far = rake.position + runAway * 130f;
+            if (NavMesh.SamplePosition(far, out hit, 45f, NavMesh.AllAreas)) far = hit.position;
+            if (manager != null)
+                manager.ServerTeleportPlayer(1, far, Quaternion.LookRotation(rake.position - far));
+            else
+                local.transform.position = far;
+
+            RakeMultiplayerPlugin.Log?.LogInfo("[AITest] player escaped to " + far.ToString("F1"));
+            yield return new WaitForSeconds(7f);
+            RakeMultiplayerPlugin.Log?.LogInfo("[AITest] after escape: " + ai.GetAiDebugInfo());
 
             RakeMultiplayerPlugin.Log?.LogInfo("[AITest] done");
             Application.Quit();

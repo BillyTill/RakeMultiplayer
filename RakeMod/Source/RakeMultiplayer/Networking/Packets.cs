@@ -1049,4 +1049,79 @@ namespace RakeMultiplayer.Networking
             IsTriggered = reader.ReadBoolean();
         }
     }
+
+    /// <summary>
+    /// A hunter died. The victim sends its position and dropped inventory so every
+    /// peer can build the same corpse and scatter the same pickups.
+    /// </summary>
+    public class PlayerDiedPacket : NetworkPacket
+    {
+        public override PacketType Type => PacketType.PlayerDied;
+
+        public int PlayerId;
+        public Vector3 Position;
+        public Quaternion Rotation;
+        public Vector3 Direction;
+        public int[] WeaponIds = new int[0];
+        public int[] WeaponAmmo = new int[0];
+
+        public override void Write(BinaryWriter writer)
+        {
+            writer.Write(PlayerId);
+            writer.Write(Position.x); writer.Write(Position.y); writer.Write(Position.z);
+            writer.Write(Rotation.x); writer.Write(Rotation.y); writer.Write(Rotation.z); writer.Write(Rotation.w);
+            writer.Write(Direction.x); writer.Write(Direction.y); writer.Write(Direction.z);
+
+            int count = WeaponIds != null ? WeaponIds.Length : 0;
+            writer.Write(count);
+            for (int i = 0; i < count; i++)
+            {
+                writer.Write(i < WeaponIds.Length ? WeaponIds[i] : 0);
+                writer.Write(WeaponAmmo != null && i < WeaponAmmo.Length ? WeaponAmmo[i] : 0);
+            }
+        }
+
+        public override void Read(BinaryReader reader)
+        {
+            PlayerId = reader.ReadInt32();
+            Position = new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
+            Rotation = new Quaternion(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
+            Direction = new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
+
+            int count = reader.ReadInt32();
+            if (count < 0) count = 0;
+            if (count > 32) count = 32;
+            WeaponIds = new int[count];
+            WeaponAmmo = new int[count];
+            for (int i = 0; i < count; i++)
+            {
+                WeaponIds[i] = reader.ReadInt32();
+                WeaponAmmo[i] = reader.ReadInt32();
+            }
+        }
+    }
+
+    /// <summary>Server -> all: restore a dead hunter at the safehouse.</summary>
+    public class PlayerRespawnPacket : NetworkPacket
+    {
+        public override PacketType Type => PacketType.PlayerRespawn;
+
+        public int PlayerId;
+        public Vector3 Position;
+        public Quaternion Rotation;
+
+        public override void Write(BinaryWriter writer)
+        {
+            writer.Write(PlayerId);
+            writer.Write(Position.x); writer.Write(Position.y); writer.Write(Position.z);
+            writer.Write(Rotation.x); writer.Write(Rotation.y); writer.Write(Rotation.z); writer.Write(Rotation.w);
+        }
+
+        public override void Read(BinaryReader reader)
+        {
+            PlayerId = reader.ReadInt32();
+            Position = new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
+            Rotation = new Quaternion(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
+        }
+    }
 }

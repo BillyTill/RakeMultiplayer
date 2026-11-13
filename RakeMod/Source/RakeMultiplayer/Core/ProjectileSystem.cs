@@ -122,7 +122,10 @@ namespace RakeMultiplayer
             }
 
             Vector3 direction = segment / distance;
-            RaycastHit[] hits = Physics.RaycastAll(previous, direction, distance);
+            // ~0 includes the players: their CharacterController lives on the built-in
+            // "Ignore Raycast" layer (2), which DefaultRaycastLayers excludes. A thin
+            // sphere cast also prevents fast bullets from tunnelling through a body.
+            RaycastHit[] hits = Physics.SphereCastAll(previous, 0.06f, direction, distance, ~0);
 
             float best = distance;
             bool found = false;
@@ -132,6 +135,7 @@ namespace RakeMultiplayer
             {
                 RaycastHit hit = hits[i];
                 if (hit.collider == null || hit.collider.isTrigger) continue;
+
                 if (IsOwnerCollider(hit.collider)) continue;
                 if (hit.distance >= best) continue;
 
@@ -193,6 +197,22 @@ namespace RakeMultiplayer
                 }
 
                 RakeNetworkManager.Instance?.BroadcastRakeHealth();
+                return;
+            }
+
+            // PvP: a bullet hit another hunter. The server applies the damage on the
+            // victim and broadcasts a ragdoll with the impulse along the shot.
+            var player = hit.collider.GetComponentInParent<NetworkedPlayer>();
+            if (player != null && player.PlayerId != _ownerId && player.PlayerId > 0)
+            {
+                if (player.IsDead) return;
+
+                Vector3 away = _velocity.sqrMagnitude > 0.01f
+                    ? _velocity.normalized
+                    : (hit.point - _position).normalized;
+
+                RakeNetworkManager.Instance?.ServerPlayerHit(player.PlayerId, _amount,
+                    _damageType, _position, away);
                 return;
             }
 

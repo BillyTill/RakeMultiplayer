@@ -37,6 +37,14 @@ namespace RakeMultiplayer
         // Player ID (assigned by server)
         public int PlayerId { get; private set; }
 
+        /// <summary>True while this player is a corpse and must not be hunted or shot.</summary>
+        public bool IsDead { get; private set; }
+
+        public void SetDead(bool value)
+        {
+            IsDead = value;
+        }
+
         // Interpolation targets for remote players
         private Vector3 targetPosition;
         private Quaternion targetRotation;

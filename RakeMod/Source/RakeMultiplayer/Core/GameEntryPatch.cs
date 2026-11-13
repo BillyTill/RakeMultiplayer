@@ -66,6 +66,8 @@ namespace RakeMultiplayer
             {
                 // Scene objects were recreated - rebuild their deterministic registries
                 manager.PrepareForSceneLoad();
+                manager.ResetDeathState();
+                PlayerDeathSystem.ResetForScene();
                 RegisterSceneObjects(manager);
 
                 // Any player may own the Rake: host, client or the AI.

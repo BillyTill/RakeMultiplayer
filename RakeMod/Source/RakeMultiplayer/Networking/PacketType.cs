@@ -53,5 +53,7 @@ namespace RakeMultiplayer.Networking
         RakeSound = 44,
         RakeDied = 45,
         TestArena = 46,
+        PlayerDied = 47,
+        PlayerRespawn = 48,
     }
 }
