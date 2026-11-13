@@ -185,6 +185,7 @@ namespace RakeMultiplayer
         private bool _seenCached;
         private float _noiseCooldown;
         private float _fleeRepathTimer;
+        private float _navCheckTimer;
         private bool _encounterActive;
         private string _lastFinishReason = "";
         private int _finishedTasks;
@@ -859,6 +860,15 @@ namespace RakeMultiplayer
             _lurkCooldownTimer = Mathf.Max(0f, _lurkCooldownTimer - dt);
             _noiseCooldown = Mathf.Max(0f, _noiseCooldown - dt);
 
+            // Safety net: if a chase/knockback/fall ever leaves the Rake off the
+            // NavMesh, recover instead of silently refusing to move.
+            _navCheckTimer -= dt;
+            if (_navCheckTimer <= 0f)
+            {
+                _navCheckTimer = 2f;
+                TryRecoverAgent();
+            }
+
             // Check for death
             float health = GetCurrentHealth();
             if (health <= 0f && currentState != RakeState.Dead)
@@ -1054,8 +1064,14 @@ namespace RakeMultiplayer
             point = transform.position;
             if (target == null) return false;
 
+            // A previous fall may have left the agent off the NavMesh; recover first so
+            // CalculatePath below starts from a valid position.
+            TryRecoverAgent();
+
             float currentDistance = Vector3.Distance(transform.position, target.position);
-            if (currentDistance >= sneakStartDistance && currentDistance <= lurkStandoffDistance + 10f &&
+            var currentAgent = GetEnemyAgent();
+            if (currentAgent != null && currentAgent.isOnNavMesh &&
+                currentDistance >= sneakStartDistance && currentDistance <= lurkStandoffDistance + 10f &&
                 HasLineOfSight(transform.position + Vector3.up * 1.4f, target.position + Vector3.up * 1.2f))
             {
                 // Already at a good watching distance with a clear view: stay put.
@@ -1078,9 +1094,7 @@ namespace RakeMultiplayer
                 Vector3 dir = Quaternion.Euler(0f, angles[i], 0f) * toRake;
                 Vector3 candidate = target.position + dir * lurkStandoffDistance;
 
-                NavMeshHit hit;
-                if (!NavMesh.SamplePosition(candidate, out hit, 12f, NavMesh.AllAreas)) continue;
-                candidate = hit.position;
+                if (!TrySampleNavMesh(candidate, 12f, out candidate)) continue;
 
                 NavMeshPath path = new NavMeshPath();
                 if (!NavMesh.CalculatePath(transform.position, candidate, NavMesh.AllAreas, path)) continue;
@@ -1350,9 +1364,34 @@ namespace RakeMultiplayer
                 if (away.sqrMagnitude < 0.001f) away = Vector3.forward;
                 away.Normalize();
 
-                Vector3 desired = target.position + away * fleeDestinationDistance;
                 Vector3 sampled;
-                if (!TrySampleNavMesh(desired, 18f, out sampled)) sampled = desired;
+                bool found = TrySampleNavMesh(target.position + away * fleeDestinationDistance, 25f, out sampled);
+
+                if (!found)
+                {
+                    // The straight-away point may be outside the level. Fan out left
+                    // and right before giving up.
+                    float[] angles = { 15f, -15f, 30f, -30f, 45f, -45f, 60f, -60f, 90f, -90f };
+                    for (int i = 0; i < angles.Length && !found; i++)
+                    {
+                        Vector3 dir = Quaternion.Euler(0f, angles[i], 0f) * away;
+                        found = TrySampleNavMesh(target.position + dir * fleeDestinationDistance, 20f, out sampled);
+                    }
+                }
+
+                if (!found)
+                {
+                    // Last chance: a shorter retreat inside the current area.
+                    found = TrySampleNavMesh(target.position + away * 60f, 25f, out sampled);
+                }
+
+                if (!found)
+                {
+                    // Nowhere valid to run: do not drive into the void, end the task.
+                    FinishEncounter("no NavMesh escape point");
+                    return;
+                }
+
                 _lurkPoint = sampled;
                 _lurkPointValid = true;
             }
@@ -1397,8 +1436,59 @@ namespace RakeMultiplayer
                 return true;
             }
 
+            // The exact point can be inside geometry or just beyond a ledge. Try a
+            // ring around it before giving up; only the sampled point is ever used.
+            for (int i = 0; i < 8; i++)
+            {
+                float angle = i * 45f * Mathf.Deg2Rad;
+                Vector3 offset = new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle)) * radius;
+                if (NavMesh.SamplePosition(desired + offset, out hit, radius * 0.75f, NavMesh.AllAreas))
+                {
+                    result = hit.position;
+                    return true;
+                }
+            }
+
             result = desired;
             return false;
+        }
+
+        /// <summary>
+        /// Put the agent back on the NavMesh if a fall/knockback/chase left it off.
+        /// Returns true when the agent is (now) on a valid NavMesh.
+        /// </summary>
+        private bool TryRecoverAgent()
+        {
+            var agent = GetEnemyAgent();
+            if (agent == null) return false;
+            if (agent.isOnNavMesh) return true;
+
+            Vector3 point;
+            if (!TrySampleNavMesh(transform.position, 15f, out point))
+            {
+                _navCheckTimer = 2f;
+                return false;
+            }
+
+            // Detach, move the transform, re-attach: Warp alone can fail while the
+            // agent is still processing its old (off-mesh) position.
+            bool wasEnabled = agent.enabled;
+            if (wasEnabled) agent.enabled = false;
+            transform.position = point;
+            if (!wasEnabled) agent.enabled = true;
+            else
+            {
+                agent.enabled = true;
+                agent.Warp(point);
+            }
+
+            _repathTimer = -999f;
+            _lastDestination = Vector3.zero;
+
+            RakeMultiplayerPlugin.Log?.LogWarning("[AI] Rake was off the NavMesh - recovered to " +
+                                                   point.ToString("F1") + " (onMesh=" + agent.isOnNavMesh + ")");
+            _navCheckTimer = 2f;
+            return agent.isOnNavMesh;
         }
 
         /// <summary>Turn the whole body towards a world point (only used while standing).</summary>
@@ -2268,7 +2358,13 @@ namespace RakeMultiplayer
         private void MoveToTarget(Vector3 targetPos, bool silent, float speed = -1f)
         {
             var agent = GetEnemyAgent();
-            if (agent == null || !agent.isOnNavMesh) return;
+            if (agent == null) return;
+            if (!agent.isOnNavMesh && !TryRecoverAgent()) return;
+
+            // Never send the agent to a point that is not on the NavMesh. For a player
+            // standing on a prop/cliff the nearest walkable point is used instead.
+            Vector3 destination;
+            if (!TrySampleNavMesh(targetPos, 8f, out destination)) return;
 
             float desired = speed > 0f ? speed : (silent ? GetSneakSpeed() : GetRunSpeed());
             agent.speed = desired;
@@ -2276,11 +2372,11 @@ namespace RakeMultiplayer
 
             // Do not re-issue the path every frame: that cuts corners and makes the
             // agent stutter. Repath on a timer or when the destination really moved.
-            bool destinationMoved = (targetPos - _lastDestination).sqrMagnitude > 4f;
+            bool destinationMoved = (destination - _lastDestination).sqrMagnitude > 4f;
             if (_repathTimer < 0f || Time.time - _repathTimer > 0.45f || destinationMoved)
             {
-                agent.SetDestination(targetPos);
-                _lastDestination = targetPos;
+                agent.SetDestination(destination);
+                _lastDestination = destination;
                 _repathTimer = Time.time;
             }
         }
@@ -2359,11 +2455,11 @@ namespace RakeMultiplayer
             float offset = UnityEngine.Random.Range(feignedRetreatTeleportOffsetMin, feignedRetreatTeleportOffsetMax);
             Vector3 teleportPos = targetHunter.position + behindDir * offset;
             
-            // Ensure position on NavMesh
-            NavMeshHit hit;
-            if (NavMesh.SamplePosition(teleportPos, out hit, NavMeshSampleRadius, NavMesh.AllAreas))
+            // Never teleport onto an invalid point.
+            if (!TrySampleNavMesh(teleportPos, NavMeshSampleRadius, out teleportPos))
             {
-                teleportPos = hit.position;
+                RakeMultiplayerPlugin.Log?.LogWarning("[AI] FeignedRetreat teleport skipped: no NavMesh point");
+                return;
             }
 
             transform.position = teleportPos;
