@@ -27,6 +27,7 @@ namespace RakeMultiplayer
         public bool IsTriggered { get; private set; }
 
         private float _lastTriggerTime = -999f;
+        private float _scanTimer;
 
         private static readonly Dictionary<uint, NetworkedTrap> _registry = new Dictionary<uint, NetworkedTrap>();
         private static int _nextTrapId = 1;
@@ -83,7 +84,7 @@ namespace RakeMultiplayer
         private void OnTriggerEnter(Collider other)
         {
             if (!RakeMultiplayerPlugin.isServer) return;
-            if (!IsArmed) return;
+            if (!IsArmed || IsTriggered) return;
             if (Time.time - _lastTriggerTime < TriggerCooldown) return;
             if (other == null) return;
 
@@ -131,9 +132,71 @@ namespace RakeMultiplayer
             }
         }
 
+        /// <summary>
+        /// Server-side proximity poll. Remote player proxies have their collider disabled
+        /// (and detectCollisions = false), so their OnTriggerEnter never reaches the trap.
+        /// </summary>
+        private void Update()
+        {
+            if (!RakeMultiplayerPlugin.isServer || !IsArmed) return;
+
+            _scanTimer -= Time.deltaTime;
+            if (_scanTimer > 0f) return;
+            _scanTimer = 0.25f;
+
+            var spawner = PlayerSpawner.Instance;
+            if (spawner == null) return;
+
+            float radius = TriggerRadius + 0.4f;
+
+            var local = spawner.LocalPlayer;
+            if (local != null && local.PlayerId > 0 && !PlayerDeathSystem.IsDead(local.PlayerId) &&
+                Vector3.Distance(local.transform.position, transform.position) <= radius)
+            {
+                HitPlayer(local.PlayerId, local.transform.position, true);
+                return;
+            }
+
+            foreach (var remote in spawner.GetAllRemotePlayerTransforms())
+            {
+                if (remote == null) continue;
+                var net = remote.GetComponent<NetworkedPlayer>();
+                if (net == null || net.PlayerId <= 0 || net.IsDead) continue;
+                if (Vector3.Distance(remote.position, transform.position) > radius) continue;
+
+                HitPlayer(net.PlayerId, remote.position, false);
+                return;
+            }
+        }
+
+        private void HitPlayer(int playerId, Vector3 position, bool isLocal)
+        {
+            if (isLocal)
+            {
+                var local = PlayerSpawner.Instance != null ? PlayerSpawner.Instance.LocalPlayer : null;
+                var fps = local != null ? local.GetComponent<FPSController>() : null;
+                if (fps != null)
+                {
+                    try { fps.TakeDamage(35, "TrapDamage"); }
+                    catch (Exception ex) { RakeMultiplayerPlugin.Log?.LogWarning("[3.11] Trap damage failed: " + ex.Message); }
+                }
+            }
+            else
+            {
+                Vector3 push = position - transform.position;
+                push.y = 0f;
+                if (push.sqrMagnitude < 0.01f) push = Vector3.forward;
+                RakeNetworkManager.Instance?.ServerPlayerHit(playerId, 35, "TrapDamage",
+                    transform.position, push.normalized);
+            }
+
+            Trigger();
+        }
+
         private void Trigger()
         {
             _lastTriggerTime = Time.time;
+            IsArmed = false; // a sprung trap is spent
             IsTriggered = true;
             BroadcastState();
 

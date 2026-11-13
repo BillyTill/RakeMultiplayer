@@ -72,7 +72,10 @@ namespace RakeMultiplayer
             RemoveInventory(fps, weaponIds);
 
             PlayerRagdoll.TriggerDeathLocal(direction);
-            DropItems(position, rotation, weaponIds.ToArray(), weaponAmmo.ToArray());
+            if (RakeMultiplayerPlugin.isServer)
+            {
+                DropItems(position, rotation, weaponIds.ToArray(), weaponAmmo.ToArray());
+            }
             DisablePlayerColliders(playerId, fps.transform);
 
             var packet = new PlayerDiedPacket
@@ -131,7 +134,11 @@ namespace RakeMultiplayer
                 }
             }
 
-            DropItems(packet.Position, packet.Rotation, packet.WeaponIds, packet.WeaponAmmo);
+            // Loot is spawned only by the server and replicated with shared ids.
+            if (RakeMultiplayerPlugin.isServer)
+            {
+                DropItems(packet.Position, packet.Rotation, packet.WeaponIds, packet.WeaponAmmo);
+            }
             RakeMultiplayerPlugin.Log?.LogInfo("[Death] applied for player " + playerId +
                                                " at " + packet.Position.ToString("F1"));
         }
@@ -321,7 +328,7 @@ namespace RakeMultiplayer
 
         private static void DropItems(Vector3 position, Quaternion rotation, int[] ids, int[] ammo)
         {
-            if (ids == null) return;
+            if (!RakeMultiplayerPlugin.isServer || ids == null) return;
 
             int dropped = 0;
             for (int i = 0; i < ids.Length && dropped < 12; i++)
@@ -339,6 +346,10 @@ namespace RakeMultiplayer
             }
         }
 
+        /// <summary>
+        /// Server: spawn one item, register it with a shared network id and tell every peer.
+        /// Clients only instantiate the ItemSpawn packet, so loot exists once per peer.
+        /// </summary>
         private static bool SpawnPickup(System.Type type, Vector3 position, Quaternion rotation)
         {
             var template = FindTemplate(type);
@@ -347,10 +358,11 @@ namespace RakeMultiplayer
             Vector3 offset = new Vector3(
                 UnityEngine.Random.Range(-1.1f, 1.1f), 0.8f,
                 UnityEngine.Random.Range(-1.1f, 1.1f));
+            Vector3 dropPosition = position + offset;
+            Quaternion dropRotation = Quaternion.Euler(
+                0f, rotation.eulerAngles.y + UnityEngine.Random.Range(-40f, 40f), 0f);
 
-            var go = Object.Instantiate(template.gameObject,
-                position + offset,
-                Quaternion.Euler(0f, rotation.eulerAngles.y + UnityEngine.Random.Range(-40f, 40f), 0f)) as GameObject;
+            var go = Object.Instantiate(template.gameObject, dropPosition, dropRotation) as GameObject;
             if (go == null) return false;
 
             go.name = "Dropped_" + type.Name;
@@ -358,23 +370,98 @@ namespace RakeMultiplayer
 
             var net = go.GetComponent<NetworkedItem>();
             if (net == null) net = go.AddComponent<NetworkedItem>();
-            net.itemId = 0; // unregistered pickups use the local vanilla path
             net.isNetworked = false;
+            net.itemId = 0;
+
+            var item = go.GetComponent<Item>();
+            var manager = RakeNetworkManager.Instance;
+            int networkId = manager != null ? manager.RegisterDroppedItem(item) : 0;
+            if (networkId > 0)
+            {
+                net.itemId = networkId;
+                net.isNetworked = true;
+            }
 
             var body = go.GetComponent<Rigidbody>();
             if (body == null) body = go.AddComponent<Rigidbody>();
             body.mass = 0.4f;
             body.drag = 0.35f;
             body.angularDrag = 0.8f;
-            body.AddForce(new Vector3(
-                UnityEngine.Random.Range(-1.6f, 1.6f),
-                UnityEngine.Random.Range(1.8f, 3.0f),
-                UnityEngine.Random.Range(-1.6f, 1.6f)), ForceMode.VelocityChange);
-            body.AddTorque(UnityEngine.Random.insideUnitSphere * 2f, ForceMode.VelocityChange);
+            // No random impulse: every peer gets the same spawn transform and the item
+            // must not slide to a different place on each machine.
 
-            RakeMultiplayerPlugin.Log?.LogInfo("[Death] dropped " + type.Name +
-                                               " at " + (position + offset).ToString("F1"));
+            if (manager != null && networkId > 0)
+            {
+                manager.ServerBroadcast(new ItemSpawnPacket
+                {
+                    ItemNetworkId = networkId,
+                    ItemTypeName = type.Name,
+                    Position = dropPosition,
+                    Rotation = dropRotation
+                }.Serialize());
+            }
+
+            RakeMultiplayerPlugin.Log?.LogInfo("[Death] dropped " + type.Name + " id=" + networkId +
+                                               " at " + dropPosition.ToString("F1"));
             return true;
+        }
+
+        /// <summary>Client: create the loot item the server announced.</summary>
+        public static void SpawnNetworkedDrop(ItemSpawnPacket packet)
+        {
+            if (packet == null || packet.ItemNetworkId <= 0) return;
+
+            var type = ItemTypeByName(packet.ItemTypeName);
+            var template = FindTemplate(type);
+            if (template == null)
+            {
+                RakeMultiplayerPlugin.Log?.LogWarning("[Death] no template for networked drop " +
+                                                      packet.ItemTypeName);
+                return;
+            }
+
+            var go = Object.Instantiate(template.gameObject, packet.Position, packet.Rotation) as GameObject;
+            if (go == null) return;
+
+            go.name = "Dropped_" + packet.ItemTypeName;
+            go.SetActive(true);
+
+            var net = go.GetComponent<NetworkedItem>();
+            if (net == null) net = go.AddComponent<NetworkedItem>();
+            net.itemId = packet.ItemNetworkId;
+            net.isNetworked = true;
+
+            var item = go.GetComponent<Item>();
+            var manager = RakeNetworkManager.Instance;
+            if (item != null && manager != null)
+            {
+                manager.RegisterItem(item, packet.ItemNetworkId);
+            }
+
+            var body = go.GetComponent<Rigidbody>();
+            if (body == null) body = go.AddComponent<Rigidbody>();
+            body.mass = 0.4f;
+            body.drag = 0.35f;
+            body.angularDrag = 0.8f;
+
+            RakeMultiplayerPlugin.Log?.LogInfo("[Death] spawned networked drop " +
+                                               packet.ItemTypeName + " id=" + packet.ItemNetworkId);
+        }
+
+        private static System.Type ItemTypeByName(string name)
+        {
+            switch (name)
+            {
+                case "Rifle_item": return typeof(Rifle_item);
+                case "Camera_item": return typeof(Camera_item);
+                case "Trap_item": return typeof(Trap_item);
+                case "Food_item": return typeof(Food_item);
+                case "SniperRifle_item": return typeof(SniperRifle_item);
+                case "Medkit_item": return typeof(Medkit_item);
+                case "RifleAmmo_item": return typeof(RifleAmmo_item);
+                case "SniperAmmo_item": return typeof(SniperAmmo_item);
+                default: return null;
+            }
         }
 
         // ---------------------------------------------------------------- colliders

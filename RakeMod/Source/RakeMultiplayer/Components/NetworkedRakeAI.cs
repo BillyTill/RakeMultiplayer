@@ -191,6 +191,7 @@ namespace RakeMultiplayer
         private float _stuckTimer;
         private float _lastRakeStateSendTime;
         private float _lurkRefreshTimer;
+        private float _cameraBreakTimer;
         private bool _wasDaytime;
         private Vector3 _lastProgressPos;
         private bool _encounterActive;
@@ -938,6 +939,22 @@ namespace RakeMultiplayer
             {
                 _stuckTimer = 0f;
                 _lastProgressPos = transform.position;
+            }
+
+            // The vanilla Enemy_AI.Update (which contained CameraBreak) is disabled while
+            // the mod owns the Rake, so cameras were never destroyed. Do it here.
+            _cameraBreakTimer -= dt;
+            if (_cameraBreakTimer <= 0f &&
+                currentState != RakeState.Dead && currentState != RakeState.Stunned)
+            {
+                _cameraBreakTimer = 0.5f;
+                var camera = NetworkedCamera.FindNearestPlaced(transform.position, 2.5f);
+                if (camera != null)
+                {
+                    camera.BreakCamera();
+                    FinishEncounter("broke a camera");
+                    return;
+                }
             }
 
             // The Rake does not hunt during the day. The vanilla brain is disabled while the

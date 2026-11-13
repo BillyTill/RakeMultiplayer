@@ -55,5 +55,7 @@ namespace RakeMultiplayer.Networking
         TestArena = 46,
         PlayerDied = 47,
         PlayerRespawn = 48,
+        ClientReady = 49,
+        ItemSpawn = 50,
     }
 }

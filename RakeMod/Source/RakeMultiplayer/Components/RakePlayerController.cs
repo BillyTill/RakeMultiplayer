@@ -1277,7 +1277,25 @@ namespace RakeMultiplayer
             to.y = 0f;
             distance = to.magnitude;
             if (distance > AttackRange || distance < 0.01f) return false;
-            return Vector3.Angle(_rake.forward, to) <= AttackCone;
+            if (Vector3.Angle(_rake.forward, to) > AttackCone) return false;
+
+            // Do not hit through walls or closed doors.
+            Vector3 from = _rake.position + Vector3.up * 1.2f;
+            Vector3 toChest = targetPosition + Vector3.up * 1.2f;
+            Vector3 delta = toChest - from;
+            float rayLength = delta.magnitude;
+            if (rayLength > 0.5f)
+            {
+                var hits = Physics.RaycastAll(from, delta / rayLength, rayLength - 0.5f, ~0);
+                for (int i = 0; i < hits.Length; i++)
+                {
+                    var collider = hits[i].collider;
+                    if (collider == null || collider.isTrigger) continue;
+                    if (collider.transform == _rake || collider.transform.IsChildOf(_rake)) continue;
+                    return false;
+                }
+            }
+            return true;
         }
 
     }

@@ -213,6 +213,43 @@ namespace RakeMultiplayer.Networking
     }
 
 
+    /// <summary>Client -> server: the client finished loading the match scene.</summary>
+    public class ClientReadyPacket : NetworkPacket
+    {
+        public override PacketType Type => PacketType.ClientReady;
+        public override void Write(BinaryWriter writer) { }
+        public override void Read(BinaryReader reader) { }
+    }
+
+
+    /// <summary>Server -> all: a networked item appeared in the world (corpse loot).</summary>
+    public class ItemSpawnPacket : NetworkPacket
+    {
+        public override PacketType Type => PacketType.ItemSpawn;
+
+        public int ItemNetworkId;
+        public string ItemTypeName;
+        public Vector3 Position;
+        public Quaternion Rotation;
+
+        public override void Write(BinaryWriter writer)
+        {
+            writer.Write(ItemNetworkId);
+            writer.Write(ItemTypeName ?? string.Empty);
+            writer.Write(Position.x); writer.Write(Position.y); writer.Write(Position.z);
+            writer.Write(Rotation.x); writer.Write(Rotation.y); writer.Write(Rotation.z); writer.Write(Rotation.w);
+        }
+
+        public override void Read(BinaryReader reader)
+        {
+            ItemNetworkId = reader.ReadInt32();
+            ItemTypeName = PacketSerializer.ReadSafeString(reader);
+            Position = new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
+            Rotation = new Quaternion(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
+        }
+    }
+
+
     /// <summary>
     /// Lobby role state. Server -> all.
     /// </summary>

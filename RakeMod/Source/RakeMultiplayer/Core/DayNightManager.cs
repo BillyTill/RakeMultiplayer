@@ -436,6 +436,19 @@ namespace RakeMultiplayer
         public float PhaseTimer => _phaseTimer;
         public int NightNumber => _nightNumber;
         public bool IsRunning => _isRunning;
+
+        /// <summary>Server: send the current phase to one client (late join).</summary>
+        public void SendPhaseTo(int playerId)
+        {
+            if (!RakeMultiplayerPlugin.isServer || !_isRunning) return;
+            var packet = new PhaseChangePacket
+            {
+                Phase = _currentPhase,
+                RemainingTime = GetRemainingTime(),
+                NightNumber = _nightNumber
+            };
+            RakeNetworkManager.Instance?.ServerSendToPlayer(playerId, packet.Serialize());
+        }
         public float DayDurationConfig => DayDuration;
         public float NightDurationConfig => NightDuration;
 

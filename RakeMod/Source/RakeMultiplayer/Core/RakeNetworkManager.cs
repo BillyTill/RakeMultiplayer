@@ -361,6 +361,7 @@ namespace RakeMultiplayer
 
                 // ID scheme: Host = 1, Clients = connectionId + 1
                 int assignedPlayerId = connectionId + 1;
+                _playerHealth[assignedPlayerId] = 100f;
 
                 // 0. Send HOST to NEW client (ВСЕГДА, даже если позиция не установлена)
                 Vector3 hostPos = _hostSpawnPositionSet ? _hostSpawnPosition : Vector3.zero;
@@ -391,6 +392,15 @@ namespace RakeMultiplayer
                         PickerId = 0,
                         ItemType = string.Empty
                     }.Serialize());
+                }
+
+                // Joining a match that is already running: load the level now. The client
+                // sends ClientReady once its scene/registries exist.
+                if (SessionManager.Instance != null && SessionManager.Instance.IsRunning &&
+                    UnityEngine.Application.loadedLevel > 0)
+                {
+                    _server.Send(connectionId,
+                        new StartGamePacket(UnityEngine.Application.loadedLevel.ToString()).Serialize());
                 }
                 RakeMultiplayerPlugin.Log?.LogInfo($"[Net] Sent Host info to C{connectionId}: pos={hostPos}");
 
@@ -467,6 +477,7 @@ namespace RakeMultiplayer
             RakeMultiplayerPlugin.Log?.LogInfo($"[Net] Server: client {connectionId} disconnected");
             _connectedClients.Remove(connectionId);
             _playerStates.Remove(connectionId);
+            _playerHealth.Remove(connectionId + 1);
 
             // If the departed client owned the Rake, hand it back to the AI. The owner id
             // used to stay stale, so nobody could send RakeState and the Rake froze forever.
@@ -528,6 +539,9 @@ namespace RakeMultiplayer
                         break;
                     case PacketType.PlayerDied:
                         HandleServerPlayerDied(connectionId, (PlayerDiedPacket)packet);
+                        break;
+                    case PacketType.ClientReady:
+                        HandleServerClientReady(connectionId);
                         break;
                     case PacketType.DoorAction:
                         DoorSync.HandleServerRequest((DoorActionPacket)packet);
@@ -678,6 +692,12 @@ namespace RakeMultiplayer
             // The server decides the weapon profile. A modified client used to be able to
             // send Amount = 300, Pellets = 12 (3600 damage) with any weapon in hand.
             string damageType = string.IsNullOrEmpty(packet.DamageType) ? "SniperShot" : packet.DamageType;
+            if (!string.Equals(damageType, "SniperShot", System.StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(damageType, "Bullet", System.StringComparison.OrdinalIgnoreCase))
+            {
+                RakeMultiplayerPlugin.Log?.LogWarning("[Ballistics] rejected unknown damage type: " + damageType);
+                return;
+            }
             int amount;
             int pellets;
             float spread;
@@ -1527,6 +1547,9 @@ namespace RakeMultiplayer
                     case PacketType.PlayerRespawn:
                         PlayerDeathSystem.ApplyRespawn((PlayerRespawnPacket)packet);
                         break;
+                    case PacketType.ItemSpawn:
+                        PlayerDeathSystem.SpawnNetworkedDrop((ItemSpawnPacket)packet);
+                        break;
                     case PacketType.DoorAction:
                         DoorSync.HandleBroadcast((DoorActionPacket)packet);
                         break;
@@ -1687,10 +1710,27 @@ namespace RakeMultiplayer
             {
                 Transform target = FindPlayerTransform(packet.TargetPlayerId);
                 if (target == null) return;
-                if (Vector3.Distance(target.position, rakePos) > 6f)
+                if (Vector3.Distance(target.position, rakePos) > 3.5f)
                 {
                     RakeMultiplayerPlugin.Log?.LogWarning("[RakePlay] rejected grab: target out of reach");
                     return;
+                }
+
+                Vector3 from = rakePos + Vector3.up * 1.2f;
+                Vector3 to = target.position + Vector3.up * 1.2f;
+                Vector3 delta = to - from;
+                float grabDistance = delta.magnitude;
+                if (grabDistance > 0.5f)
+                {
+                    var blockers = Physics.RaycastAll(from, delta / grabDistance, grabDistance - 0.5f, ~0);
+                    for (int i = 0; i < blockers.Length; i++)
+                    {
+                        var blocker = blockers[i].collider;
+                        if (blocker == null || blocker.isTrigger) continue;
+                        if (blocker.transform == rake || blocker.transform.IsChildOf(rake)) continue;
+                        RakeMultiplayerPlugin.Log?.LogWarning("[RakePlay] rejected grab: wall in the way");
+                        return;
+                    }
                 }
 
                 Vector3 focus = packet.FocusPosition != Vector3.zero
@@ -2251,6 +2291,70 @@ namespace RakeMultiplayer
                                                packet.PlayerId + " (shown=" + shown + ")");
         }
 
+        /// <summary>Client: my scene is loaded and registries exist.</summary>
+        public void NotifyClientReady()
+        {
+            if (!RakeMultiplayerPlugin.isConnected || RakeMultiplayerPlugin.isServer) return;
+            ClientSend(new ClientReadyPacket().Serialize());
+        }
+
+        /// <summary>Server: send the current world state to a client that just loaded.</summary>
+        private void HandleServerClientReady(int connectionId)
+        {
+            int playerId = connectionId + 1;
+            RakeMultiplayerPlugin.Log?.LogInfo("[Net] C" + connectionId + " ready - sending world snapshot");
+
+            DoorSync.SendSnapshotToPlayer(playerId);
+
+            foreach (var consumedId in _consumedItemIds)
+            {
+                _server.Send(connectionId, new ItemDestroyedPacket
+                {
+                    ItemNetworkId = consumedId,
+                    PickerId = 0,
+                    ItemType = string.Empty
+                }.Serialize());
+            }
+
+            SessionManager.Instance?.SendStateTo(playerId);
+            DayNightManager.Instance?.SendPhaseTo(playerId);
+
+            Vector3 hostPos = _hostSpawnPositionSet ? _hostSpawnPosition : Vector3.zero;
+            foreach (var existingId in _connectedClients)
+            {
+                if (existingId == connectionId) continue;
+
+                Vector3 pos = hostPos;
+                if (_playerStates.TryGetValue(existingId, out var st)) pos = st.Position;
+                else if (PlayerSpawner.Instance != null &&
+                         PlayerSpawner.Instance.TryGetRemotePlayer(existingId + 1, out var proxy) &&
+                         proxy != null)
+                {
+                    pos = proxy.transform.position;
+                }
+
+                _server.Send(connectionId, new PlayerConnectedPacket
+                {
+                    PlayerId = existingId + 1,
+                    SpawnPosition = pos,
+                    IsYou = false
+                }.Serialize());
+            }
+        }
+
+        /// <summary>Server: register a dropped item with a shared id.</summary>
+        public int RegisterDroppedItem(Item item)
+        {
+            if (item == null || !RakeMultiplayerPlugin.isServer) return 0;
+
+            int id = _nextItemNetworkId;
+            while (_networkedItems.ContainsKey(id)) id++;
+            _nextItemNetworkId = id + 1;
+
+            RegisterItem(item, id);
+            return id;
+        }
+
         /// <summary>Server: a client reports its own death (it knows its inventory).</summary>
         private void HandleServerPlayerDied(int connectionId, PlayerDiedPacket packet)
         {
@@ -2267,6 +2371,11 @@ namespace RakeMultiplayer
             if (PlayerDeathSystem.IsDead(playerId)) return; // host already handled it
 
             packet.PlayerId = playerId;
+
+            // Never trust the loot list from a client: whitelist item ids, clamp ammo.
+            packet.WeaponIds = SanitizeDroppedWeapons(packet.WeaponIds, packet.WeaponAmmo,
+                                                      out var cleanAmmo);
+            packet.WeaponAmmo = cleanAmmo;
 
             // Use the server's own view of the body instead of the client-supplied position.
             if (playerId == 1)
@@ -2295,6 +2404,63 @@ namespace RakeMultiplayer
             SchedulePlayerRespawn(packet.PlayerId);
         }
 
+        private static int[] SanitizeDroppedWeapons(int[] ids, int[] ammo, out int[] cleanAmmo)
+        {
+            var outIds = new List<int>();
+            var outAmmo = new List<int>();
+
+            if (ids != null)
+            {
+                for (int i = 0; i < ids.Length && outIds.Count < 8; i++)
+                {
+                    int id = ids[i];
+                    if (id != 1 && id != 2 && id != 4 && id != 5 && id != 6 && id != 8) continue;
+
+                    outIds.Add(id);
+                    int a = ammo != null && i < ammo.Length ? Mathf.Clamp(ammo[i], 0, 999) : 0;
+                    outAmmo.Add(a);
+                }
+            }
+
+            cleanAmmo = outAmmo.ToArray();
+            return outIds.ToArray();
+        }
+
+        /// <summary>Server: track a player's health and force death when it reaches zero.</summary>
+        public float ServerRegisterDamage(int playerId, int amount)
+        {
+            if (!RakeMultiplayerPlugin.isServer || playerId <= 0) return 100f;
+
+            float hp;
+            if (!_playerHealth.TryGetValue(playerId, out hp)) hp = 100f;
+
+            hp = Mathf.Max(0f, hp - Mathf.Max(0, amount));
+            _playerHealth[playerId] = hp;
+
+            if (hp <= 0f && playerId != 1 && !PlayerDeathSystem.IsDead(playerId))
+            {
+                ForcePlayerDeath(playerId);
+            }
+            return hp;
+        }
+
+        private void ForcePlayerDeath(int playerId)
+        {
+            if (!RakeMultiplayerPlugin.isServer || playerId <= 1) return;
+
+            int connectionId = playerId - 1;
+            if (!_connectedClients.Contains(connectionId)) return;
+
+            RakeMultiplayerPlugin.Log?.LogInfo("[Death] server forced death for player " + playerId);
+            _server.Send(connectionId, new PlayerDamagedPacket
+            {
+                PlayerId = playerId,
+                Amount = 9999,
+                DamageType = "ServerKill",
+                SourcePosition = Vector3.zero
+            }.Serialize());
+        }
+
         /// <summary>Server -> all: a player died (used for a host death too).</summary>
         public void BroadcastPlayerDied(PlayerDiedPacket packet)
         {
@@ -2304,6 +2470,7 @@ namespace RakeMultiplayer
 
         private readonly HashSet<int> _respawnScheduled = new HashSet<int>();
         private readonly HashSet<int> _consumedItemIds = new HashSet<int>();
+        private readonly Dictionary<int, float> _playerHealth = new Dictionary<int, float>();
         private float _lastRakeAttackTime = -999f;
 
         /// <summary>Server: put a dead hunter back at the safehouse after a delay.</summary>
@@ -2340,6 +2507,7 @@ namespace RakeMultiplayer
 
             // Apply on the server view first (host player or the remote clone), then
             // tell every client to restore the same player.
+            _playerHealth[playerId] = 100f;
             PlayerDeathSystem.ApplyRespawn(packet);
             ServerBroadcast(packet.Serialize());
             RakeMultiplayerPlugin.Log?.LogInfo("[Death] server respawned player " + playerId +
@@ -2378,6 +2546,7 @@ namespace RakeMultiplayer
                 PlayerDeathSystem.SetLastHitDirection(away);
                 var fps = local.GetComponent<FPSController>();
                 if (fps != null) fps.TakeDamage(amount, damageType);
+                ServerRegisterDamage(playerId, amount);
                 PlayerRagdoll.TriggerNetworked(playerId, away);
                 return;
             }
@@ -2390,6 +2559,7 @@ namespace RakeMultiplayer
                 SourcePosition = sourcePosition
             };
             ServerSendToPlayer(playerId, packet.Serialize());
+            ServerRegisterDamage(playerId, amount);
             PlayerRagdoll.TriggerNetworked(playerId, away);
         }
 

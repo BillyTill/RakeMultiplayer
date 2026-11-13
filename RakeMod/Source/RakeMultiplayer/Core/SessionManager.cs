@@ -64,6 +64,19 @@ namespace RakeMultiplayer
         /// <summary>
         /// Start a new session (called by host when game begins)
         /// </summary>
+        public void SendStateTo(int playerId)
+        {
+            if (!RakeMultiplayerPlugin.isServer) return;
+            var packet = new SessionStatePacket
+            {
+                CurrentNight = _currentNight,
+                State = _currentState,
+                RakeHealth = _rakeHealth,
+                VictoryType = _victoryType
+            };
+            RakeNetworkManager.Instance?.ServerSendToPlayer(playerId, packet.Serialize());
+        }
+
         public void StartSession()
         {
             if (_isRunning)

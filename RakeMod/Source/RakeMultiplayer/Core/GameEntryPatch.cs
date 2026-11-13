@@ -87,6 +87,12 @@ namespace RakeMultiplayer
 
                 // Recreate remote player proxies for the new scene
                 manager.EnsureRemotePlayersSpawned();
+
+                // Registries exist now: ask the server for doors/items/session state.
+                if (!RakeMultiplayerPlugin.isServer)
+                {
+                    manager.NotifyClientReady();
+                }
             }
 
             if (netPlayer != null)

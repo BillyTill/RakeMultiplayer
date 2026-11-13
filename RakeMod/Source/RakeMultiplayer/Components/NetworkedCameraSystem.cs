@@ -164,6 +164,28 @@ namespace RakeMultiplayer
         /// <summary>
         /// Try to find a NetworkedCamera by CameraId
         /// </summary>
+        /// <summary>The nearest placed, intact camera within radius (used by the Rake AI).</summary>
+        public static NetworkedCamera FindNearestPlaced(Vector3 position, float radius)
+        {
+            NetworkedCamera best = null;
+            float bestDistance = radius;
+
+            foreach (var pair in _cameraRegistry)
+            {
+                var cam = pair.Value;
+                if (cam == null || !cam.IsPlaced || cam.IsBroken) continue;
+
+                float distance = Vector3.Distance(cam.transform.position, position);
+                if (distance <= bestDistance)
+                {
+                    best = cam;
+                    bestDistance = distance;
+                }
+            }
+
+            return best;
+        }
+
         public static bool TryGetCamera(uint cameraId, out NetworkedCamera camera)
         {
             return _cameraRegistry.TryGetValue(cameraId, out camera);
