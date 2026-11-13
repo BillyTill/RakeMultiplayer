@@ -25,6 +25,7 @@ namespace RakeMultiplayer.UI
         private string _lastSceneName;
         private SteamLobbyManager.LobbyInfo _steamSelectedLobby;
         private float _steamUiTimer;
+        private float _steamRefreshTimer = 5f;
 
         // Match result overlay
         private bool _matchOver;
@@ -269,11 +270,20 @@ namespace RakeMultiplayer.UI
             if (_uiBuilder != null && _uiBuilder.SteamBrowsePanel != null &&
                 _uiBuilder.SteamBrowsePanel.activeSelf)
             {
-                _steamUiTimer -= Time.deltaTime;
+                _steamUiTimer -= Time.unscaledDeltaTime;
                 if (_steamUiTimer <= 0f)
                 {
                     _steamUiTimer = 0.4f;
                     UpdateSteamBrowse();
+                }
+
+                // Keep the list fresh: a lobby created after opening the browser used to
+                // require a manual REFRESH.
+                _steamRefreshTimer -= Time.unscaledDeltaTime;
+                if (_steamRefreshTimer <= 0f)
+                {
+                    _steamRefreshTimer = 5f;
+                    if (SteamLobbyManager.Instance != null) SteamLobbyManager.Instance.RefreshLobbies();
                 }
             }
         }

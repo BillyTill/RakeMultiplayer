@@ -445,6 +445,6 @@ namespace RakeMultiplayer
     {
         public const string GUID = "com.rake.multiplayer";
         public const string NAME = "Rake Multiplayer";
-        public const string VERSION = "1.0.22";
+        public const string VERSION = "1.0.23";
     }
 }

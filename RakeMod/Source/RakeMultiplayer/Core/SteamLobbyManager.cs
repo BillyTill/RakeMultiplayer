@@ -42,6 +42,8 @@ namespace RakeMultiplayer
         private ulong _joinCall;
         private ulong _listCall;
         private float _memberSync;
+        private bool _listPending;
+        private float _listRequestTime;
         private readonly HashSet<ulong> _knownMembers = new HashSet<ulong>();
         private string _pendingName;
         private string _pendingPasswordHash;
@@ -65,6 +67,12 @@ namespace RakeMultiplayer
 
             PollApiCalls();
             PollLobbyMembers();
+
+            if (_listPending && Time.unscaledTime - _listRequestTime > 10f)
+            {
+                _listPending = false;
+                LastError = "Lobby list timed out";
+            }
 
 
         }
@@ -178,8 +186,6 @@ namespace RakeMultiplayer
         public void RefreshLobbies()
         {
             EnsureRegistered();
-            Lobbies.Clear();
-            LastError = "";
 
             if (!SteamIntegration.Initialized)
             {
@@ -187,12 +193,24 @@ namespace RakeMultiplayer
                 return;
             }
 
+            // Do not stack requests: Steam returns 0 for a second concurrent list call.
+            if (_listPending) return;
+            _listPending = true;
+            _listRequestTime = Time.unscaledTime;
+
+            Lobbies.Clear();
+            LastError = "";
+
             SteamNative.AddGameFilter("game", "RakeMultiplayer");
-            SteamNative.LimitLobbyResults(30);
+            // Default lobby distance is "close": friends in another region never saw
+            // each other. Worldwide + a larger limit fixes that.
+            SteamNative.SetLobbyDistanceFilter(3);
+            SteamNative.LimitLobbyResults(50);
 
             _listCall = SteamNative.RequestLobbyList();
             if (_listCall == 0)
             {
+                _listPending = false;
                 LastError = "RequestLobbyList failed";
                 return;
             }
@@ -203,6 +221,7 @@ namespace RakeMultiplayer
         private void OnLobbyMatchList(SteamNative.LobbyMatchList list)
         {
             RakeMultiplayerPlugin.Log?.LogInfo("[Steam] LobbyMatchList callback count=" + list.Count);
+            _listPending = false;
             Lobbies.Clear();
 
             int count = (int)list.Count;

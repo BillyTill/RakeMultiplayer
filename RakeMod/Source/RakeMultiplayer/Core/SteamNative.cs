@@ -142,6 +142,9 @@ namespace RakeMultiplayer
         private static extern void ISteamMatchmaking_AddRequestLobbyListResultCountFilter(int maxResults);
 
         [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+        private static extern void ISteamMatchmaking_AddRequestLobbyListDistanceFilter(int distanceFilter);
+
+        [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
         private static extern IntPtr ISteamMatchmaking_GetLobbyMemberData(ulong lobbyId, ulong member, IntPtr key);
 
         [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
@@ -254,6 +257,8 @@ namespace RakeMultiplayer
         public static void LeaveLobby(ulong lobbyId) { ISteamMatchmaking_LeaveLobby(lobbyId); }
         public static ulong RequestLobbyList() { return ISteamMatchmaking_RequestLobbyList(); }
         public static void LimitLobbyResults(int max) { ISteamMatchmaking_AddRequestLobbyListResultCountFilter(max); }
+        /// <summary>0=Close, 1=Default, 2=Far, 3=Worldwide.</summary>
+        public static void SetLobbyDistanceFilter(int filter) { ISteamMatchmaking_AddRequestLobbyListDistanceFilter(filter); }
         public static ulong GetLobbyByIndex(int index) { return ISteamMatchmaking_GetLobbyByIndex(index); }
         public static int GetNumLobbyMembers(ulong lobbyId) { return ISteamMatchmaking_GetNumLobbyMembers(lobbyId); }
         public static ulong GetLobbyMemberByIndex(ulong lobbyId, int index) { return ISteamMatchmaking_GetLobbyMemberByIndex(lobbyId, index); }

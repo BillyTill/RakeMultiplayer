@@ -494,16 +494,42 @@ namespace RakeMultiplayer.UI
 
         public void UpdateSteamRows(System.Collections.Generic.List<SteamLobbyManager.LobbyInfo> lobbies)
         {
+            if (lobbies == null) lobbies = new System.Collections.Generic.List<SteamLobbyManager.LobbyInfo>();
+
             for (int i = 0; i < _steamRows.Length; i++)
             {
+                // A partially built browse panel (older install / interrupted UI init)
+                // leaves the row arrays empty. Recreate a missing row instead of throwing
+                // a NullReferenceException every frame.
+                if (_steamRows[i] == null)
+                {
+                    if (_steamBrowsePanel == null) return;
+                    int index = i;
+                    _steamRows[i] = CreateButton(_steamBrowsePanel.transform, "SteamRow" + i, "",
+                        new Vector2(620, 44), new Vector2(0, 212 - i * 50),
+                        () => OnSteamRowClicked(index), ColPanelLight);
+                    _steamRowTexts[i] = _steamRows[i].GetComponentInChildren<Text>();
+                    _steamRows[i].gameObject.SetActive(false);
+                }
+
                 bool has = i < lobbies.Count;
                 _steamRows[i].gameObject.SetActive(has);
                 if (!has) continue;
 
+                var text = _steamRowTexts[i];
+                if (text == null)
+                {
+                    text = _steamRows[i].GetComponentInChildren<Text>();
+                    _steamRowTexts[i] = text;
+                }
+                if (text == null) continue;
+
                 var info = lobbies[i];
+                if (info == null) continue;
+
                 string lockIcon = info.HasPassword ? "  [LOCK]" : "";
-                _steamRowTexts[i].text = info.Name + "   " + info.Host + "   " +
-                                         info.Members + "/" + info.Max + lockIcon;
+                text.text = info.Name + "   " + info.Host + "   " +
+                            info.Members + "/" + info.Max + lockIcon;
             }
         }
         // --------------------------------------------------------------- callbacks
