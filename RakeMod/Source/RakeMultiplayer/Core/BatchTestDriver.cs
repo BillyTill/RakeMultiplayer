@@ -103,6 +103,17 @@ namespace RakeMultiplayer
             RakeMultiplayerPlugin.Log?.LogInfo("[AutoTest] projectile damage: before=" + before +
                                                " after=" + after);
 
+            // Shotgun pellet check: 6 pellets x 17 damage with a 4.5 degree cone.
+            if (rake != null && rakeEnemy != null && local != null)
+            {
+                float pelletBefore = rakeEnemy.Health;
+                Vector3 origin2 = local.transform.position + Vector3.up * 1.5f;
+                Vector3 target2 = rake.position + Vector3.up * 1.2f;
+                ProjectileSystem.SpawnShot(origin2, (target2 - origin2).normalized, 6, 4.5f, 17, "Bullet", 1);
+                yield return new WaitForSeconds(1.5f);
+                RakeMultiplayerPlugin.Log?.LogInfo("[AutoTest] shotgun pellets: before=" + pelletBefore + " after=" + rakeEnemy.Health);
+            }
+
             yield return new WaitForSeconds(2f);
             RakeMultiplayerPlugin.Log?.LogInfo("[AutoTest] done");
             Application.Quit();

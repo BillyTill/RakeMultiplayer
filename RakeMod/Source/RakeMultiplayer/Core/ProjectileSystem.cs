@@ -27,6 +27,34 @@ namespace RakeMultiplayer
 
         private static GameObject _root;
 
+        /// <summary>Spawn one projectile, or a shotgun cone of pellets.</summary>
+        public static void SpawnShot(Vector3 origin, Vector3 direction, int pellets, float spreadDegrees,
+                                     int amount, string damageType, int ownerId)
+        {
+            pellets = Mathf.Clamp(pellets, 1, 12);
+            if (pellets <= 1)
+            {
+                SpawnServerProjectile(origin, direction, amount, damageType, ownerId);
+                return;
+            }
+
+            if (direction.sqrMagnitude < 0.0001f) return;
+            direction.Normalize();
+
+            Vector3 right = Vector3.Cross(Vector3.up, direction);
+            if (right.sqrMagnitude < 0.001f) right = Vector3.Cross(Vector3.forward, direction);
+            right.Normalize();
+            Vector3 up = Vector3.Cross(direction, right).normalized;
+
+            float radius = Mathf.Tan(Mathf.Clamp(spreadDegrees, 0f, 10f) * Mathf.Deg2Rad);
+            for (int i = 0; i < pellets; i++)
+            {
+                float x = UnityEngine.Random.Range(-radius, radius);
+                float y = UnityEngine.Random.Range(-radius, radius);
+                Vector3 pelletDirection = (direction + right * x + up * y).normalized;
+                SpawnServerProjectile(origin, pelletDirection, amount, damageType, ownerId);
+            }
+        }
         public static void SpawnServerProjectile(Vector3 origin, Vector3 direction,
                                                  int amount, string damageType, int ownerId)
         {

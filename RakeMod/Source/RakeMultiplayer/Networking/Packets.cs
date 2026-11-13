@@ -435,6 +435,8 @@ namespace RakeMultiplayer.Networking
         public string DamageType;
         public Vector3 ShooterPosition; // Position of shooter for AI reaction (danger state)
         public Vector3 Direction;        // Aim direction, used to validate client hits
+        public byte Pellets = 1;         // >1 for shotgun-style shots
+        public float Spread;             // cone half-angle in degrees
 
         public override void Write(BinaryWriter writer)
         {
@@ -448,6 +450,8 @@ namespace RakeMultiplayer.Networking
             writer.Write(Direction.x);
             writer.Write(Direction.y);
             writer.Write(Direction.z);
+            writer.Write(Pellets);
+            writer.Write(Spread);
         }
 
         public override void Read(BinaryReader reader)
@@ -458,6 +462,8 @@ namespace RakeMultiplayer.Networking
             DamageType = reader.ReadString();
             ShooterPosition = new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
             Direction = new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
+            Pellets = reader.ReadByte();
+            Spread = reader.ReadSingle();
         }
     }
 
@@ -497,6 +503,8 @@ namespace RakeMultiplayer.Networking
         public byte WeaponType;
         public Vector3 Origin;
         public Vector3 Direction;
+        public byte Pellets = 1;
+        public float Spread;
 
         public override void Write(BinaryWriter writer)
         {
@@ -508,6 +516,8 @@ namespace RakeMultiplayer.Networking
             writer.Write(Direction.x);
             writer.Write(Direction.y);
             writer.Write(Direction.z);
+            writer.Write(Pellets);
+            writer.Write(Spread);
         }
 
         public override void Read(BinaryReader reader)
@@ -516,13 +526,10 @@ namespace RakeMultiplayer.Networking
             WeaponType = reader.ReadByte();
             Origin = new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
             Direction = new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
+            Pellets = reader.ReadByte();
+            Spread = reader.ReadSingle();
         }
     }
-
-    /// <summary>
-    /// Item pickup request from client to server
-    /// Client -> Server (when player interacts with pickup)
-    /// </summary>
     public class ItemPickupPacket : NetworkPacket
     {
         public override PacketType Type => PacketType.ItemPickup;

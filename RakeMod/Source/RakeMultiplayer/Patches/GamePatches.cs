@@ -217,13 +217,18 @@ namespace RakeMultiplayer.Patches
             int shooterId = PlayerSpawner.Instance != null && PlayerSpawner.Instance.LocalPlayer != null
                 ? PlayerSpawner.Instance.LocalPlayer.PlayerId : 1;
 
-            // Visual bullet/tracer and muzzle light are local and identical on every peer.
-            BulletVisuals.Spawn(caster.position, caster.forward);
+            // The Rifle is the game's break-action shotgun (2-shell clip): fire a cone of
+            // pellets using exactly the vanilla caster position/direction as the centre.
+            const int pellets = 6;
+            const float spread = 4.5f;
+            const int pelletDamage = 17;
+
+            BulletVisuals.SpawnSpread(caster.position, caster.forward, pellets, spread);
 
             if (!RakeMultiplayerPlugin.isConnected)
             {
-                // Single-player: the projectile is authoritative here too.
-                ProjectileSystem.SpawnServerProjectile(caster.position, caster.forward, 100, "Bullet", shooterId);
+                ProjectileSystem.SpawnShot(caster.position, caster.forward, pellets, spread,
+                    pelletDamage, "Bullet", shooterId);
                 return;
             }
 
@@ -235,7 +240,9 @@ namespace RakeMultiplayer.Patches
                 ShooterId = shooterId,
                 WeaponType = 0,
                 Origin = caster.position,
-                Direction = caster.forward
+                Direction = caster.forward,
+                Pellets = (byte)pellets,
+                Spread = spread
             };
 
             if (RakeMultiplayerPlugin.isServer) manager.ServerBroadcast(visual.Serialize());
@@ -243,9 +250,9 @@ namespace RakeMultiplayer.Patches
 
             if (RakeMultiplayerPlugin.isServer)
             {
-                // Host: spawn the authoritative projectile; the vanilla raycast damage
-                // is cancelled by EnemyTakeDamageAuthorityPatch.
-                ProjectileSystem.SpawnServerProjectile(caster.position, caster.forward, 100, "Bullet", shooterId);
+                // Host also fires the authoritative pellets (vanilla raycast damage is cancelled).
+                ProjectileSystem.SpawnShot(caster.position, caster.forward, pellets, spread,
+                    pelletDamage, "Bullet", shooterId);
                 return;
             }
 
@@ -253,13 +260,15 @@ namespace RakeMultiplayer.Patches
             {
                 ShooterId = shooterId,
                 TargetId = 0,
-                Amount = 100,
+                Amount = pelletDamage,
                 DamageType = "Bullet",
                 ShooterPosition = caster.position,
-                Direction = caster.forward
+                Direction = caster.forward,
+                Pellets = (byte)pellets,
+                Spread = spread
             };
             manager.ClientSend(packet.Serialize());
-            RakeMultiplayerPlugin.Log?.LogInfo($"[3.4] Client sent rifle DamageRequest from {caster.position}");
+            RakeMultiplayerPlugin.Log?.LogInfo($"[3.4] Client sent shotgun DamageRequest from {caster.position}");
         }
         private static int GetAmmo(Rifle_weapon w)
         {
@@ -324,7 +333,9 @@ namespace RakeMultiplayer.Patches
                 ShooterId = shooterId,
                 WeaponType = 1,
                 Origin = caster.position,
-                Direction = caster.forward
+                Direction = caster.forward,
+                Pellets = 1,
+                Spread = 0f
             };
 
             if (RakeMultiplayerPlugin.isServer) manager.ServerBroadcast(visual.Serialize());
@@ -343,7 +354,9 @@ namespace RakeMultiplayer.Patches
                 Amount = 200,
                 DamageType = "SniperShot",
                 ShooterPosition = caster.position,
-                Direction = caster.forward
+                Direction = caster.forward,
+                Pellets = 1,
+                Spread = 0f
             };
             manager.ClientSend(packet.Serialize());
             RakeMultiplayerPlugin.Log?.LogInfo($"[3.4] Client sent sniper DamageRequest from {caster.position}");

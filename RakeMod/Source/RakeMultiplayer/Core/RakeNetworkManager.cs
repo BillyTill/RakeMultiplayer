@@ -620,7 +620,7 @@ namespace RakeMultiplayer
             string damageType = string.IsNullOrEmpty(packet.DamageType) ? "SniperShot" : packet.DamageType;
 
             // Real ballistics: the server simulates the bullet and applies damage on impact.
-            ProjectileSystem.SpawnServerProjectile(origin, direction, amount, damageType, shooterId);
+            ProjectileSystem.SpawnShot(origin, direction, packet.Pellets, packet.Spread, amount, damageType, shooterId);
 
             // ===== КРИТИЧЕСКИЙ ФИКС: Заставляем Рейка среагировать на выстрел (Danger state) =====
             // Enemy_AI.Start() подписывается на NotificationsManager.Instance.AddListener("Event_PlayerFire")
@@ -2676,7 +2676,7 @@ namespace RakeMultiplayer
 
             if (packet.Origin != Vector3.zero)
             {
-                BulletVisuals.Spawn(packet.Origin, packet.Direction);
+                BulletVisuals.SpawnSpread(packet.Origin, packet.Direction, packet.Pellets, packet.Spread);
             }
 
             try
