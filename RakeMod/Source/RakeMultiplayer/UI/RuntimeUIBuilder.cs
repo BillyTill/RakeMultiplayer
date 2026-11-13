@@ -846,7 +846,7 @@ namespace RakeMultiplayer.UI
             if (_canvas == null) return;
 
             _rakeHpPanel = CreatePanel(_canvas.transform, "RakeHealthPanel", new Vector2(460, 40),
-                new Vector2(0f, -122f), new Vector2(0.5f, 1f), new Vector2(0.5f, 1f));
+                new Vector2(0f, -100f), new Vector2(0.5f, 1f), new Vector2(0.5f, 1f));
             _rakeHpPanel.GetComponent<Image>().color = new Color(0f, 0f, 0f, 0f);
 
             _rakeHpLabel = CreateText(_rakeHpPanel.transform, "RakeName", "THE RAKE", 12,
