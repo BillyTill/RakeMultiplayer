@@ -137,6 +137,10 @@ namespace RakeMultiplayer
             _phaseTimer = 0f;
             _isRunning = true;
 
+            // Announce the initial phase: StartCycle used to skip this event, so
+            // SessionManager stayed at night 0 until the first transition.
+            OnPhaseChanged?.Invoke(_currentPhase, GetRemainingTime(), _nightNumber);
+
             // Set initial lighting
             ApplyLighting(_currentPhase, 1f);
 
@@ -146,7 +150,7 @@ namespace RakeMultiplayer
                 BroadcastPhaseChange();
             }
 
-            RakeMultiplayerPlugin.Log?.LogInfo($"[DayNightManager] Cycle started: {_currentPhase}, Night #{_nightNumber + 1}");
+            RakeMultiplayerPlugin.Log?.LogInfo($"[DayNightManager] Cycle started: {_currentPhase}, Night #{_nightNumber}");
         }
 
         /// <summary>

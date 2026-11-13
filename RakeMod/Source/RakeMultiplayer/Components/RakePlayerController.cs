@@ -489,6 +489,9 @@ namespace RakeMultiplayer
                 return;
             }
 
+            // The F1 menu and the console own the input while they are open.
+            if (DebugConsole.ConsoleOpen || UI.MultiplayerMenu.IsOpen) return;
+
             float dt = Time.deltaTime;
             if (dt <= 0f) return;
 
@@ -769,6 +772,8 @@ namespace RakeMultiplayer
 
         private void TryAutoAttack()
         {
+            if (DebugConsole.ConsoleOpen || UI.MultiplayerMenu.IsOpen) return;
+
             Transform best = null;
             int bestType = -1; // 0 player, 1 animal, 2 camera
             float bestDistance = float.MaxValue;

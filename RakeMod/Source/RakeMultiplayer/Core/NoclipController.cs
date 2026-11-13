@@ -103,7 +103,7 @@ namespace RakeMultiplayer
             if (!_enabled) return;
 
             // Do not fly while the user is typing in the console or using the debug camera.
-            if (DebugConsole.ConsoleOpen || DebugFreeCamera.IsActive) return;
+            if (DebugConsole.ConsoleOpen || DebugFreeCamera.IsActive || UI.MultiplayerMenu.IsOpen) return;
             if (PlayerRagdoll.IsActive) return;
             if (_fps != null && _fps.Health < 0) return;
 

@@ -57,4 +57,52 @@ namespace RakeMultiplayer
     {
         private static bool Prefix() { return !InputGate.Blocked; }
     }
+
+    [HarmonyPatch(typeof(Inventory), "Update")]
+    internal static class GateInventoryUpdate
+    {
+        private static bool Prefix() { return !InputGate.Blocked; }
+    }
+
+    [HarmonyPatch(typeof(CameraComputer), "Update")]
+    internal static class GateCameraComputerUpdate
+    {
+        private static bool Prefix() { return !InputGate.Blocked; }
+    }
+
+    [HarmonyPatch(typeof(MapCase_weapon), "Update")]
+    internal static class GateMapCaseUpdate
+    {
+        private static bool Prefix() { return !InputGate.Blocked; }
+    }
+
+    [HarmonyPatch(typeof(Food_weapon), "Update")]
+    internal static class GateFoodUpdate
+    {
+        private static bool Prefix() { return !InputGate.Blocked; }
+    }
+
+    [HarmonyPatch(typeof(MedKit_weapon), "Update")]
+    internal static class GateMedkitUpdate
+    {
+        private static bool Prefix() { return !InputGate.Blocked; }
+    }
+
+    [HarmonyPatch(typeof(Trap_weapon), "Update")]
+    internal static class GateTrapUpdate
+    {
+        private static bool Prefix() { return !InputGate.Blocked; }
+    }
+
+    [HarmonyPatch(typeof(Camera_weapon), "Update")]
+    internal static class GateCameraWeaponUpdate
+    {
+        private static bool Prefix() { return !InputGate.Blocked; }
+    }
+
+    [HarmonyPatch(typeof(Binocular_weapon), "Update")]
+    internal static class GateBinocularUpdate
+    {
+        private static bool Prefix() { return !InputGate.Blocked; }
+    }
 }

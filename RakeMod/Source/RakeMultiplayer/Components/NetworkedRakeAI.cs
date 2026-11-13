@@ -190,6 +190,8 @@ namespace RakeMultiplayer
         private float _progressTimer;
         private float _stuckTimer;
         private float _lastRakeStateSendTime;
+        private float _lurkRefreshTimer;
+        private bool _wasDaytime;
         private Vector3 _lastProgressPos;
         private bool _encounterActive;
         private string _lastFinishReason = "";
@@ -899,7 +901,8 @@ namespace RakeMultiplayer
 
             float stateTimeout = currentState == RakeState.Chase ? 120f
                                 : currentState == RakeState.Stealth ? 90f
-                                : currentState == RakeState.Flee ? 60f : 0f;
+                                : currentState == RakeState.Flee ? 60f
+                                : currentState == RakeState.Lurk ? 120f : 0f;
             if (stateTimeout > 0f && stateTimer > stateTimeout)
             {
                 FinishEncounter("state timeout (" + currentState + ")");
@@ -935,6 +938,31 @@ namespace RakeMultiplayer
             {
                 _stuckTimer = 0f;
                 _lastProgressPos = transform.position;
+            }
+
+            // The Rake does not hunt during the day. The vanilla brain is disabled while the
+            // mod owns it, so without this gate the stalking cycle ran 24/7.
+            var cycle = DayNightManager.Instance;
+            bool daytime = cycle != null && cycle.IsRunning &&
+                           cycle.CurrentPhase == Phase.Day;
+            if (daytime)
+            {
+                _wasDaytime = true;
+                if (currentState != RakeState.Idle && currentState != RakeState.Dead &&
+                    currentState != RakeState.Stunned)
+                {
+                    FinishEncounter("day phase");
+                    return;
+                }
+                _lurkCooldownTimer = Mathf.Max(_lurkCooldownTimer, 5f);
+            }
+            else if (_wasDaytime)
+            {
+                _wasDaytime = false;
+                if (currentState == RakeState.Idle)
+                {
+                    _lurkCooldownTimer = Mathf.Min(_lurkCooldownTimer, 8f);
+                }
             }
 
             // Check for death
@@ -1025,6 +1053,9 @@ namespace RakeMultiplayer
         /// </summary>
         private void UpdateIdle()
         {
+            var cycle = DayNightManager.Instance;
+            if (cycle != null && cycle.IsRunning && cycle.CurrentPhase == Phase.Day) return;
+
             if (currentTarget == null) return;
 
             float distance = HorizontalDistance(transform.position, currentTarget.position);
@@ -1082,7 +1113,8 @@ namespace RakeMultiplayer
             {
                 if (!_lurkPointValid)
                 {
-                    ArriveAtLurk();
+                    FinishEncounter("no lurk point");
+                    return;
                 }
                 else
                 {
@@ -1092,7 +1124,8 @@ namespace RakeMultiplayer
 
                     var agent = GetEnemyAgent();
                     bool arrived = agent != null && !agent.pathPending && agent.remainingDistance <= 2.5f;
-                    if (arrived || Vector3.Distance(transform.position, _lurkPoint) < 2.5f || stateTimer > 60f)
+                    float toPoint = Vector3.Distance(transform.position, _lurkPoint);
+                    if (arrived || toPoint < 2.5f || (stateTimer > 60f && toPoint < 10f))
                     {
                         ArriveAtLurk();
                     }
@@ -1101,8 +1134,10 @@ namespace RakeMultiplayer
 
             if (_lurkArrived)
             {
-                if (HorizontalDistance(transform.position, target.position) > lurkStandoffDistance + 25f)
+                if (HorizontalDistance(transform.position, target.position) > lurkStandoffDistance + 25f &&
+                    Time.time >= _lurkRefreshTimer)
                 {
+                    _lurkRefreshTimer = Time.time + 5f;
                     BeginLurk();
                     return;
                 }
@@ -1511,7 +1546,7 @@ namespace RakeMultiplayer
             }
             else
             {
-                stateTimer = 0f;
+                // Do not restart the 60/120 s timeout when the point is just refreshed.
                 ResetAgentPath();
             }
         }

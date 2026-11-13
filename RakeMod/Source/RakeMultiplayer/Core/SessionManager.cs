@@ -72,6 +72,17 @@ namespace RakeMultiplayer
                 return;
             }
 
+            // StartSession may run before SessionManager.Start() (scene load order).
+            if (_dayNightManager == null)
+            {
+                _dayNightManager = DayNightManager.Instance;
+                if (_dayNightManager != null)
+                {
+                    _dayNightManager.OnPhaseChanged -= OnDayNightPhaseChanged;
+                    _dayNightManager.OnPhaseChanged += OnDayNightPhaseChanged;
+                }
+            }
+
             _currentState = SessionState.Active;
             _currentNight = 0;
             WorldPersistence.Clear();
@@ -86,7 +97,7 @@ namespace RakeMultiplayer
             // Start first night
             if (_dayNightManager != null)
             {
-                _dayNightManager.StartCycle(isNight: true, startingNight: 0);
+                _dayNightManager.StartCycle(isNight: true, startingNight: 1);
             }
 
             BroadcastSessionState();

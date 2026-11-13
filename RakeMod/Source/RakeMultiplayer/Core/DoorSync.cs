@@ -68,7 +68,11 @@ namespace RakeMultiplayer
             {
                 DoorId = id,
                 SenderId = local != null ? local.PlayerId : (RakeMultiplayerPlugin.isServer ? 1 : 0),
-                DoorState = (int)door.doorState
+                // Action() flips doorState inside a 0.5 s coroutine, so at postfix time
+                // doorState is still the OLD value. Send the state it is moving to.
+                DoorState = (int)(door.doorState == Door_obj.Door_state.Close
+                    ? Door_obj.Door_state.Open
+                    : Door_obj.Door_state.Close)
             };
 
             var manager = RakeNetworkManager.Instance;

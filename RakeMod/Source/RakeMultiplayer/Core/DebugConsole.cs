@@ -705,8 +705,7 @@ namespace RakeMultiplayer
 
         private static bool IsGameplayScene()
         {
-            string scene = Application.loadedLevelName;
-            return !string.IsNullOrEmpty(scene) && scene.StartsWith("level");
+            return Application.loadedLevel >= 1;
         }
 
         private void HistoryPrev()

@@ -198,7 +198,10 @@ namespace RakeMultiplayer
             hitbox.direction = 1;
             hitbox.height = 1.8f;
             hitbox.radius = 0.4f;
-            hitbox.center = new Vector3(0f, 0.9f, 0f);
+            // The player root sits at the centre of the CharacterController
+            // (height 1.8, center 0), so the capsule must be centered on the root too.
+            // A +0.9 offset left the legs unhittable and created a hitbox above the head.
+            hitbox.center = Vector3.zero;
 
             // Disable ALL cameras and AudioListener on remote player
             var cameras = GetComponentsInChildren<Camera>(true);

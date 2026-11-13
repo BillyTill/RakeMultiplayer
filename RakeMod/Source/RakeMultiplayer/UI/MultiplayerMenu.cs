@@ -37,8 +37,8 @@ namespace RakeMultiplayer.UI
 
         private static bool IsGameplayScene()
         {
-            string scene = UnityEngine.Application.loadedLevelName;
-            return !string.IsNullOrEmpty(scene) && scene.StartsWith("level");
+            // Main menu is level0, matches are level1..level5.
+            return UnityEngine.Application.loadedLevel >= 1;
         }
 
         private void Awake()
@@ -160,6 +160,10 @@ namespace RakeMultiplayer.UI
             UpdateConnectionStatus();
             UpdateHUD();
             UpdateRakeHealthBar();
+
+            // Keep the lock in sync even if LocalPlayer appeared after the menu opened
+            // (the lock would otherwise never be applied).
+            PlayerInputLock.SetMenu(_menuVisible);
 
             if (_uiBuilder != null && _uiBuilder.SteamBrowsePanel != null &&
                 _uiBuilder.SteamBrowsePanel.activeSelf)
@@ -435,6 +439,7 @@ namespace RakeMultiplayer.UI
                 RakeMultiplayerPlugin.Log?.LogInfo("[Menu] Host loading level index 1 NOW");
 
                 _menuVisible = false;
+                PlayerInputLock.SetMenu(false);
                 if (_mainContainer != null) _mainContainer.SetActive(false);
                 HideAllPanels();
 
@@ -470,6 +475,21 @@ namespace RakeMultiplayer.UI
 
             LoadingScreen.SetProgress(1f);
             LoadingScreen.Hide();
+
+            // SessionManager is created when the level's FPSController starts. Wait for
+            // it and start the 3-night cycle: StartSession used to be called only from a
+            // packet the host never receives, so day/night never ran.
+            float waited = 0f;
+            while (SessionManager.Instance == null && waited < 10f)
+            {
+                waited += Time.unscaledDeltaTime;
+                yield return null;
+            }
+            yield return null;
+            if (RakeMultiplayerPlugin.isServer)
+            {
+                SessionManager.Instance?.StartSession();
+            }
         }
         
         private bool _startGameSent = false;
@@ -678,6 +698,7 @@ namespace RakeMultiplayer.UI
             if (menu == null) return;
 
             menu._menuVisible = false;
+            PlayerInputLock.SetMenu(false);
             if (menu._mainContainer != null) menu._mainContainer.SetActive(false);
             menu.HideAllPanels();
         }
