@@ -43,6 +43,7 @@ namespace RakeMultiplayer
 
         private string _input = string.Empty;
         private bool _open;
+        private bool _focusInput;
         private Vector2 _scroll;
         private bool _scrollToBottom;
 
@@ -619,16 +620,15 @@ namespace RakeMultiplayer
                 return rake.GetAiDebugInfo();
             });
 
-            Register("noclip", "noclip", "Toggle CharacterController collision for the local player", args =>
+            Register("noclip", "noclip", "Toggle free-fly noclip (WASD, Space/Ctrl, Shift = fast)", args =>
             {
                 var player = LocalPlayer();
                 if (player == null) return "noclip: no local player";
 
-                var controller = player.GetComponent<CharacterController>();
-                if (controller == null) return "noclip: no CharacterController";
-
-                controller.enabled = !controller.enabled;
-                return "noclip " + (controller.enabled ? "OFF" : "ON");
+                bool active = NoclipController.Toggle(player);
+                return active
+                    ? "noclip ON (WASD, Space = up, Ctrl = down, Shift = fast)"
+                    : "noclip OFF";
             });
 
             Register("rake highlight", "rake highlight [on|off|toggle]",
@@ -679,6 +679,7 @@ namespace RakeMultiplayer
         private void Open()
         {
             _open = true;
+            _focusInput = true;
             _scrollToBottom = true;
             Print("console opened - 'help' for commands, Escape to close");
         }
@@ -892,6 +893,7 @@ namespace RakeMultiplayer
                 {
                     _input = command.Name + " ";
                     _suggestionQuery = null;
+                    _focusInput = true;
                 }
             }
 
@@ -903,7 +905,14 @@ namespace RakeMultiplayer
 
             GUILayout.EndArea();
 
-            GUI.FocusControl("rakeConsoleInput");
+            // Focus ONCE when the console opens (or after a command/suggestion).
+            // Calling FocusControl every OnGUI frame selected all text again and
+            // again, so every new keystroke replaced the whole line.
+            if (_focusInput)
+            {
+                _focusInput = false;
+                GUI.FocusControl("rakeConsoleInput");
+            }
         }
         private void Submit()
         {
@@ -911,6 +920,7 @@ namespace RakeMultiplayer
             _input = string.Empty;
             Execute(line);
             _scrollToBottom = true;
+            _focusInput = true;
         }
     }
 

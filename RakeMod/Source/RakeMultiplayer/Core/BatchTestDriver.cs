@@ -14,6 +14,7 @@ namespace RakeMultiplayer
         private bool _enabled;
         private bool _aiTest;
         private bool _deathTest;
+        private bool _noclipTest;
 
         private void Awake()
         {
@@ -22,6 +23,7 @@ namespace RakeMultiplayer
             _enabled = Array.IndexOf(args, "-autotest") >= 0;
             _aiTest = Array.IndexOf(args, "-aitest") >= 0;
             _deathTest = Array.IndexOf(args, "-deathtest") >= 0;
+            _noclipTest = Array.IndexOf(args, "-nctest") >= 0;
         }
 
         private void Start()
@@ -29,6 +31,7 @@ namespace RakeMultiplayer
             if (_enabled) StartCoroutine(Run());
             else if (_aiTest) StartCoroutine(RunAiTest());
             else if (_deathTest) StartCoroutine(RunDeathTest());
+            else if (_noclipTest) StartCoroutine(RunNoclipTest());
         }
 
         private float _heart;
@@ -123,6 +126,51 @@ namespace RakeMultiplayer
 
             yield return new WaitForSeconds(2f);
             RakeMultiplayerPlugin.Log?.LogInfo("[AutoTest] done");
+            Application.Quit();
+        }
+
+        /// <summary>
+        /// Headless noclip check: host, toggle noclip, fly up, verify no gravity, toggle
+        /// off and verify the controller/movement are restored. Run with -nctest.
+        /// </summary>
+        private IEnumerator RunNoclipTest()
+        {
+            RakeMultiplayerPlugin.Log?.LogInfo("[NcTest] starting");
+            yield return new WaitForSeconds(3f);
+
+            var menu = FindObjectOfType<UI.MultiplayerMenu>();
+            if (menu != null) menu.OnHostGame();
+            yield return new WaitForSeconds(1.5f);
+            if (menu != null) menu.OnStartGame();
+            yield return new WaitForSeconds(14f);
+
+            var spawner = PlayerSpawner.Instance;
+            var local = spawner != null ? spawner.LocalPlayer : null;
+            var cc = local != null ? local.GetComponent<CharacterController>() : null;
+            var pm = local != null ? local.GetComponent<PlayerMovement>() : null;
+            if (local == null || cc == null || pm == null)
+            {
+                RakeMultiplayerPlugin.Log?.LogError("[NcTest] missing player/controller/movement");
+                Application.Quit();
+                yield break;
+            }
+
+            RakeMultiplayerPlugin.Log?.LogInfo("[NcTest] before: cc=" + cc.enabled + " pm=" + pm.enabled);
+            bool on = NoclipController.Toggle(local.transform);
+            RakeMultiplayerPlugin.Log?.LogInfo("[NcTest] ON=" + on + " cc=" + cc.enabled + " pm=" + pm.enabled);
+
+            Vector3 high = local.transform.position + Vector3.up * 3f;
+            local.transform.position = high;
+            yield return new WaitForSeconds(1.2f);
+            RakeMultiplayerPlugin.Log?.LogInfo("[NcTest] airborne pos=" + local.transform.position.ToString("F2") +
+                                               " (expected ~" + high.ToString("F2") + ")");
+
+            bool off = NoclipController.Toggle(local.transform);
+            yield return new WaitForSeconds(0.2f);
+            RakeMultiplayerPlugin.Log?.LogInfo("[NcTest] OFF=" + off + " cc=" + cc.enabled + " pm=" + pm.enabled +
+                                               " pos=" + local.transform.position.ToString("F2"));
+
+            yield return new WaitForSeconds(0.5f);
             Application.Quit();
         }
 
