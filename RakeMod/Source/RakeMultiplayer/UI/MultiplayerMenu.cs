@@ -315,6 +315,7 @@ namespace RakeMultiplayer.UI
             if (_uiBuilder.LobbyPanel) _uiBuilder.LobbyPanel.SetActive(false);
             if (_uiBuilder.SettingsPanel) _uiBuilder.SettingsPanel.SetActive(false);
             if (_uiBuilder.JoinGamePanel) _uiBuilder.JoinGamePanel.SetActive(false);
+            if (_uiBuilder.HostPanel) _uiBuilder.HostPanel.SetActive(false);
             if (_uiBuilder.SteamPanel) _uiBuilder.SteamPanel.SetActive(false);
             if (_uiBuilder.SteamCreatePanel) _uiBuilder.SteamCreatePanel.SetActive(false);
             if (_uiBuilder.SteamBrowsePanel) _uiBuilder.SteamBrowsePanel.SetActive(false);
@@ -634,6 +635,14 @@ namespace RakeMultiplayer.UI
 
         // ------------------------------------------------------------- steam lobby UI
 
+        public void ShowCreateLobby()
+        {
+            HideAllPanels();
+            if (_uiBuilder != null && _uiBuilder.HostPanel != null)
+            {
+                _uiBuilder.HostPanel.SetActive(true);
+            }
+        }
         public void ShowSteamMain()
         {
             HideAllPanels();

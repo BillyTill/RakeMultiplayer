@@ -26,6 +26,7 @@ namespace RakeMultiplayer.UI
         private GameObject _mainContainer;
 
         private GameObject _mainMenuPanel;
+        private GameObject _hostPanel;
         private GameObject _multiplayerPanel;
         private GameObject _lobbyPanel;
         private GameObject _settingsPanel;
@@ -114,14 +115,16 @@ namespace RakeMultiplayer.UI
 
             canvasObj.AddComponent<GraphicRaycaster>();
 
-            _mainContainer = CreatePanel(canvasObj.transform, "MainContainer", new Vector2(560, 660), Vector2.zero,
+            _mainContainer = CreatePanel(canvasObj.transform, "MainContainer", new Vector2(760, 840), Vector2.zero,
                 new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f));
             _mainContainer.GetComponent<Image>().color = ColBg;
             _mainContainer.SetActive(false);
 
             AddTopBar(_mainContainer.transform, ColAccent, 4f);
+            AddPanelAnimation(_mainContainer, 0f, true);
 
             BuildMainMenu();
+            BuildHostPanel();
             BuildMultiplayerPanel();
             BuildJoinPanel();
             BuildLobbyPanel();
@@ -137,24 +140,50 @@ namespace RakeMultiplayer.UI
         {
             _mainMenuPanel = CreatePanel(_mainContainer.transform, "MainMenuPanel", new Vector2(0, 0), Vector2.zero, Vector2.zero, Vector2.one);
             _mainMenuPanel.GetComponent<Image>().color = new Color(0f, 0f, 0f, 0f);
+            AddPanelAnimation(_mainMenuPanel, 16f);
 
-            CreateText(_mainMenuPanel.transform, "Kicker", "RAKE", 13, new Vector2(0, 262), ColAccent, TextAnchor.MiddleCenter);
-            CreateTitle(_mainMenuPanel.transform, "MULTIPLAYER", 34, new Vector2(0, 232));
-            CreateText(_mainMenuPanel.transform, "Tagline", "THE HUNT BEGINS WITH YOU", 13, new Vector2(0, 200), ColMuted, TextAnchor.MiddleCenter);
+            CreateText(_mainMenuPanel.transform, "Kicker", "RAKE", 14, new Vector2(0, 344), ColAccent, TextAnchor.MiddleCenter);
+            CreateTitle(_mainMenuPanel.transform, "MULTIPLAYER", 40, new Vector2(0, 306));
+            CreateText(_mainMenuPanel.transform, "Tagline", "THE HUNT BEGINS WITH YOU", 14, new Vector2(0, 266), ColMuted, TextAnchor.MiddleCenter);
 
-            CreateSeparator(_mainMenuPanel.transform, 172f, 440f);
+            CreateSeparator(_mainMenuPanel.transform, 232f, 560f);
 
-            CreateButton(_mainMenuPanel.transform, "HostGameBtn", "HOST GAME", new Vector2(380, 52), new Vector2(0, 118), OnHostGameClicked);
-            CreateButton(_mainMenuPanel.transform, "JoinGameBtn", "JOIN GAME", new Vector2(380, 52), new Vector2(0, 56), OnJoinGameClicked);
-            CreateButton(_mainMenuPanel.transform, "SettingsBtn", "SETTINGS", new Vector2(380, 52), new Vector2(0, -6), OnSettingsClicked);
-            CreateButton(_mainMenuPanel.transform, "ExitBtn", "EXIT TO GAME", new Vector2(380, 52), new Vector2(0, -68), OnExitClicked, ColPanelLight);
+            CreateButton(_mainMenuPanel.transform, "HostGameBtn", "HOST GAME", new Vector2(460, 60), new Vector2(0, 152), OnHostGameClicked);
+            CreateButton(_mainMenuPanel.transform, "JoinGameBtn", "JOIN GAME", new Vector2(460, 60), new Vector2(0, 80), OnJoinGameClicked);
+            CreateButton(_mainMenuPanel.transform, "SettingsBtn", "SETTINGS", new Vector2(460, 60), new Vector2(0, 8), OnSettingsClicked);
+            CreateButton(_mainMenuPanel.transform, "ExitBtn", "EXIT TO GAME", new Vector2(460, 60), new Vector2(0, -64), OnExitClicked, ColPanelLight);
 
-            CreateSeparator(_mainMenuPanel.transform, -132f, 440f);
+            CreateSeparator(_mainMenuPanel.transform, -140f, 560f);
 
             CreateText(_mainMenuPanel.transform, "Hint",
-                "F1 - menu   |   Tab - cameras   |   1 Rake + up to 3 hunters", 12, new Vector2(0, -160), ColMuted, TextAnchor.MiddleCenter);
+                "F1 - menu   |   Tab - cameras   |   1 Rake + up to 3 hunters", 12, new Vector2(0, -184), ColMuted, TextAnchor.MiddleCenter, 620);
             CreateText(_mainMenuPanel.transform, "Version", PluginInfo.NAME + "  v" + PluginInfo.VERSION, 11,
-                new Vector2(0, -186), new Color(0.35f, 0.33f, 0.30f, 1f), TextAnchor.MiddleCenter);
+                new Vector2(0, -216), new Color(0.35f, 0.33f, 0.30f, 1f), TextAnchor.MiddleCenter);
+        }
+
+        private void BuildHostPanel()
+        {
+            _hostPanel = CreatePanel(_mainContainer.transform, "HostPanel", new Vector2(0, 0), Vector2.zero, Vector2.zero, Vector2.one);
+            _hostPanel.GetComponent<Image>().color = new Color(0f, 0f, 0f, 0f);
+            _hostPanel.SetActive(false);
+            AddPanelAnimation(_hostPanel, 16f);
+
+            CreateTitle(_hostPanel.transform, "CREATE LOBBY", 32, new Vector2(0, 322));
+            CreateSeparator(_hostPanel.transform, 282f, 560f);
+
+            CreateText(_hostPanel.transform, "HostSubtitle", "CHOOSE HOW THE HUNT IS HOSTED", 12,
+                new Vector2(0, 246), ColMuted, TextAnchor.MiddleCenter, 620);
+
+            CreateButton(_hostPanel.transform, "LanHostBtn", "CREATE LAN LOBBY", new Vector2(460, 62),
+                new Vector2(0, 168), OnCreateLanClicked);
+            CreateButton(_hostPanel.transform, "SteamHostBtn", "CREATE STEAM LOBBY", new Vector2(460, 62),
+                new Vector2(0, 96), OnCreateSteamClicked);
+            CreateButton(_hostPanel.transform, "HostBackBtn", "BACK", new Vector2(460, 48),
+                new Vector2(0, 8), OnBackToMainClicked, ColPanelLight);
+
+            CreateText(_hostPanel.transform, "HostHint",
+                "LAN: direct TCP, no Steam needed.  STEAM: lobby browser, invites and no port forwarding.", 11,
+                new Vector2(0, -110), ColMuted, TextAnchor.MiddleCenter, 660);
         }
 
         private void BuildMultiplayerPanel()
@@ -162,16 +191,17 @@ namespace RakeMultiplayer.UI
             _multiplayerPanel = CreatePanel(_mainContainer.transform, "MultiplayerPanel", new Vector2(0, 0), Vector2.zero, Vector2.zero, Vector2.one);
             _multiplayerPanel.GetComponent<Image>().color = new Color(0f, 0f, 0f, 0f);
             _multiplayerPanel.SetActive(false);
+            AddPanelAnimation(_multiplayerPanel, 16f);
 
-            CreateTitle(_multiplayerPanel.transform, "CONNECTION", 30, new Vector2(0, 250));
-            CreateSeparator(_multiplayerPanel.transform, 214f, 440f);
+            CreateTitle(_multiplayerPanel.transform, "CONNECTION", 32, new Vector2(0, 320));
+            CreateSeparator(_multiplayerPanel.transform, 282f, 560f);
 
-            CreateButton(_multiplayerPanel.transform, "LANBtn", "LAN / DIRECT IP", new Vector2(380, 52), new Vector2(0, 120), OnLANClicked);
-            CreateButton(_multiplayerPanel.transform, "OnlineBtn", "STEAM LOBBY", new Vector2(380, 52), new Vector2(0, 58), OnOnlineClicked, ColPanelLight);
-            CreateButton(_multiplayerPanel.transform, "BackToMainBtn", "BACK", new Vector2(380, 46), new Vector2(0, -60), OnBackToMainClicked, ColPanelLight);
+            CreateButton(_multiplayerPanel.transform, "LANBtn", "LAN / DIRECT IP", new Vector2(460, 60), new Vector2(0, 190), OnLANClicked);
+            CreateButton(_multiplayerPanel.transform, "OnlineBtn", "STEAM LOBBY", new Vector2(460, 60), new Vector2(0, 118), OnOnlineClicked, ColPanelLight);
+            CreateButton(_multiplayerPanel.transform, "BackToMainBtn", "BACK", new Vector2(460, 48), new Vector2(0, 30), OnBackToMainClicked, ColPanelLight);
 
             CreateText(_multiplayerPanel.transform, "Hint", "Radmin VPN / Hamachi work too: enter the host's VPN IP.",
-                12, new Vector2(0, -140), ColMuted, TextAnchor.MiddleCenter);
+                12, new Vector2(0, -128), ColMuted, TextAnchor.MiddleCenter, 620);
         }
 
         private void BuildJoinPanel()
@@ -179,22 +209,23 @@ namespace RakeMultiplayer.UI
             _joinGamePanel = CreatePanel(_mainContainer.transform, "JoinGamePanel", new Vector2(0, 0), Vector2.zero, Vector2.zero, Vector2.one);
             _joinGamePanel.GetComponent<Image>().color = new Color(0f, 0f, 0f, 0f);
             _joinGamePanel.SetActive(false);
+            AddPanelAnimation(_joinGamePanel, 16f);
 
-            CreateTitle(_joinGamePanel.transform, "JOIN GAME", 30, new Vector2(0, 250));
-            CreateSeparator(_joinGamePanel.transform, 214f, 440f);
+            CreateTitle(_joinGamePanel.transform, "JOIN GAME", 32, new Vector2(0, 320));
+            CreateSeparator(_joinGamePanel.transform, 282f, 560f);
 
-            CreateText(_joinGamePanel.transform, "IpLabel", "HOST ADDRESS", 12, new Vector2(0, 150), ColMuted, TextAnchor.MiddleLeft, 380);
+            CreateText(_joinGamePanel.transform, "IpLabel", "HOST ADDRESS", 12, new Vector2(0, 224), ColMuted, TextAnchor.MiddleLeft, 460);
             _ipInputField = CreateInputField(_joinGamePanel.transform, "IPInput", "192.168.1.10 / 26.x.x.x", "127.0.0.1",
-                new Vector2(380, 44), new Vector2(0, 118));
+                new Vector2(460, 50), new Vector2(0, 188));
 
-            CreateText(_joinGamePanel.transform, "PortLabel", "PORT", 12, new Vector2(0, 76), ColMuted, TextAnchor.MiddleLeft, 380);
-            _portInputField = CreateInputField(_joinGamePanel.transform, "PortInput", "7777", "7777", new Vector2(380, 44), new Vector2(0, 44));
+            CreateText(_joinGamePanel.transform, "PortLabel", "PORT", 12, new Vector2(0, 138), ColMuted, TextAnchor.MiddleLeft, 460);
+            _portInputField = CreateInputField(_joinGamePanel.transform, "PortInput", "7777", "7777", new Vector2(460, 50), new Vector2(0, 102));
 
-            _connectButton = CreateButton(_joinGamePanel.transform, "ConnectBtn", "CONNECT", new Vector2(380, 52), new Vector2(0, -24), OnConnectClicked);
-            CreateButton(_joinGamePanel.transform, "JoinBackBtn", "BACK", new Vector2(380, 46), new Vector2(0, -86), OnBackToMultiplayerClicked, ColPanelLight);
+            _connectButton = CreateButton(_joinGamePanel.transform, "ConnectBtn", "CONNECT", new Vector2(460, 60), new Vector2(0, 22), OnConnectClicked);
+            CreateButton(_joinGamePanel.transform, "JoinBackBtn", "BACK", new Vector2(460, 48), new Vector2(0, -50), OnBackToMultiplayerClicked, ColPanelLight);
 
             CreateText(_joinGamePanel.transform, "Hint", "The host must allow TCP 7777 through Windows Firewall.",
-                12, new Vector2(0, -160), ColMuted, TextAnchor.MiddleCenter);
+                12, new Vector2(0, -156), ColMuted, TextAnchor.MiddleCenter, 620);
         }
 
         private void BuildLobbyPanel()
@@ -202,54 +233,56 @@ namespace RakeMultiplayer.UI
             _lobbyPanel = CreatePanel(_mainContainer.transform, "LobbyPanel", new Vector2(0, 0), Vector2.zero, Vector2.zero, Vector2.one);
             _lobbyPanel.GetComponent<Image>().color = new Color(0f, 0f, 0f, 0f);
             _lobbyPanel.SetActive(false);
+            AddPanelAnimation(_lobbyPanel, 16f);
 
-            _lobbyTitleText = CreateTitle(_lobbyPanel.transform, "LOBBY", 30, new Vector2(0, 270));
-            _lobbySubtitleText = CreateText(_lobbyPanel.transform, "LobbySubtitle", "HOST", 12, new Vector2(0, 244), ColMuted, TextAnchor.MiddleCenter);
-            CreateSeparator(_lobbyPanel.transform, 222f, 460f);
+            _lobbyTitleText = CreateTitle(_lobbyPanel.transform, "LOBBY", 32, new Vector2(0, 352));
+            _lobbySubtitleText = CreateText(_lobbyPanel.transform, "LobbySubtitle", "HOST", 12, new Vector2(0, 324), ColMuted, TextAnchor.MiddleCenter);
+            CreateSeparator(_lobbyPanel.transform, 300f, 620f);
 
             _connectionStatusText = CreateText(_lobbyPanel.transform, "ConnectionStatus", "Disconnected", 13,
-                new Vector2(0, 194), ColBad, TextAnchor.MiddleCenter);
+                new Vector2(0, 262), ColBad, TextAnchor.MiddleCenter);
             _playerCountText = CreateText(_lobbyPanel.transform, "PlayerCount", "Players: 1/4", 13,
-                new Vector2(0, 172), ColText, TextAnchor.MiddleCenter);
+                new Vector2(0, 236), ColText, TextAnchor.MiddleCenter);
 
             // ---- hunters column ----
-            CreateText(_lobbyPanel.transform, "HuntersLabel", "HUNTERS", 12, new Vector2(-118, 136), ColMuted, TextAnchor.MiddleLeft, 200);
-            var huntersFrame = CreatePanel(_lobbyPanel.transform, "HuntersFrame", new Vector2(220, 190), new Vector2(-118, 28),
+            CreateText(_lobbyPanel.transform, "HuntersLabel", "HUNTERS", 12, new Vector2(-172, 196), ColMuted, TextAnchor.MiddleLeft, 320);
+            var huntersFrame = CreatePanel(_lobbyPanel.transform, "HuntersFrame", new Vector2(320, 240), new Vector2(-172, 52),
                 new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f));
             _playerListContainer = huntersFrame.transform;
             AddTopBar(huntersFrame.transform, ColAccentDim, 3f);
 
             _playerListText = CreateText(huntersFrame.transform, "PlayerList", "1. HOST", 14, Vector2.zero,
-                ColText, TextAnchor.UpperLeft, 196);
+                ColText, TextAnchor.UpperLeft, 292);
             var listRt = _playerListText.GetComponent<RectTransform>();
             listRt.anchorMin = Vector2.zero;
             listRt.anchorMax = Vector2.one;
-            listRt.offsetMin = new Vector2(12f, 10f);
-            listRt.offsetMax = new Vector2(-12f, -10f);
+            listRt.offsetMin = new Vector2(16f, 14f);
+            listRt.offsetMax = new Vector2(-16f, -14f);
 
             // ---- rake column ----
-            CreateText(_lobbyPanel.transform, "RakeLabel", "RAKE (1 slot)", 12, new Vector2(118, 136), ColAccent, TextAnchor.MiddleLeft, 200);
-            var rakeFrame = CreatePanel(_lobbyPanel.transform, "RakeFrame", new Vector2(220, 190), new Vector2(118, 28),
+            CreateText(_lobbyPanel.transform, "RakeLabel", "RAKE (1 slot)", 12, new Vector2(172, 196), ColAccent, TextAnchor.MiddleLeft, 320);
+            var rakeFrame = CreatePanel(_lobbyPanel.transform, "RakeFrame", new Vector2(320, 240), new Vector2(172, 52),
                 new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f));
             AddTopBar(rakeFrame.transform, ColAccent, 3f);
 
-            _rakeSlotText = CreateText(rakeFrame.transform, "RakeSlot", "-", 22, new Vector2(0, 10), ColAccent, TextAnchor.MiddleCenter);
-            CreateText(rakeFrame.transform, "RakeHint", "one per session", 11, new Vector2(0, -34), ColMuted, TextAnchor.MiddleCenter);
+            _rakeSlotText = CreateText(rakeFrame.transform, "RakeSlot", "-", 24, new Vector2(0, 14), ColAccent, TextAnchor.MiddleCenter);
+            CreateText(rakeFrame.transform, "RakeHint", "one per session", 11, new Vector2(0, -40), ColMuted, TextAnchor.MiddleCenter);
 
-            _rakeRoleButton = CreateButton(_lobbyPanel.transform, "RakeRoleBtn", "BECOME THE RAKE", new Vector2(220, 40),
-                new Vector2(118, -84), OnRakeRoleClicked, ColAccentDim);
+            _rakeRoleButton = CreateButton(_lobbyPanel.transform, "RakeRoleBtn", "BECOME THE RAKE", new Vector2(320, 48),
+                new Vector2(172, -112), OnRakeRoleClicked, ColAccentDim);
             _rakeRoleButtonText = _rakeRoleButton.GetComponentInChildren<Text>();
 
             // ---- actions ----
-            _startGameButton = CreateButton(_lobbyPanel.transform, "StartGameBtn", "START GAME", new Vector2(220, 48), new Vector2(-118, -168), OnStartGameClicked);
-            CreateButton(_lobbyPanel.transform, "LeaveLobbyBtn", "LEAVE LOBBY", new Vector2(220, 48), new Vector2(118, -168), OnLeaveLobbyClicked, ColPanelLight);
+            _startGameButton = CreateButton(_lobbyPanel.transform, "StartGameBtn", "START GAME", new Vector2(320, 56), new Vector2(-172, -206), OnStartGameClicked);
+            CreateButton(_lobbyPanel.transform, "LeaveLobbyBtn", "LEAVE LOBBY", new Vector2(320, 56), new Vector2(172, -206), OnLeaveLobbyClicked, ColPanelLight);
             _waitingText = CreateText(_lobbyPanel.transform, "WaitingText", "WAITING FOR THE HOST...", 12,
-                new Vector2(-118, -168), ColMuted, TextAnchor.MiddleCenter, 220f);
+                new Vector2(-172, -206), ColMuted, TextAnchor.MiddleCenter, 320f);
             _waitingText.gameObject.SetActive(false);
-            CreateButton(_lobbyPanel.transform, "CopyIPBtn", "COPY MY IP", new Vector2(460, 38), new Vector2(0, -222), OnCopyIPClicked, ColPanelLight);
+
+            CreateButton(_lobbyPanel.transform, "CopyIPBtn", "COPY MY IP", new Vector2(660, 42), new Vector2(0, -274), OnCopyIPClicked, ColPanelLight);
 
             _lobbyHintText = CreateText(_lobbyPanel.transform, "LobbyHint",
-                "Only one Rake per session. It cannot attack during the day.", 11, new Vector2(0, -258), ColMuted, TextAnchor.MiddleCenter);
+                "Only one Rake per session. It cannot attack during the day.", 11, new Vector2(0, -318), ColMuted, TextAnchor.MiddleCenter, 660);
         }
 
         private void BuildSettingsPanel()
@@ -257,21 +290,21 @@ namespace RakeMultiplayer.UI
             _settingsPanel = CreatePanel(_mainContainer.transform, "SettingsPanel", new Vector2(0, 0), Vector2.zero, Vector2.zero, Vector2.one);
             _settingsPanel.GetComponent<Image>().color = new Color(0f, 0f, 0f, 0f);
             _settingsPanel.SetActive(false);
+            AddPanelAnimation(_settingsPanel, 16f);
 
-            CreateTitle(_settingsPanel.transform, "SETTINGS", 30, new Vector2(0, 250));
-            CreateSeparator(_settingsPanel.transform, 214f, 440f);
+            CreateTitle(_settingsPanel.transform, "SETTINGS", 32, new Vector2(0, 320));
+            CreateSeparator(_settingsPanel.transform, 282f, 560f);
 
-            CreateText(_settingsPanel.transform, "NameLabel", "PLAYER NAME", 12, new Vector2(0, 150), ColMuted, TextAnchor.MiddleLeft, 380);
-            _playerNameInputField = CreateInputField(_settingsPanel.transform, "PlayerNameInput", "Player", "Player", new Vector2(380, 44), new Vector2(0, 118));
+            CreateText(_settingsPanel.transform, "NameLabel", "PLAYER NAME", 12, new Vector2(0, 224), ColMuted, TextAnchor.MiddleLeft, 460);
+            _playerNameInputField = CreateInputField(_settingsPanel.transform, "PlayerNameInput", "Player", "Player", new Vector2(460, 50), new Vector2(0, 188));
 
-            CreateText(_settingsPanel.transform, "MaxLabel", "MAX PLAYERS (2-4)", 12, new Vector2(0, 76), ColMuted, TextAnchor.MiddleLeft, 380);
-            _maxPlayersInputField = CreateInputField(_settingsPanel.transform, "MaxPlayersInput", "4", "4", new Vector2(380, 44), new Vector2(0, 44));
+            CreateText(_settingsPanel.transform, "MaxLabel", "MAX PLAYERS (2-4)", 12, new Vector2(0, 138), ColMuted, TextAnchor.MiddleLeft, 460);
+            _maxPlayersInputField = CreateInputField(_settingsPanel.transform, "MaxPlayersInput", "4", "4", new Vector2(460, 50), new Vector2(0, 102));
 
-            _steamP2PToggle = CreateToggle(_settingsPanel.transform, "SteamP2PToggle", "Use Steam P2P", false, new Vector2(0, -20));
+            _steamP2PToggle = CreateToggle(_settingsPanel.transform, "SteamP2PToggle", "Use Steam P2P", false, new Vector2(0, 30));
 
-            CreateButton(_settingsPanel.transform, "SettingsBackBtn", "BACK", new Vector2(380, 46), new Vector2(0, -100), OnBackToMultiplayerClicked, ColPanelLight);
+            CreateButton(_settingsPanel.transform, "SettingsBackBtn", "BACK", new Vector2(460, 48), new Vector2(0, -62), OnBackToMultiplayerClicked, ColPanelLight);
         }
-
         // ------------------------------------------------------------- steam panels
 
         private void BuildSteamPanels()
@@ -281,101 +314,105 @@ namespace RakeMultiplayer.UI
                 Vector2.zero, Vector2.one);
             _steamPanel.GetComponent<Image>().color = new Color(0f, 0f, 0f, 0f);
             _steamPanel.SetActive(false);
+            AddPanelAnimation(_steamPanel, 16f);
 
-            CreateTitle(_steamPanel.transform, "STEAM", 30, new Vector2(0, 250));
+            CreateTitle(_steamPanel.transform, "STEAM", 32, new Vector2(0, 330));
             _steamMainStatus = CreateText(_steamPanel.transform, "SteamStatus", "Steam ready", 12,
-                new Vector2(0, 210), ColMuted, TextAnchor.MiddleCenter, 460);
-            CreateSeparator(_steamPanel.transform, 184f, 440f);
+                new Vector2(0, 290), ColMuted, TextAnchor.MiddleCenter, 620);
+            CreateSeparator(_steamPanel.transform, 256f, 560f);
 
-            CreateButton(_steamPanel.transform, "SteamCreateBtn", "CREATE LOBBY", new Vector2(380, 52),
-                new Vector2(0, 110), OnSteamCreateClicked);
-            CreateButton(_steamPanel.transform, "SteamBrowseBtn", "BROWSE LOBBIES", new Vector2(380, 52),
-                new Vector2(0, 48), OnSteamBrowseClicked);
-            CreateButton(_steamPanel.transform, "SteamBackBtn", "BACK", new Vector2(380, 46),
-                new Vector2(0, -40), OnBackToMultiplayerClicked, ColPanelLight);
+            CreateButton(_steamPanel.transform, "SteamCreateBtn", "CREATE LOBBY", new Vector2(460, 60),
+                new Vector2(0, 186), OnSteamCreateClicked);
+            CreateButton(_steamPanel.transform, "SteamBrowseBtn", "BROWSE LOBBIES", new Vector2(460, 60),
+                new Vector2(0, 114), OnSteamBrowseClicked);
+            CreateButton(_steamPanel.transform, "SteamBackBtn", "BACK", new Vector2(460, 48),
+                new Vector2(0, 26), OnBackToMultiplayerClicked, ColPanelLight);
 
             CreateText(_steamPanel.transform, "SteamHint", "Spacewar app 480 · Steam must be running", 11,
-                new Vector2(0, -150), ColMuted, TextAnchor.MiddleCenter, 460);
+                new Vector2(0, -160), ColMuted, TextAnchor.MiddleCenter, 660);
 
             // create
             _steamCreatePanel = CreatePanel(_mainContainer.transform, "SteamCreatePanel", Vector2.zero, Vector2.zero,
                 Vector2.zero, Vector2.one);
             _steamCreatePanel.GetComponent<Image>().color = new Color(0f, 0f, 0f, 0f);
             _steamCreatePanel.SetActive(false);
+            AddPanelAnimation(_steamCreatePanel, 16f);
 
-            CreateTitle(_steamCreatePanel.transform, "CREATE LOBBY", 30, new Vector2(0, 250));
-            CreateSeparator(_steamCreatePanel.transform, 214f, 440f);
+            CreateTitle(_steamCreatePanel.transform, "CREATE LOBBY", 32, new Vector2(0, 330));
+            CreateSeparator(_steamCreatePanel.transform, 292f, 560f);
 
-            CreateText(_steamCreatePanel.transform, "SteamNameLabel", "LOBBY NAME", 12, new Vector2(0, 160),
-                ColMuted, TextAnchor.MiddleLeft, 380);
+            CreateText(_steamCreatePanel.transform, "SteamNameLabel", "LOBBY NAME", 12, new Vector2(0, 232),
+                ColMuted, TextAnchor.MiddleLeft, 460);
             _steamNameInput = CreateInputField(_steamCreatePanel.transform, "SteamNameInput", "Night Hunt",
-                "Night Hunt", new Vector2(380, 44), new Vector2(0, 128));
+                "Night Hunt", new Vector2(460, 50), new Vector2(0, 196));
 
             CreateText(_steamCreatePanel.transform, "SteamPassLabel", "PASSWORD (OPTIONAL)", 12,
-                new Vector2(0, 86), ColMuted, TextAnchor.MiddleLeft, 380);
+                new Vector2(0, 142), ColMuted, TextAnchor.MiddleLeft, 460);
             _steamPasswordInput = CreateInputField(_steamCreatePanel.transform, "SteamPassInput", "empty = public",
-                "", new Vector2(380, 44), new Vector2(0, 54));
+                "", new Vector2(460, 50), new Vector2(0, 106));
 
             CreateText(_steamCreatePanel.transform, "SteamSlots", "SLOTS: 4 (1 Rake + 3 hunters)", 12,
-                new Vector2(0, 12), ColMuted, TextAnchor.MiddleCenter, 440);
+                new Vector2(0, 42), ColMuted, TextAnchor.MiddleCenter, 560);
 
-            CreateButton(_steamCreatePanel.transform, "SteamCreateOk", "CREATE", new Vector2(380, 52),
-                new Vector2(0, -40), OnSteamCreateConfirmed);
-            CreateButton(_steamCreatePanel.transform, "SteamCreateBack", "BACK", new Vector2(380, 46),
-                new Vector2(0, -102), OnSteamBackClicked, ColPanelLight);
+            CreateButton(_steamCreatePanel.transform, "SteamCreateOk", "CREATE", new Vector2(460, 60),
+                new Vector2(0, -6), OnSteamCreateConfirmed);
+            CreateButton(_steamCreatePanel.transform, "SteamCreateBack", "BACK", new Vector2(460, 48),
+                new Vector2(0, -70), OnSteamBackClicked, ColPanelLight);
 
             _steamCreateStatus = CreateText(_steamCreatePanel.transform, "SteamCreateStatus", "", 12,
-                new Vector2(0, -166), ColBad, TextAnchor.MiddleCenter, 460);
+                new Vector2(0, -176), ColBad, TextAnchor.MiddleCenter, 660);
 
             // browse
             _steamBrowsePanel = CreatePanel(_mainContainer.transform, "SteamBrowsePanel", Vector2.zero, Vector2.zero,
                 Vector2.zero, Vector2.one);
             _steamBrowsePanel.GetComponent<Image>().color = new Color(0f, 0f, 0f, 0f);
             _steamBrowsePanel.SetActive(false);
+            AddPanelAnimation(_steamBrowsePanel, 16f);
 
-            CreateTitle(_steamBrowsePanel.transform, "LOBBIES", 30, new Vector2(0, 250));
+            CreateTitle(_steamBrowsePanel.transform, "LOBBIES", 32, new Vector2(0, 330));
             _steamBrowseStatus = CreateText(_steamBrowsePanel.transform, "SteamBrowseStatus", "", 12,
-                new Vector2(0, 214), ColMuted, TextAnchor.MiddleCenter, 460);
-            CreateSeparator(_steamBrowsePanel.transform, 190f, 460f);
+                new Vector2(0, 292), ColMuted, TextAnchor.MiddleCenter, 660);
+            CreateSeparator(_steamBrowsePanel.transform, 264f, 620f);
 
             for (int i = 0; i < 6; i++)
             {
                 int index = i;
-                var row = CreateButton(_steamBrowsePanel.transform, "SteamRow" + i, "", new Vector2(460, 38),
-                    new Vector2(0, 140 - i * 44), () => OnSteamRowClicked(index), ColPanelLight);
+                var row = CreateButton(_steamBrowsePanel.transform, "SteamRow" + i, "", new Vector2(620, 44),
+                    new Vector2(0, 212 - i * 50), () => OnSteamRowClicked(index), ColPanelLight);
                 _steamRows[i] = row;
                 _steamRowTexts[i] = row.GetComponentInChildren<Text>();
                 row.gameObject.SetActive(false);
             }
 
-            CreateButton(_steamBrowsePanel.transform, "SteamRefresh", "REFRESH", new Vector2(220, 42),
-                new Vector2(-118, -164), OnSteamRefreshClicked);
-            CreateButton(_steamBrowsePanel.transform, "SteamBrowseBack", "BACK", new Vector2(220, 42),
-                new Vector2(118, -164), OnSteamBackClicked, ColPanelLight);
+            CreateButton(_steamBrowsePanel.transform, "SteamRefresh", "REFRESH", new Vector2(300, 46),
+                new Vector2(-160, -116), OnSteamRefreshClicked);
+            CreateButton(_steamBrowsePanel.transform, "SteamBrowseBack", "BACK", new Vector2(300, 46),
+                new Vector2(160, -116), OnSteamBackClicked, ColPanelLight);
 
             // password
             _steamPasswordPanel = CreatePanel(_mainContainer.transform, "SteamPasswordPanel", Vector2.zero, Vector2.zero,
                 Vector2.zero, Vector2.one);
             _steamPasswordPanel.GetComponent<Image>().color = new Color(0f, 0f, 0f, 0f);
             _steamPasswordPanel.SetActive(false);
+            AddPanelAnimation(_steamPasswordPanel, 16f);
 
-            CreateTitle(_steamPasswordPanel.transform, "JOIN LOBBY", 30, new Vector2(0, 250));
+            CreateTitle(_steamPasswordPanel.transform, "JOIN LOBBY", 32, new Vector2(0, 330));
             _steamPasswordTitle = CreateText(_steamPasswordPanel.transform, "SteamJoinTitle", "", 13,
-                new Vector2(0, 210), ColAccent, TextAnchor.MiddleCenter, 460);
-            CreateSeparator(_steamPasswordPanel.transform, 184f, 440f);
+                new Vector2(0, 290), ColAccent, TextAnchor.MiddleCenter, 620);
+            CreateSeparator(_steamPasswordPanel.transform, 262f, 560f);
 
-            CreateText(_steamPasswordPanel.transform, "SteamJoinPassLabel", "PASSWORD", 12, new Vector2(0, 140),
-                ColMuted, TextAnchor.MiddleLeft, 380);
+            CreateText(_steamPasswordPanel.transform, "SteamJoinPassLabel", "PASSWORD", 12, new Vector2(0, 200),
+                ColMuted, TextAnchor.MiddleLeft, 460);
             _steamJoinPasswordInput = CreateInputField(_steamPasswordPanel.transform, "SteamJoinPassInput",
-                "lobby password", "", new Vector2(380, 44), new Vector2(0, 108));
+                "lobby password", "", new Vector2(460, 50), new Vector2(0, 164));
 
-            CreateButton(_steamPasswordPanel.transform, "SteamJoinOk", "JOIN", new Vector2(380, 52),
-                new Vector2(0, 28), OnSteamJoinConfirmed);
-            CreateButton(_steamPasswordPanel.transform, "SteamJoinBack", "BACK", new Vector2(380, 46),
-                new Vector2(0, -34), OnSteamRowBackClicked, ColPanelLight);
+            CreateButton(_steamPasswordPanel.transform, "SteamJoinOk", "JOIN", new Vector2(460, 60),
+                new Vector2(0, 86), OnSteamJoinConfirmed);
+            CreateButton(_steamPasswordPanel.transform, "SteamJoinBack", "BACK", new Vector2(460, 48),
+                new Vector2(0, 16), OnSteamRowBackClicked, ColPanelLight);
 
             _steamPasswordStatus = CreateText(_steamPasswordPanel.transform, "SteamJoinStatus", "", 12,
-                new Vector2(0, -120), ColBad, TextAnchor.MiddleCenter, 460);
+                new Vector2(0, -92), ColBad, TextAnchor.MiddleCenter, 660);
         }
 
         // -------------------------------------------------- steam callbacks
@@ -391,6 +428,7 @@ namespace RakeMultiplayer.UI
 
         // -------------------------------------------------- steam accessors
 
+        public GameObject HostPanel { get { return _hostPanel; } }
         public GameObject SteamPanel { get { return _steamPanel; } }
         public GameObject SteamCreatePanel { get { return _steamCreatePanel; } }
         public GameObject SteamBrowsePanel { get { return _steamBrowsePanel; } }
@@ -444,7 +482,9 @@ namespace RakeMultiplayer.UI
         }
         // --------------------------------------------------------------- callbacks
 
-        private void OnHostGameClicked() { if (_menu != null) _menu.OnHostGame(); }
+        private void OnHostGameClicked() { if (_menu != null) _menu.ShowCreateLobby(); }
+        private void OnCreateLanClicked() { if (_menu != null) _menu.OnHostGame(); }
+        private void OnCreateSteamClicked() { if (_menu != null) _menu.ShowSteamCreate(); }
         private void OnJoinGameClicked() { if (_menu != null) _menu.ShowMultiplayerPanel(); }
         private void OnSettingsClicked() { if (_menu != null) _menu.ShowSettings(); }
         private void OnExitClicked() { if (_menu != null) _menu.ToggleMenu(); }
@@ -472,6 +512,16 @@ namespace RakeMultiplayer.UI
             var img = obj.AddComponent<Image>();
             img.color = ColPanel;
             return obj;
+        }
+
+        private static void AddPanelAnimation(GameObject panel, float slide, bool scale = false)
+        {
+            if (panel == null) return;
+
+            var animator = panel.GetComponent<PanelAnimator>();
+            if (animator == null) animator = panel.AddComponent<PanelAnimator>();
+            animator.Slide = slide;
+            animator.AnimateScale = scale;
         }
 
         private static void AddTopBar(Transform parent, Color color, float height)
@@ -545,6 +595,7 @@ namespace RakeMultiplayer.UI
             btn.colors = colors;
             btn.targetGraphic = img;
             btn.onClick.AddListener(onClick);
+            obj.AddComponent<ButtonHoverScale>();
 
             var edge = new GameObject("Edge", typeof(RectTransform), typeof(Image));
             edge.transform.SetParent(obj.transform, false);
