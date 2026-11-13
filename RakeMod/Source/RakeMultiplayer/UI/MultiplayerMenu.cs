@@ -234,6 +234,20 @@ namespace RakeMultiplayer.UI
             _uiBuilder.UpdateTimerText($"{minutes:00}:{seconds:00}");
         }
 
+        /// <summary>Open the mod menu (used by the vanilla Multiplayer tile).</summary>
+        public void OpenMenu()
+        {
+            if (_mainContainer == null) return;
+
+            _menuVisible = true;
+            _mainContainer.SetActive(true);
+            ShowMainMenu();
+
+            Cursor.lockState = CursorLockMode.None;
+            Cursor.visible = true;
+
+            RakeMultiplayerPlugin.Log?.LogInfo("[Menu] Opened from the main-menu tile");
+        }
         public void ToggleMenu()
         {
             _menuVisible = !_menuVisible;
