@@ -219,7 +219,7 @@ namespace RakeMultiplayer.UI
             CreateText(_mainMenuPanel.transform, "Hint",
                 "F1 - menu   |   Tab - cameras   |   1 Rake + up to 3 hunters", 18,
                 new Vector2(0, -450), ColMuted, TextAnchor.MiddleCenter, 900f);
-            CreateText(_mainMenuPanel.transform, "Version", PluginInfo.NAME + "  v" + PluginInfo.VERSION, 13,
+            CreateText(_mainMenuPanel.transform, "Version", PluginInfo.NAME + "  v" + PluginInfo.DISPLAY_VERSION, 13,
                 new Vector2(0, -480), new Color(0.45f, 0.42f, 0.36f, 1f), TextAnchor.MiddleCenter);
         }
 

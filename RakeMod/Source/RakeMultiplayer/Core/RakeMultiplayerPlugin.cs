@@ -51,7 +51,7 @@ namespace RakeMultiplayer
         {
             Instance = this;
             Log = Logger;
-            Log.LogInfo($"[{PluginInfo.NAME}] Loading version {PluginInfo.VERSION}");
+            Log.LogInfo($"[{PluginInfo.NAME}] Loading version {PluginInfo.DISPLAY_VERSION}");
 
             // Configuration
             Enabled = Config.Bind("General", "Enabled", true, "Enable the multiplayer mod");
@@ -482,6 +482,9 @@ namespace RakeMultiplayer
     {
         public const string GUID = "com.rake.multiplayer";
         public const string NAME = "Rake Multiplayer";
-        public const string VERSION = "1.1.0-alpha.1";
+        // BepInPlugin.Version is a System.Version: it must stay numeric.
+        public const string VERSION = "1.1.0";
+        // Shown in the UI and logs; the alpha suffix is valid here.
+        public const string DISPLAY_VERSION = "1.1.0-alpha.1";
     }
 }

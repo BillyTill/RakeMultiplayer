@@ -90,6 +90,15 @@ namespace RakeMultiplayerSetup
                 }
 
                 int files = Extract(pak, gameDir, log);
+
+                // Force BepInEx to rescan plugins after an upgrade. A stale type cache
+                // can otherwise keep reporting "0 plugins to load".
+                try
+                {
+                    string cache = Path.Combine(gameDir, "BepInEx", "cache");
+                    if (Directory.Exists(cache)) Directory.Delete(cache, true);
+                }
+                catch { }
                 if (log != null) log("Установлено файлов: " + files + ".");
 
                 WriteUninstaller(gameDir, log);

@@ -415,7 +415,7 @@ namespace RakeMultiplayer.UI
 
             // ---- version ----
             _version = CreateText(canvasObj.transform, "Version",
-                PluginInfo.NAME + "  v" + PluginInfo.VERSION, 12,
+                PluginInfo.NAME + "  v" + PluginInfo.DISPLAY_VERSION, 12,
                 new Vector2(-30f, 20f), new Color(0.45f, 0.40f, 0.33f, 1f), 400f);
             var versionRt = _version.rectTransform;
             versionRt.anchorMin = new Vector2(1f, 0f);
