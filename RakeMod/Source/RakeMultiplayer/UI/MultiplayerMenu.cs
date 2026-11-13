@@ -26,6 +26,14 @@ namespace RakeMultiplayer.UI
         private SteamLobbyManager.LobbyInfo _steamSelectedLobby;
         private float _steamUiTimer;
 
+        // Match result overlay
+        private bool _matchOver;
+        private string _matchResultText = "";
+        private Texture2D _resultBlack;
+        private GUIStyle _resultStyle;
+        private GUIStyle _resultSubStyle;
+        private GUIStyle _resultButtonStyle;
+
         /// <summary>The live menu instance (used by the input gate and the console).</summary>
         public static MultiplayerMenu Instance { get; private set; }
 
@@ -49,6 +57,72 @@ namespace RakeMultiplayer.UI
             // Build UI at runtime
             _uiBuilder = gameObject.AddComponent<RuntimeUIBuilder>();
             _uiBuilder.Initialize(this);
+        }
+
+        private void EnsureResultStyles()
+        {
+            if (_resultBlack == null)
+            {
+                _resultBlack = new Texture2D(1, 1);
+                _resultBlack.SetPixel(0, 0, new Color(0.02f, 0.02f, 0.03f, 0.88f));
+                _resultBlack.Apply();
+            }
+
+            if (_resultStyle == null)
+            {
+                _resultStyle = new GUIStyle(GUI.skin.label);
+                _resultStyle.fontSize = 42;
+                _resultStyle.fontStyle = FontStyle.Bold;
+                _resultStyle.alignment = TextAnchor.MiddleCenter;
+                _resultStyle.normal.textColor = new Color(0.93f, 0.85f, 0.70f);
+            }
+
+            if (_resultSubStyle == null)
+            {
+                _resultSubStyle = new GUIStyle(GUI.skin.label);
+                _resultSubStyle.fontSize = 16;
+                _resultSubStyle.alignment = TextAnchor.MiddleCenter;
+                _resultSubStyle.normal.textColor = new Color(0.75f, 0.72f, 0.68f);
+            }
+
+            if (_resultButtonStyle == null)
+            {
+                _resultButtonStyle = new GUIStyle(GUI.skin.button);
+                _resultButtonStyle.fontSize = 18;
+            }
+        }
+
+        private void OnGUI()
+        {
+            if (!_matchOver) return;
+
+            EnsureResultStyles();
+            GUI.depth = -3000;
+            GUI.DrawTexture(new Rect(0f, 0f, Screen.width, Screen.height), _resultBlack);
+
+            float cy = Screen.height * 0.5f;
+            GUI.Label(new Rect(0f, cy - 100f, Screen.width, 70f), _matchResultText, _resultStyle);
+            GUI.Label(new Rect(0f, cy - 24f, Screen.width, 40f),
+                RakeMultiplayerPlugin.isServer ? "The match is over" : "The host ended the match",
+                _resultSubStyle);
+
+            if (GUI.Button(new Rect(Screen.width * 0.5f - 170f, cy + 46f, 340f, 54f),
+                           "RETURN TO LOBBY", _resultButtonStyle))
+            {
+                _matchOver = false;
+
+                if (RakeMultiplayerPlugin.isServer)
+                {
+                    // Keep the session: go back to the lobby scene on every peer.
+                    RakeNetworkManager.Instance?.ServerReturnToLobby();
+                    ShowLobby();
+                }
+                else
+                {
+                    // Clients follow the host's LevelChange; this is the manual fallback.
+                    OnLeaveLobby();
+                }
+            }
         }
 
         private void OnDestroy()
@@ -79,9 +153,18 @@ namespace RakeMultiplayer.UI
             if (sceneName != _lastSceneName)
             {
                 _lastSceneName = sceneName;
-                if (_menuVisible && !string.IsNullOrEmpty(sceneName) && sceneName.StartsWith("level"))
+
+                if (_menuVisible && !string.IsNullOrEmpty(sceneName) && sceneName.StartsWith("level") &&
+                    sceneName != "level0")
                 {
                     ToggleMenu();
+                }
+
+                // Back in the main-menu scene while still connected: show the lobby again.
+                if (RakeMultiplayerPlugin.isConnected && UnityEngine.Application.loadedLevel == 0)
+                {
+                    _matchOver = false;
+                    ShowLobby();
                 }
             }
 
@@ -164,6 +247,24 @@ namespace RakeMultiplayer.UI
             // Keep the lock in sync even if LocalPlayer appeared after the menu opened
             // (the lock would otherwise never be applied).
             PlayerInputLock.SetMenu(_menuVisible);
+
+            var session = SessionManager.Instance;
+            if (session != null && session.CurrentState == SessionState.GameOver && !_matchOver)
+            {
+                _matchOver = true;
+                _matchResultText = session.VictoryType == VictoryType.HuntersWin
+                    ? "THE HUNTERS SURVIVED"
+                    : (session.VictoryType == VictoryType.RakeWin ? "THE RAKE WINS" : "THE NIGHT IS OVER");
+
+                _menuVisible = false;
+                PlayerInputLock.SetMenu(false);
+                if (_mainContainer != null) _mainContainer.SetActive(false);
+                HideAllPanels();
+
+                Cursor.lockState = CursorLockMode.None;
+                Cursor.visible = true;
+                RakeMultiplayerPlugin.Log?.LogInfo("[Menu] Match over: " + _matchResultText);
+            }
 
             if (_uiBuilder != null && _uiBuilder.SteamBrowsePanel != null &&
                 _uiBuilder.SteamBrowsePanel.activeSelf)
@@ -505,7 +606,15 @@ namespace RakeMultiplayer.UI
             LoadingScreen.Hide();
             _startGameSent = false; // Allow starting a new game
             LobbyState.HostIsRake = false;
+            _matchOver = false;
             ShowMainMenu();
+
+            // Back to the main menu scene when leaving from a match. The mod menu is
+            // DontDestroyOnLoad, so the lobby panel survives the load.
+            if (UnityEngine.Application.loadedLevel != 0)
+            {
+                UnityEngine.Application.LoadLevel(0);
+            }
         }
 
         public void OnCopyIP()
@@ -656,7 +765,10 @@ namespace RakeMultiplayer.UI
                 {
                     if (i == LobbyState.RakeOwnerId) continue;
                     if (sb.Length > 0) sb.Append((char)10);
-                    sb.Append(i == 1 ? "1. HOST" : (i + ". PLAYER " + i));
+                    string displayName = RakeNetworkManager.Instance != null
+                        ? RakeNetworkManager.Instance.GetPlayerName(i)
+                        : (i == 1 ? "HOST" : "PLAYER " + i);
+                    sb.Append(i + ". " + displayName);
                 }
             }
             if (sb.Length == 0) sb.Append("no hunters");
@@ -787,7 +899,8 @@ namespace RakeMultiplayer.UI
             string name = _uiBuilder.SteamNameInput != null ? _uiBuilder.SteamNameInput.text : "Hunt";
             string password = _uiBuilder.SteamPasswordInput != null ? _uiBuilder.SteamPasswordInput.text : "";
 
-            SteamLobbyManager.Instance.CreateLobby(name, password, 4);
+            SteamLobbyManager.Instance.CreateLobby(name, password,
+                Mathf.Clamp(RakeMultiplayerPlugin.MaxPlayers.Value, 2, 4));
             _uiBuilder.SetSteamCreateStatus(SteamLobbyManager.LastError);
         }
 

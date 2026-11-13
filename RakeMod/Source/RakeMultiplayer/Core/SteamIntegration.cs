@@ -29,13 +29,10 @@ namespace RakeMultiplayer
         private void Update()
         {
             if (!Initialized) return;
-            try { SteamNative.RunCallbacks(); }
-            catch (Exception ex)
-            {
-                Initialized = false;
-                Status = "callback error: " + ex.Message;
-                RakeMultiplayerPlugin.Log?.LogError("[Steam] " + Status);
-            }
+
+            // SteamAPI_RunCallbacks crashed inside steam_api.dll on this Unity 5 build.
+            // Everything the mod needs is polled (TryGetCallResult + lobby member diffing),
+            // so native callback dispatch is intentionally not used.
         }
 
         private void OnApplicationQuit()

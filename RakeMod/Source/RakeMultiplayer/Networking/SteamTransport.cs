@@ -25,6 +25,14 @@ namespace RakeMultiplayer.Networking
 
         public bool Start(int port)
         {
+            if (!SteamIntegration.Initialized || 
+                !SteamLobbyManager.InLobby)
+            {
+                RakeMultiplayerPlugin.Log?.LogError("[Steam] refusing P2P server without an initialised Steam lobby");
+                _active = false;
+                return false;
+            }
+
             _active = true;
             // Conn 0 is the client-side channel to the host. Server-side peers must
             // start at 1, because the player id is derived as connectionId + 1 and
@@ -53,6 +61,19 @@ namespace RakeMultiplayer.Networking
             _active = false;
 
             if (Current == this) Current = null;
+        }
+
+        public void Disconnect(int connectionId)
+        {
+            ulong steamId;
+            if (_steamByConn.TryGetValue(connectionId, out steamId))
+            {
+                try { SteamNative.CloseSession(steamId); } catch { }
+                _steamByConn.Remove(connectionId);
+                _connBySteam.Remove(steamId);
+            }
+
+            _queue.Enqueue(new NetMessage(NetEventType.Disconnected, connectionId, null));
         }
 
         public void Send(int connectionId, byte[] data)

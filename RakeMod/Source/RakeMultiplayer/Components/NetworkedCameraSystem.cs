@@ -164,6 +164,12 @@ namespace RakeMultiplayer
         /// <summary>
         /// Try to find a NetworkedCamera by CameraId
         /// </summary>
+        /// <summary>Server: re-broadcast this camera spawn state (late join).</summary>
+        public void BroadcastSpawn()
+        {
+            if (RakeMultiplayerPlugin.isServer && _isPlaced) SendCameraSpawn();
+        }
+
         /// <summary>The nearest placed, intact camera within radius (used by the Rake AI).</summary>
         public static NetworkedCamera FindNearestPlaced(Vector3 position, float radius)
         {

@@ -212,6 +212,9 @@ namespace RakeMultiplayer
             RakeMultiplayerPlugin.Log?.LogInfo($"[3.11] Trap {TrapId} triggered at {transform.position}");
         }
 
+        /// <summary>Server: re-broadcast this trap (late join).</summary>
+        public void SendStateNow() { BroadcastState(); }
+
         private void BroadcastState()
         {
             if (!RakeMultiplayerPlugin.isServer) return;
@@ -242,6 +245,17 @@ namespace RakeMultiplayer
 
             RakeNetworkManager.Instance?.RegisterLocalMapMarker(marker);
             RakeNetworkManager.Instance?.ServerBroadcast(marker.Serialize());
+        }
+
+        /// <summary>Client: create a state-only trap object for a packet (no collider).</summary>
+        public static NetworkedTrap SpawnClientTrap(TrapStatePacket packet)
+        {
+            if (packet == null || packet.TrapId == 0) return null;
+
+            var go = new GameObject("ClientTrap_" + packet.TrapId);
+            var trap = go.AddComponent<NetworkedTrap>();
+            trap.ApplyState(packet);
+            return trap;
         }
 
         /// <summary>Client: apply trap state from the server (used for map/UI).</summary>

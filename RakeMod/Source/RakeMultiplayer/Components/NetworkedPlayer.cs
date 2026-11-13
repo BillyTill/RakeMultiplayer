@@ -272,12 +272,14 @@ namespace RakeMultiplayer
 
             if (!force && !posChanged && !rotChanged && !animChanged) return;
 
+            var selfFps = GetComponent<FPSController>();
             var packet = new PlayerStatePacket
             {
                 PlayerId = PlayerId,
                 Position = currentPos,
                 Rotation = currentRot,
-                AnimState = currentAnimState
+                AnimState = currentAnimState,
+                Health = selfFps != null ? Mathf.Clamp(selfFps.Health, 0, 100) : 100f
             };
 
             var data = packet.Serialize();

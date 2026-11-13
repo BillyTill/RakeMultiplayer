@@ -31,6 +31,7 @@ namespace RakeMultiplayer.Networking
         bool Start(int port);
         void Stop();
         void Send(int connectionId, byte[] data);
+        void Disconnect(int connectionId);
         bool GetNextMessage(out NetMessage message);
     }
 
@@ -74,6 +75,7 @@ namespace RakeMultiplayer.Networking
         public bool Start(int port) { return _server.Start(port); }
         public void Stop() { _server.Stop(); }
         public void Send(int connectionId, byte[] data) { _server.Send(connectionId, data); }
+        public void Disconnect(int connectionId) { _server.Disconnect(connectionId); }
 
         public bool GetNextMessage(out NetMessage message)
         {

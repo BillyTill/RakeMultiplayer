@@ -25,6 +25,7 @@ namespace RakeMultiplayer.Networking
         public Vector3 Position;
         public Quaternion Rotation;
         public byte AnimState;
+        public float Health;
 
         public override void Write(BinaryWriter writer)
         {
@@ -37,6 +38,7 @@ namespace RakeMultiplayer.Networking
             writer.Write(Rotation.z);
             writer.Write(Rotation.w);
             writer.Write(AnimState);
+            writer.Write(Health);
         }
 
         public override void Read(BinaryReader reader)
@@ -45,6 +47,7 @@ namespace RakeMultiplayer.Networking
             Position = new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
             Rotation = new Quaternion(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
             AnimState = reader.ReadByte();
+            Health = reader.ReadSingle();
         }
     }
 
@@ -217,8 +220,17 @@ namespace RakeMultiplayer.Networking
     public class ClientReadyPacket : NetworkPacket
     {
         public override PacketType Type => PacketType.ClientReady;
-        public override void Write(BinaryWriter writer) { }
-        public override void Read(BinaryReader reader) { }
+        public string Name;
+
+        public override void Write(BinaryWriter writer)
+        {
+            writer.Write(Name ?? string.Empty);
+        }
+
+        public override void Read(BinaryReader reader)
+        {
+            Name = PacketSerializer.ReadSafeString(reader);
+        }
     }
 
 
@@ -423,6 +435,7 @@ namespace RakeMultiplayer.Networking
         public int PlayerId;
         public Vector3 SpawnPosition;
         public bool IsYou; // true only for the packet sent to the player who owns this ID
+        public string Name;
 
         public override void Write(BinaryWriter writer)
         {
@@ -431,6 +444,7 @@ namespace RakeMultiplayer.Networking
             writer.Write(SpawnPosition.y);
             writer.Write(SpawnPosition.z);
             writer.Write(IsYou);
+            writer.Write(Name ?? string.Empty);
         }
 
         public override void Read(BinaryReader reader)
@@ -438,6 +452,7 @@ namespace RakeMultiplayer.Networking
             PlayerId = reader.ReadInt32();
             SpawnPosition = new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
             IsYou = reader.ReadBoolean();
+            Name = PacketSerializer.ReadSafeString(reader);
         }
     }
 
@@ -1105,6 +1120,7 @@ namespace RakeMultiplayer.Networking
         public Vector3 Direction;
         public int[] WeaponIds = new int[0];
         public int[] WeaponAmmo = new int[0];
+        public float Health;
 
         public override void Write(BinaryWriter writer)
         {
@@ -1112,6 +1128,7 @@ namespace RakeMultiplayer.Networking
             writer.Write(Position.x); writer.Write(Position.y); writer.Write(Position.z);
             writer.Write(Rotation.x); writer.Write(Rotation.y); writer.Write(Rotation.z); writer.Write(Rotation.w);
             writer.Write(Direction.x); writer.Write(Direction.y); writer.Write(Direction.z);
+            writer.Write(Health);
 
             int count = WeaponIds != null ? WeaponIds.Length : 0;
             writer.Write(count);
@@ -1128,6 +1145,7 @@ namespace RakeMultiplayer.Networking
             Position = new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
             Rotation = new Quaternion(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
             Direction = new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
+            Health = reader.ReadSingle();
 
             int count = reader.ReadInt32();
             if (count < 0) count = 0;

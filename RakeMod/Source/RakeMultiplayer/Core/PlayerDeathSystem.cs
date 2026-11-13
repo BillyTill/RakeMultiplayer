@@ -85,7 +85,8 @@ namespace RakeMultiplayer
                 Rotation = rotation,
                 Direction = direction,
                 WeaponIds = weaponIds.ToArray(),
-                WeaponAmmo = weaponAmmo.ToArray()
+                WeaponAmmo = weaponAmmo.ToArray(),
+                Health = Mathf.Max(0, fps.Health)
             };
 
             var manager = RakeNetworkManager.Instance;
@@ -141,6 +142,11 @@ namespace RakeMultiplayer
             }
             RakeMultiplayerPlugin.Log?.LogInfo("[Death] applied for player " + playerId +
                                                " at " + packet.Position.ToString("F1"));
+
+            if (RakeMultiplayerPlugin.isServer)
+            {
+                SessionManager.Instance?.NotifyHunterDied(playerId);
+            }
         }
 
         /// <summary>Restore a player after the server's respawn timer.</summary>

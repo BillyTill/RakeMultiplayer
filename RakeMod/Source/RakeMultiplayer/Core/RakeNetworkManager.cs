@@ -357,11 +357,20 @@ namespace RakeMultiplayer
                     RakeMultiplayerPlugin.Log?.LogWarning($"[Net] Duplicate connection event for C{connectionId}, ignoring");
                     return;
                 }
+                int maxPlayers = Mathf.Clamp(RakeMultiplayerPlugin.MaxPlayers.Value, 2, 4);
+                if (_connectedClients.Count + 1 >= maxPlayers)
+                {
+                    RakeMultiplayerPlugin.Log?.LogWarning("[Net] server full (" + maxPlayers + " players), rejected C" + connectionId);
+                    _server.Disconnect(connectionId);
+                    return;
+                }
+
                 _connectedClients.Add(connectionId);
 
                 // ID scheme: Host = 1, Clients = connectionId + 1
                 int assignedPlayerId = connectionId + 1;
                 _playerHealth[assignedPlayerId] = 100f;
+                _playerNames[assignedPlayerId] = "PLAYER " + assignedPlayerId;
 
                 // 0. Send HOST to NEW client (ВСЕГДА, даже если позиция не установлена)
                 Vector3 hostPos = _hostSpawnPositionSet ? _hostSpawnPosition : Vector3.zero;
@@ -369,11 +378,13 @@ namespace RakeMultiplayer
                 {
                     RakeMultiplayerPlugin.Log?.LogWarning("[Net] Host spawn pos not set. Sending Vector3.zero.");
                 }
+                _playerNames[1] = RakeMultiplayerPlugin.PlayerName.Value;
                 var hostPacket = new PlayerConnectedPacket
                 {
                     PlayerId = 1, // Host always has ID 1
                     SpawnPosition = hostPos,
-                    IsYou = false
+                    IsYou = false,
+                    Name = _playerNames[1]
                 };
                 _server.Send(connectionId, hostPacket.Serialize());
             _server.Send(connectionId, new RakeOwnerPacket { OwnerId = LobbyState.RakeOwnerId }.Serialize());
@@ -438,7 +449,8 @@ namespace RakeMultiplayer
                 {
                     PlayerId = assignedPlayerId,
                     SpawnPosition = hostPos,
-                    IsYou = true
+                    IsYou = true,
+                    Name = _playerNames[assignedPlayerId]
                 };
                 _server.Send(connectionId, newPacketForNew.Serialize());
 
@@ -446,7 +458,8 @@ namespace RakeMultiplayer
                 {
                     PlayerId = assignedPlayerId,
                     SpawnPosition = hostPos,
-                    IsYou = false
+                    IsYou = false,
+                    Name = _playerNames[assignedPlayerId]
                 };
                 var dataForOthers = newPacketForOthers.Serialize();
                 foreach (var connId in _connectedClients)
@@ -478,6 +491,7 @@ namespace RakeMultiplayer
             _connectedClients.Remove(connectionId);
             _playerStates.Remove(connectionId);
             _playerHealth.Remove(connectionId + 1);
+            _playerNames.Remove(connectionId + 1);
 
             // If the departed client owned the Rake, hand it back to the AI. The owner id
             // used to stay stale, so nobody could send RakeState and the Rake froze forever.
@@ -541,7 +555,7 @@ namespace RakeMultiplayer
                         HandleServerPlayerDied(connectionId, (PlayerDiedPacket)packet);
                         break;
                     case PacketType.ClientReady:
-                        HandleServerClientReady(connectionId);
+                        HandleServerClientReady(connectionId, (ClientReadyPacket)packet);
                         break;
                     case PacketType.DoorAction:
                         DoorSync.HandleServerRequest((DoorActionPacket)packet);
@@ -618,6 +632,24 @@ namespace RakeMultiplayer
                 RakeMultiplayerPlugin.Log?.LogWarning("[Net] rejected invalid PlayerState from C" + connectionId);
                 return;
             }
+
+            Quaternion rot = packet.Rotation;
+            if (float.IsNaN(rot.x) || float.IsNaN(rot.y) || float.IsNaN(rot.z) || float.IsNaN(rot.w) ||
+                Mathf.Abs(rot.x * rot.x + rot.y * rot.y + rot.z * rot.z + rot.w * rot.w - 1f) > 0.2f)
+            {
+                RakeMultiplayerPlugin.Log?.LogWarning("[Net] rejected invalid PlayerState rotation from C" + connectionId);
+                return;
+            }
+
+            // Client-reported health: decreases are accepted immediately, healing is
+            // rate-limited, so environment damage reaches the server but a client cannot
+            // simply declare itself at full HP after taking hits.
+            float reportedHealth = Mathf.Clamp(packet.Health, 0f, 100f);
+            float knownHealth;
+            if (!_playerHealth.TryGetValue(assignedPlayerId, out knownHealth)) knownHealth = reportedHealth;
+            if (reportedHealth < knownHealth) knownHealth = reportedHealth;
+            else knownHealth = Mathf.Min(reportedHealth, knownHealth + 10f);
+            _playerHealth[assignedPlayerId] = knownHealth;
 
             // Store state by connectionId
             _playerStates[connectionId] = packet;
@@ -1464,12 +1496,23 @@ namespace RakeMultiplayer
 
         private void HandleClientLevelChange(LevelChangePacket packet)
         {
-            if (packet.LevelIndex <= 0) return;
+            // Level 0 = back to the lobby/menu after the match.
+            if (packet.LevelIndex < 0) return;
 
             // Dedupe: the host's StartGame already loads the same level.
             if (packet.LevelIndex == UnityEngine.Application.loadedLevel) return;
 
             ApplyNetworkLevelChange(packet.LevelIndex);
+        }
+
+        /// <summary>Server: end-of-match return to the lobby scene, keeping the session.</summary>
+        public void ServerReturnToLobby()
+        {
+            if (!RakeMultiplayerPlugin.isServer) return;
+
+            var packet = new LevelChangePacket { LevelIndex = 0 };
+            ServerBroadcast(packet.Serialize());
+            ApplyNetworkLevelChange(0);
         }
 
         private void ApplyNetworkLevelChange(int levelIndex)
@@ -1676,6 +1719,27 @@ namespace RakeMultiplayer
 
             var rake = _cachedRake != null ? _cachedRake : UnityEngine.Object.FindObjectOfType<NetworkedRakeAI>();
             if (rake == null) return;
+
+            // Never trust the owner's position blindly: reject NaN and speed-hacked jumps.
+            if (float.IsNaN(packet.Position.x) || float.IsNaN(packet.Position.y) ||
+                float.IsNaN(packet.Position.z))
+            {
+                return;
+            }
+
+            float now = Time.time;
+            float dt = Mathf.Max(0.02f, now - _lastRakeOwnerTime);
+            if (_lastRakeOwnerTime > 0f &&
+                Vector3.Distance(packet.Position, _lastRakeOwnerPosition) > 30f * dt)
+            {
+                RakeMultiplayerPlugin.Log?.LogWarning("[RakePlay] rejected Rake teleport from C" + connectionId);
+                return;
+            }
+            _lastRakeOwnerPosition = packet.Position;
+            _lastRakeOwnerTime = now;
+
+            // Health is server-authoritative; the owner only publishes movement/animation.
+            packet.Health = rake.CurrentHealth;
 
             rake.ApplyOwnerSnapshot(packet.Position, packet.Rotation,
                                     packet.AnimFlags, packet.WalkType, packet.AnimSpeed);
@@ -2156,11 +2220,11 @@ namespace RakeMultiplayer
         private void HandleClientPlayerConnected(PlayerConnectedPacket packet)
         {
             RakeMultiplayerPlugin.Log?.LogInfo($"[3.3] Client received PlayerConnected: playerId={packet.PlayerId}, spawnPos={packet.SpawnPosition}, IsYou={packet.IsYou}");
-
             // Track other players' IDs (client-side). Never track our own id.
             if (!RakeMultiplayerPlugin.isServer && !packet.IsYou)
             {
                 _knownPlayerIds.Add(packet.PlayerId);
+                if (!string.IsNullOrEmpty(packet.Name)) _playerNames[packet.PlayerId] = packet.Name;
             }
 
             if (!RakeMultiplayerPlugin.isServer && packet.IsYou)
@@ -2295,14 +2359,44 @@ namespace RakeMultiplayer
         public void NotifyClientReady()
         {
             if (!RakeMultiplayerPlugin.isConnected || RakeMultiplayerPlugin.isServer) return;
-            ClientSend(new ClientReadyPacket().Serialize());
+            ClientSend(new ClientReadyPacket { Name = RakeMultiplayerPlugin.PlayerName.Value }.Serialize());
+        }
+
+        /// <summary>Display name of a player (host, clients, or a fallback).</summary>
+        public string GetPlayerName(int playerId)
+        {
+            string name;
+            if (_playerNames.TryGetValue(playerId, out name) && !string.IsNullOrEmpty(name)) return name;
+            return playerId == 1 ? "HOST" : "PLAYER " + playerId;
         }
 
         /// <summary>Server: send the current world state to a client that just loaded.</summary>
-        private void HandleServerClientReady(int connectionId)
+        private void HandleServerClientReady(int connectionId, ClientReadyPacket packet)
         {
             int playerId = connectionId + 1;
             RakeMultiplayerPlugin.Log?.LogInfo("[Net] C" + connectionId + " ready - sending world snapshot");
+
+            string displayName = string.IsNullOrEmpty(packet.Name) ? "PLAYER " + playerId : packet.Name.Trim();
+            if (displayName.Length > 24) displayName = displayName.Substring(0, 24);
+            _playerNames[playerId] = displayName;
+
+            // Tell everyone the real name now that the client has introduced itself.
+            Vector3 readyPos = _hostSpawnPositionSet ? _hostSpawnPosition : Vector3.zero;
+            if (_playerStates.TryGetValue(connectionId, out var readyState)) readyPos = readyState.Position;
+            ServerBroadcast(new PlayerConnectedPacket
+            {
+                PlayerId = playerId,
+                SpawnPosition = readyPos,
+                IsYou = false,
+                Name = displayName
+            }.Serialize());
+
+            // Cameras, traps and animals: rebroadcast current state (idempotent).
+            var cameras = UnityEngine.Object.FindObjectsOfType<NetworkedCamera>();
+            for (int i = 0; i < cameras.Length; i++) cameras[i].BroadcastSpawn();
+            var pigs = UnityEngine.Object.FindObjectsOfType<NetworkedPig>();
+            for (int i = 0; i < pigs.Length; i++) pigs[i].ForceSendState();
+            foreach (var trap in NetworkedTrap.GetAllTraps()) trap.SendStateNow();
 
             DoorSync.SendSnapshotToPlayer(playerId);
 
@@ -2376,6 +2470,10 @@ namespace RakeMultiplayer
             packet.WeaponIds = SanitizeDroppedWeapons(packet.WeaponIds, packet.WeaponAmmo,
                                                       out var cleanAmmo);
             packet.WeaponAmmo = cleanAmmo;
+
+            float knownDeathHealth;
+            if (!_playerHealth.TryGetValue(playerId, out knownDeathHealth)) knownDeathHealth = 100f;
+            _playerHealth[playerId] = Mathf.Min(knownDeathHealth, Mathf.Max(0f, packet.Health));
 
             // Use the server's own view of the body instead of the client-supplied position.
             if (playerId == 1)
@@ -2471,6 +2569,9 @@ namespace RakeMultiplayer
         private readonly HashSet<int> _respawnScheduled = new HashSet<int>();
         private readonly HashSet<int> _consumedItemIds = new HashSet<int>();
         private readonly Dictionary<int, float> _playerHealth = new Dictionary<int, float>();
+        private readonly Dictionary<int, string> _playerNames = new Dictionary<int, string>();
+        private Vector3 _lastRakeOwnerPosition;
+        private float _lastRakeOwnerTime = -1f;
         private float _lastRakeAttackTime = -999f;
 
         /// <summary>Server: put a dead hunter back at the safehouse after a delay.</summary>
@@ -2975,6 +3076,12 @@ namespace RakeMultiplayer
             {
                 trap.ApplyState(packet);
             }
+            else
+            {
+                // Clients have no trap objects (the server creates the zones); build a
+                // state-only copy so the trap exists in the registry and on the map.
+                NetworkedTrap.SpawnClientTrap(packet);
+            }
         }
 
         /// <summary>Trap states received from the server (TrapId -> packet), for MapUI.</summary>
@@ -2982,7 +3089,7 @@ namespace RakeMultiplayer
 
         private void HandleClientPhaseChange(PhaseChangePacket packet)
         {
-            RakeMultiplayerPlugin.Log?.LogInfo($"[DayNight] Client received PhaseChange: phase={packet.Phase}, remaining={packet.RemainingTime:F1}s, night={packet.NightNumber + 1}");
+            RakeMultiplayerPlugin.Log?.LogInfo($"[DayNight] Client received PhaseChange: phase={packet.Phase}, remaining={packet.RemainingTime:F1}s, night={packet.NightNumber}");
 
             if (DayNightManager.Instance != null)
             {

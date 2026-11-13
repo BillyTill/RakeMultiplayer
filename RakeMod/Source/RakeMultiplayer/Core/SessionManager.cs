@@ -138,8 +138,6 @@ namespace RakeMultiplayer
             OnGameOver?.Invoke(victoryType);
 
             RakeMultiplayerPlugin.Log?.LogInfo($"[SessionManager] Session ended: {victoryType}");
-
-            // TODO: Trigger GameOver UI, show results, return to lobby
         }
 
         /// <summary>
@@ -182,21 +180,34 @@ namespace RakeMultiplayer
             }
         }
 
+        /// <summary>Server: called when a hunter dies; ends the match if nobody is left.</summary>
+        public void NotifyHunterDied(int playerId)
+        {
+            if (!RakeMultiplayerPlugin.isServer || !_isRunning) return;
+
+            int alive = CountAliveHunters();
+            RakeMultiplayerPlugin.Log?.LogInfo("[SessionManager] Hunter died (P" + playerId +
+                                              "), alive=" + alive);
+
+            if (alive == 0)
+            {
+                EndSession(VictoryType.RakeWin);
+            }
+        }
+
         private int CountAliveHunters()
         {
             if (PlayerSpawner.Instance == null) return 0;
 
             int count = 0;
-            // Count local player if exists
-            if (PlayerSpawner.Instance.LocalPlayer != null)
-            {
-                count++;
-            }
 
-            // Count remote players
+            var local = PlayerSpawner.Instance.LocalPlayer;
+            if (local != null && !PlayerDeathSystem.IsDead(local.PlayerId)) count++;
+
             foreach (var kvp in PlayerSpawner.Instance.GetAllRemotePlayers())
             {
-                if (kvp.Value != null) count++;
+                var remote = kvp.Value;
+                if (remote != null && !PlayerDeathSystem.IsDead(remote.PlayerId)) count++;
             }
 
             return count;

@@ -316,6 +316,17 @@ namespace RakeMultiplayer
         private void Update()
         {
             if (!RakeMultiplayerPlugin.Enabled.Value) return;
+
+            // Match over: freeze the stalker instead of hunting through the results screen.
+            var session = SessionManager.Instance;
+            if (session != null && session.CurrentState == SessionState.GameOver)
+            {
+                if (currentState != RakeState.Idle && currentState != RakeState.Dead)
+                {
+                    TransitionToState(RakeState.Idle);
+                }
+                return;
+            }
             if (!_initialized) return;
 
             // Only server runs AI logic

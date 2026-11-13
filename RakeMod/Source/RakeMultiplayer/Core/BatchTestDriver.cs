@@ -16,6 +16,86 @@ namespace RakeMultiplayer
         private bool _deathTest;
         private bool _noclipTest;
 
+        [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+        private static extern IntPtr GetCurrentProcess();
+
+        [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+        private static extern bool TerminateProcess(IntPtr process, uint exitCode);
+
+        private int _checks;
+        private int _failures;
+        private bool _finished;
+
+        private static string ResultPath
+        {
+            get { return Application.dataPath + "/../batchtest-result.json"; }
+        }
+
+        private void Check(bool ok, string what)
+        {
+            _checks++;
+            if (ok)
+            {
+                RakeMultiplayerPlugin.Log?.LogInfo("[Test] PASS: " + what);
+            }
+            else
+            {
+                _failures++;
+                RakeMultiplayerPlugin.Log?.LogError("[Test] FAIL: " + what);
+            }
+        }
+
+        private void Finish()
+        {
+            if (_finished) return;
+            _finished = true;
+
+            string test = _enabled ? "autotest" : _aiTest ? "aitest" : _deathTest ? "deathtest" : "nctest";
+            try
+            {
+                string json = "{\"test\":\"" + test + "\",\"checks\":" + _checks +
+                              ",\"failures\":" + _failures +
+                              ",\"time\":\"" + DateTime.UtcNow.ToString("o") + "\"}";
+                System.IO.File.WriteAllText(ResultPath, json);
+            }
+            catch (Exception ex)
+            {
+                RakeMultiplayerPlugin.Log?.LogWarning("[Test] could not write result: " + ex.Message);
+            }
+
+            RakeMultiplayerPlugin.Log?.LogInfo("[Test] finished: checks=" + _checks + " failures=" + _failures);
+
+            // Application.Quit is not reliable in -batchmode, and a blocking native
+            // shutdown can hang the player. Set the exit code, ask Unity to quit, then
+            // hard-exit from a background thread if the process is still alive.
+            Environment.ExitCode = _failures > 0 ? 1 : 0;
+
+            // Start the hard-exit thread first: Application.Quit can block in batchmode.
+            var exitThread = new System.Threading.Thread(delegate()
+            {
+                System.Threading.Thread.Sleep(1200);
+                Environment.Exit(Environment.ExitCode);
+                System.Threading.Thread.Sleep(800);
+                TerminateProcess(GetCurrentProcess(), (uint)Environment.ExitCode);
+            });
+            exitThread.IsBackground = true;
+            exitThread.Start();
+
+            // Do not call Application.Quit here: in -batchmode it can block the main
+            // thread and starve the hard-exit thread.
+            while (true) { System.Threading.Thread.Sleep(100); }
+        }
+
+        private IEnumerator Watchdog(float seconds)
+        {
+            yield return new WaitForSeconds(seconds);
+            if (_finished) yield break;
+
+            RakeMultiplayerPlugin.Log?.LogError("[Test] TIMEOUT after " + seconds + "s");
+            _failures++;
+            Finish();
+        }
+
         private void Awake()
         {
             DontDestroyOnLoad(gameObject);
@@ -28,6 +108,8 @@ namespace RakeMultiplayer
 
         private void Start()
         {
+            StartCoroutine(Watchdog(180f));
+
             if (_enabled) StartCoroutine(Run());
             else if (_aiTest) StartCoroutine(RunAiTest());
             else if (_deathTest) StartCoroutine(RunDeathTest());
@@ -112,6 +194,7 @@ namespace RakeMultiplayer
             float after = rakeEnemy != null ? rakeEnemy.Health : -1f;
             RakeMultiplayerPlugin.Log?.LogInfo("[AutoTest] projectile damage: before=" + before +
                                                " after=" + after);
+            Check(before > 0f && after < before, "projectile dealt damage to the Rake");
 
             // Shotgun pellet check: 6 pellets x 17 damage with a 4.5 degree cone.
             if (rake != null && rakeEnemy != null && local != null)
@@ -122,11 +205,12 @@ namespace RakeMultiplayer
                 ProjectileSystem.SpawnShot(origin2, (target2 - origin2).normalized, 6, 4.5f, 17, "Bullet", 1);
                 yield return new WaitForSeconds(1.5f);
                 RakeMultiplayerPlugin.Log?.LogInfo("[AutoTest] shotgun pellets: before=" + pelletBefore + " after=" + rakeEnemy.Health);
+                Check(rakeEnemy.Health < pelletBefore, "shotgun pellets dealt damage");
             }
 
             yield return new WaitForSeconds(2f);
             RakeMultiplayerPlugin.Log?.LogInfo("[AutoTest] done");
-            Application.Quit();
+            Finish();
         }
 
         /// <summary>
@@ -151,27 +235,33 @@ namespace RakeMultiplayer
             if (local == null || cc == null || pm == null)
             {
                 RakeMultiplayerPlugin.Log?.LogError("[NcTest] missing player/controller/movement");
-                Application.Quit();
+                Finish();
                 yield break;
             }
 
             RakeMultiplayerPlugin.Log?.LogInfo("[NcTest] before: cc=" + cc.enabled + " pm=" + pm.enabled);
             bool on = NoclipController.Toggle(local.transform);
             RakeMultiplayerPlugin.Log?.LogInfo("[NcTest] ON=" + on + " cc=" + cc.enabled + " pm=" + pm.enabled);
+            Check(on, "noclip enabled");
+            Check(!cc.enabled && !pm.enabled, "controller and movement disabled in noclip");
 
             Vector3 high = local.transform.position + Vector3.up * 3f;
             local.transform.position = high;
             yield return new WaitForSeconds(1.2f);
             RakeMultiplayerPlugin.Log?.LogInfo("[NcTest] airborne pos=" + local.transform.position.ToString("F2") +
                                                " (expected ~" + high.ToString("F2") + ")");
+            Check(Vector3.Distance(local.transform.position, high) < 0.15f, "noclip has no gravity");
 
             bool off = NoclipController.Toggle(local.transform);
             yield return new WaitForSeconds(0.2f);
             RakeMultiplayerPlugin.Log?.LogInfo("[NcTest] OFF=" + off + " cc=" + cc.enabled + " pm=" + pm.enabled +
                                                " pos=" + local.transform.position.ToString("F2"));
+            Check(!off, "noclip disabled");
+            Check(cc.enabled && pm.enabled, "controller and movement restored");
+            Check(local.transform.position.y < high.y - 1f, "body landed after noclip");
 
             yield return new WaitForSeconds(0.5f);
-            Application.Quit();
+            Finish();
         }
 
         /// <summary>
@@ -204,7 +294,7 @@ namespace RakeMultiplayer
             if (local == null)
             {
                 RakeMultiplayerPlugin.Log?.LogError("[DeathTest] no local player");
-                Application.Quit();
+                Finish();
                 yield break;
             }
 
@@ -244,6 +334,8 @@ namespace RakeMultiplayer
             RakeMultiplayerPlugin.Log?.LogInfo("[DeathTest] non-lethal: health=" +
                 (fps != null ? fps.Health.ToString() : "?") +
                 " ragdollActive=" + PlayerRagdoll.IsActive);
+            Check(fps != null && fps.Health < 100, "non-lethal hit damaged the victim");
+            Check(PlayerRagdoll.IsActive, "non-lethal hit started a ragdoll");
             yield return new WaitForSeconds(3.4f);
             RakeMultiplayerPlugin.Log?.LogInfo("[DeathTest] non-lethal restored: ragdollActive=" +
                 PlayerRagdoll.IsActive);
@@ -257,6 +349,8 @@ namespace RakeMultiplayer
                 " dead=" + PlayerDeathSystem.IsDead(local.PlayerId) +
                 " ragdolls=" + UnityEngine.Object.FindObjectsOfType<PlayerRagdoll>().Length +
                 " pos=" + local.transform.position.ToString("F1"));
+            Check(PlayerDeathSystem.IsDead(local.PlayerId), "lethal hit killed the victim");
+            Check(UnityEngine.Object.FindObjectsOfType<PlayerRagdoll>().Length >= 1, "corpse ragdoll exists");
 
             yield return new WaitForSeconds(5f);
             var ragdolls = UnityEngine.Object.FindObjectsOfType<PlayerRagdoll>();
@@ -264,6 +358,7 @@ namespace RakeMultiplayer
             for (int i = 0; i < ragdolls.Length; i++) if (ragdolls[i].IsCorpseFrozen) frozen++;
             RakeMultiplayerPlugin.Log?.LogInfo("[DeathTest] t+6.5: ragdolls=" + ragdolls.Length +
                                                " frozen=" + frozen);
+            Check(frozen >= 1, "corpse physics frozen after 5 s");
 
             yield return new WaitForSeconds(9f);
             RakeMultiplayerPlugin.Log?.LogInfo("[DeathTest] after respawn: health=" +
@@ -271,10 +366,12 @@ namespace RakeMultiplayer
                 " dead=" + PlayerDeathSystem.IsDead(local.PlayerId) +
                 " pos=" + local.transform.position.ToString("F1") +
                 " ragdolls=" + UnityEngine.Object.FindObjectsOfType<PlayerRagdoll>().Length);
+            Check(!PlayerDeathSystem.IsDead(local.PlayerId), "player respawned");
+            Check(fps != null && fps.Health == 100, "respawn restored health");
 
             yield return new WaitForSeconds(2f);
             RakeMultiplayerPlugin.Log?.LogInfo("[DeathTest] done, scene=" + Application.loadedLevelName);
-            Application.Quit();
+            Finish();
         }
 
         /// <summary>
@@ -301,7 +398,7 @@ namespace RakeMultiplayer
             if (rake == null || ai == null || local == null)
             {
                 RakeMultiplayerPlugin.Log?.LogError("[AITest] no rake/AI/local player");
-                Application.Quit();
+                Finish();
                 yield break;
             }
 
@@ -320,12 +417,14 @@ namespace RakeMultiplayer
                                                " rake at " + rakePos.ToString("F1"));
             yield return new WaitForSeconds(1f);
 
+            bool sawState = false;
             ai.ForceLurk();
             for (int i = 0; i < 20; i++)
             {
                 yield return new WaitForSeconds(1f);
                 RakeMultiplayerPlugin.Log?.LogInfo("[AITest] " + ai.GetAiDebugInfo() +
                                                    " rakePos=" + rake.position.ToString("F1"));
+                if (ai.GetAiDebugInfo().IndexOf("state=Idle", StringComparison.Ordinal) < 0) sawState = true;
             }
 
             // Look straight at the watching Rake: expect Lurk -> Flee.
@@ -390,7 +489,9 @@ namespace RakeMultiplayer
             RakeMultiplayerPlugin.Log?.LogInfo("[AITest] after escape: " + ai.GetAiDebugInfo());
 
             RakeMultiplayerPlugin.Log?.LogInfo("[AITest] done");
-            Application.Quit();
+            Check(sawState, "AI entered a stalking state");
+            Check(RakeHighlight.FindRake() != null, "Rake still exists after the cycle");
+            Finish();
         }
     }
 }
