@@ -476,7 +476,7 @@ namespace RakeMultiplayer.UI
                 new Vector2(28f, 36f), new Vector2(760f, 16f));
 
             var right = NewText("FooterRight", root,
-                "TAB CAMERAS   M MAP   F1 MENU", 9, Dim, TextAnchor.MiddleRight);
+                "TAB CAMERAS   F3 MAP   F1 MENU", 9, Dim, TextAnchor.MiddleRight);
             SetRect(right.rectTransform, new Vector2(1f, 0f), new Vector2(1f, 0f), new Vector2(1f, 0f),
                 new Vector2(-28f, 36f), new Vector2(520f, 16f));
         }

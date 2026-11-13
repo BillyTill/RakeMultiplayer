@@ -186,6 +186,11 @@ namespace RakeMultiplayer
         private float _noiseCooldown;
         private float _fleeRepathTimer;
         private float _navCheckTimer;
+        private float _navRecoverBlockedUntil;
+        private float _progressTimer;
+        private float _stuckTimer;
+        private float _lastRakeStateSendTime;
+        private Vector3 _lastProgressPos;
         private bool _encounterActive;
         private string _lastFinishReason = "";
         private int _finishedTasks;
@@ -508,6 +513,15 @@ namespace RakeMultiplayer
                 }
 
                 currentState = RakeState.Chase;
+
+                if (animator != null)
+                {
+                    animator.speed = 1f;
+                    animator.SetBool("bCrouch", false);
+                    animator.SetBool("bAttack", false);
+                    animator.SetFloat("Speed", 0f);
+                }
+
                 RakeMultiplayerPlugin.Log?.LogInfo("[RakePlay] Rake switched to player control");
             }
             else
@@ -841,8 +855,20 @@ namespace RakeMultiplayer
                 }
             }
 
-            // Prefer isolated hunter for Follow/Stealth targeting
-            currentTarget = nearestHunter ?? isolatedHunter;
+            if (currentTarget != null && hunters.Contains(currentTarget) &&
+                currentState != RakeState.Idle)
+            {
+                if (currentState != RakeState.Attack && nearestHunter != null &&
+                    Vector3.Distance(transform.position, nearestHunter.position) + 5f <
+                    Vector3.Distance(transform.position, currentTarget.position))
+                {
+                    currentTarget = nearestHunter;
+                }
+            }
+            else
+            {
+                currentTarget = nearestHunter ?? isolatedHunter;
+            }
 
             // The vanilla AI still runs on the host and only knows one player. Point it at
             // whoever we are hunting, otherwise it keeps dragging the Rake to the host.
@@ -867,6 +893,48 @@ namespace RakeMultiplayer
             {
                 _navCheckTimer = 2f;
                 TryRecoverAgent();
+            }
+
+            _attackCooldown = Mathf.Max(0f, _attackCooldown - dt);
+
+            float stateTimeout = currentState == RakeState.Chase ? 120f
+                                : currentState == RakeState.Stealth ? 90f
+                                : currentState == RakeState.Flee ? 60f : 0f;
+            if (stateTimeout > 0f && stateTimer > stateTimeout)
+            {
+                FinishEncounter("state timeout (" + currentState + ")");
+                return;
+            }
+
+            if (currentState == RakeState.Stealth || currentState == RakeState.Chase ||
+                currentState == RakeState.Flee)
+            {
+                _progressTimer -= dt;
+                if (_progressTimer <= 0f)
+                {
+                    _progressTimer = 1f;
+                    float moved = Vector3.Distance(transform.position, _lastProgressPos);
+                    _lastProgressPos = transform.position;
+
+                    var progressAgent = GetEnemyAgent();
+                    bool wantsToMove = progressAgent != null && progressAgent.isOnNavMesh &&
+                                       !float.IsInfinity(progressAgent.remainingDistance) &&
+                                       progressAgent.remainingDistance > 2f;
+
+                    if (wantsToMove && moved < 0.35f) _stuckTimer += 1f;
+                    else _stuckTimer = 0f;
+
+                    if (_stuckTimer >= 4f)
+                    {
+                        FinishEncounter("no progress");
+                        return;
+                    }
+                }
+            }
+            else
+            {
+                _stuckTimer = 0f;
+                _lastProgressPos = transform.position;
             }
 
             // Check for death
@@ -959,7 +1027,7 @@ namespace RakeMultiplayer
         {
             if (currentTarget == null) return;
 
-            float distance = Vector3.Distance(transform.position, currentTarget.position);
+            float distance = HorizontalDistance(transform.position, currentTarget.position);
 
             // Point blank: even between cycles the Rake will not ignore a hunter
             // standing in its face. Otherwise the lurk cycle owns the decision.
@@ -993,7 +1061,7 @@ namespace RakeMultiplayer
                 return;
             }
 
-            float distance = Vector3.Distance(transform.position, target.position);
+            float distance = HorizontalDistance(transform.position, target.position);
 
             // During the watch, a hunter closing to 30 m starts the silent approach.
             // While still walking to the vantage point the Rake keeps going.
@@ -1033,6 +1101,12 @@ namespace RakeMultiplayer
 
             if (_lurkArrived)
             {
+                if (HorizontalDistance(transform.position, target.position) > lurkStandoffDistance + 25f)
+                {
+                    BeginLurk();
+                    return;
+                }
+
                 FaceLook(target.position, 2.5f);
                 _lurkWatchTimer += Time.deltaTime;
                 if (_lurkWatchTimer >= lurkWatchDuration)
@@ -1068,11 +1142,11 @@ namespace RakeMultiplayer
             // CalculatePath below starts from a valid position.
             TryRecoverAgent();
 
-            float currentDistance = Vector3.Distance(transform.position, target.position);
+            float currentDistance = HorizontalDistance(transform.position, target.position);
             var currentAgent = GetEnemyAgent();
             if (currentAgent != null && currentAgent.isOnNavMesh &&
                 currentDistance >= sneakStartDistance && currentDistance <= lurkStandoffDistance + 10f &&
-                HasLineOfSight(transform.position + Vector3.up * 1.4f, target.position + Vector3.up * 1.2f))
+                HasLineOfSight(transform.position + Vector3.up * 1.4f, target.position + Vector3.up * 1.2f, target))
             {
                 // Already at a good watching distance with a clear view: stay put.
                 return true;
@@ -1102,7 +1176,7 @@ namespace RakeMultiplayer
 
                 // Prefer a spot from which the hunter is actually visible: the whole
                 // point of the watch is to be seen at a distance, not to stare at a hill.
-                if (HasLineOfSight(candidate + Vector3.up * 1.4f, target.position + Vector3.up * 1.2f))
+                if (HasLineOfSight(candidate + Vector3.up * 1.4f, target.position + Vector3.up * 1.2f, target))
                 {
                     point = candidate;
                     return true;
@@ -1125,7 +1199,7 @@ namespace RakeMultiplayer
         }
 
         /// <summary>Clear physical line between two points (triggers are ignored).</summary>
-        private static bool HasLineOfSight(Vector3 from, Vector3 to)
+        private bool HasLineOfSight(Vector3 from, Vector3 to, Transform ignore = null)
         {
             Vector3 delta = to - from;
             float distance = delta.magnitude;
@@ -1134,11 +1208,24 @@ namespace RakeMultiplayer
             RaycastHit[] hits = Physics.RaycastAll(from, delta / distance, distance - 0.4f, ~0);
             for (int i = 0; i < hits.Length; i++)
             {
-                if (hits[i].collider == null) continue;
-                if (hits[i].collider.isTrigger) continue;
+                var collider = hits[i].collider;
+                if (collider == null || collider.isTrigger) continue;
+
+                if (collider.transform == transform || collider.transform.IsChildOf(transform)) continue;
+                if (ignore != null &&
+                    (collider.transform == ignore || collider.transform.IsChildOf(ignore))) continue;
+
                 return false;
             }
             return true;
+        }
+
+        /// <summary>Ground distance: the 60/30/20/100 m bands must not drift on slopes.</summary>
+        private static float HorizontalDistance(Vector3 a, Vector3 b)
+        {
+            a.y = 0f;
+            b.y = 0f;
+            return Vector3.Distance(a, b);
         }
 
         /// <summary>
@@ -1154,7 +1241,7 @@ namespace RakeMultiplayer
                 return;
             }
 
-            float distance = Vector3.Distance(transform.position, target.position);
+            float distance = HorizontalDistance(transform.position, target.position);
 
             if (distance <= chargeStartDistance)
             {
@@ -1205,7 +1292,7 @@ namespace RakeMultiplayer
             }
             noTargetTimer = 0f;
 
-            float distance = Vector3.Distance(transform.position, currentTarget.position);
+            float distance = HorizontalDistance(transform.position, currentTarget.position);
 
             MoveToTarget(currentTarget.position, false, GetRunSpeed());
 
@@ -1216,7 +1303,7 @@ namespace RakeMultiplayer
                 FaceTarget(lookDir, 10f);
             }
 
-            if (distance <= attackRange && !IsTargetDown(currentTarget))
+            if (distance <= attackRange && !IsTargetDown(currentTarget) && _attackCooldown <= 0f)
             {
                 TransitionToState(RakeState.Attack);
                 return;
@@ -1244,7 +1331,7 @@ namespace RakeMultiplayer
                 return;
             }
 
-            float distance = Vector3.Distance(transform.position, currentTarget.position);
+            float distance = HorizontalDistance(transform.position, currentTarget.position);
             if (distance > attackRange * 2f)
             {
                 TransitionToState(RakeState.Chase);
@@ -1273,8 +1360,6 @@ namespace RakeMultiplayer
                 animator.SetBool("bAttack", _attackSwing);
             }
 
-            _attackCooldown = Mathf.Max(0f, _attackCooldown - Time.deltaTime);
-
             if (!_attackStruck)
             {
                 // Wind-up: roar, then strike once.
@@ -1292,7 +1377,11 @@ namespace RakeMultiplayer
                     bool inFront = toTarget.sqrMagnitude < 0.01f ||
                                    Vector3.Dot(transform.forward, toTarget.normalized) > 0.2f;
 
-                    if (strikeDistance <= attackRange + 1.5f && inFront &&
+                    bool clearLine = HasLineOfSight(transform.position + Vector3.up * 1.2f,
+                                                    currentTarget.position + Vector3.up * 1.2f,
+                                                    currentTarget);
+
+                    if (strikeDistance <= attackRange + 1.5f && inFront && clearLine &&
                         !IsTargetDown(currentTarget))
                     {
                         DealRakeDamage(currentTarget);
@@ -1307,7 +1396,7 @@ namespace RakeMultiplayer
                 _attackTimer -= Time.deltaTime;
                 if (_attackTimer <= 0f)
                 {
-                    if (distance <= chargeStartDistance)
+                    if (distance <= attackRange)
                     {
                         _attackStruck = false;
                         _attackTimer = AttackWindup;
@@ -1345,7 +1434,7 @@ namespace RakeMultiplayer
                 return;
             }
 
-            float distance = Vector3.Distance(transform.position, target.position);
+            float distance = HorizontalDistance(transform.position, target.position);
             if (distance > fleeStopDistance)
             {
                 FinishEncounter("fled far enough");
@@ -1462,6 +1551,9 @@ namespace RakeMultiplayer
             var agent = GetEnemyAgent();
             if (agent == null) return false;
             if (agent.isOnNavMesh) return true;
+
+            if (Time.time < _navRecoverBlockedUntil) return false;
+            _navRecoverBlockedUntil = Time.time + 2f;
 
             Vector3 point;
             if (!TrySampleNavMesh(transform.position, 15f, out point))
@@ -2598,7 +2690,8 @@ namespace RakeMultiplayer
                                walkType != lastSentWalkType ||
                                Math.Abs(animSpeed - lastSentAnimSpeed) > 0.05f;
 
-            if (!posChanged && !stateChanged && !healthChanged && !animChanged) return;
+            bool keepalive = Time.time - _lastRakeStateSendTime > 1f;
+            if (!posChanged && !stateChanged && !healthChanged && !animChanged && !keepalive) return;
 
             var packet = new RakeStatePacket
             {
@@ -2627,6 +2720,7 @@ namespace RakeMultiplayer
             lastSentAnimFlags = animFlags;
             lastSentWalkType = walkType;
             lastSentAnimSpeed = animSpeed;
+            _lastRakeStateSendTime = Time.time;
         }
 
         private byte GetCurrentStateByte()

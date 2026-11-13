@@ -36,6 +36,7 @@ namespace RakeMultiplayer
         private bool _enabled;
         private bool _controllerWasEnabled;
         private bool _movementWasEnabled;
+        private Vector3 _lastGroundedPosition;
 
         private void Awake()
         {
@@ -52,6 +53,8 @@ namespace RakeMultiplayer
             {
                 if (PlayerRagdoll.IsActive) return;
                 if (_fps != null && _fps.Health < 0) return;
+
+                _lastGroundedPosition = transform.position;
 
                 if (_controller == null) _controller = GetComponent<CharacterController>();
                 if (_movement == null) _movement = GetComponent<PlayerMovement>();
@@ -130,10 +133,26 @@ namespace RakeMultiplayer
         private void PlaceOnGround()
         {
             Vector3 origin = transform.position + Vector3.up * 0.5f;
-            RaycastHit[] hits = Physics.RaycastAll(origin, Vector3.down, 40f, ~0);
+            Vector3 point;
 
+            // Down first; if the player flew under the map the floor is above, so look up
+            // too. The old 40 m down-only ray left the body falling forever.
+            if (FindFloor(origin, Vector3.down, out point) ||
+                FindFloor(origin, Vector3.up, out point))
+            {
+                transform.position = point + Vector3.up * 0.1f;
+                return;
+            }
+
+            // No floor at all: return to where the flight started.
+            transform.position = _lastGroundedPosition + Vector3.up * 0.1f;
+        }
+
+        private bool FindFloor(Vector3 origin, Vector3 direction, out Vector3 point)
+        {
+            point = origin;
             float best = float.MaxValue;
-            Vector3 point = transform.position;
+            RaycastHit[] hits = Physics.RaycastAll(origin, direction, 250f, ~0);
 
             for (int i = 0; i < hits.Length; i++)
             {
@@ -147,10 +166,7 @@ namespace RakeMultiplayer
                 }
             }
 
-            if (best < float.MaxValue)
-            {
-                transform.position = point + Vector3.up * 0.1f;
-            }
+            return best < float.MaxValue;
         }
 
         private void OnDisable()

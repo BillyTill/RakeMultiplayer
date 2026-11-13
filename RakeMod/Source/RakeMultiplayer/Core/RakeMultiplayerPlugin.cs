@@ -39,7 +39,8 @@ namespace RakeMultiplayer
         internal static bool IsApplyingNetworkCameraState = false;
 
         // Config accessors
-        internal static ConfigEntry<string> GameSceneName { get; private set; }
+        internal static ConfigEntry<string> PlayerName;
+    internal static ConfigEntry<string> GameSceneName { get; private set; }
 
         // Singleton instance
         public static RakeMultiplayerPlugin Instance { get; private set; }
@@ -57,6 +58,7 @@ namespace RakeMultiplayer
             MaxPlayers = Config.Bind("Network", "MaxPlayers", 4, "Maximum players (2-4)");
             IsServer = Config.Bind("Network", "IsServer", false, "Run as server/host");
             UseSteamP2P = Config.Bind("Network", "UseSteamP2P", false, "Use Steam P2P networking (not implemented)");
+        PlayerName = Config.Bind("Player", "Name", "Player", "Name shown in the lobby and on the scoreboard");
             SteamAppId = Config.Bind("Network", "SteamAppId", "480", "Steam App ID for P2P");
             GameSceneName = Config.Bind("Network", "GameSceneName", "level1", "Name of the game scene to load (must match build settings, e.g. level1)");
             RunInBackground = Config.Bind("General", "RunInBackground", true,
@@ -443,6 +445,6 @@ namespace RakeMultiplayer
     {
         public const string GUID = "com.rake.multiplayer";
         public const string NAME = "Rake Multiplayer";
-        public const string VERSION = "1.0.0";
+        public const string VERSION = "1.0.19";
     }
 }

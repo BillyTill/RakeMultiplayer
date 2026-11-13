@@ -18,8 +18,9 @@ namespace RakeMultiplayer.Patches
             // In multiplayer the vanilla "Game over -> LoadLevel(0)" must never run:
             // it would kick the whole match to the main menu. BeginLocalDeath is
             // idempotent, so a second lethal pellet cannot restart anything either.
-            PlayerDeathSystem.BeginLocalDeath(__instance);
-            return false;
+            // If the mod could not handle the death (no local player/id yet), let the
+            // vanilla path run instead of leaving the hunter at negative health forever.
+            return !PlayerDeathSystem.BeginLocalDeath(__instance);
         }
     }
 }

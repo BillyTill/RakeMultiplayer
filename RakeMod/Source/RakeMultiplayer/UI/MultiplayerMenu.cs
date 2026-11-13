@@ -26,23 +26,35 @@ namespace RakeMultiplayer.UI
         private SteamLobbyManager.LobbyInfo _steamSelectedLobby;
         private float _steamUiTimer;
 
+        /// <summary>The live menu instance (used by the input gate and the console).</summary>
+        public static MultiplayerMenu Instance { get; private set; }
+
         /// <summary>True while the F1 menu (or any of its panels) is on screen.</summary>
         public static bool IsOpen
         {
-            get
-            {
-                var menu = FindObjectOfType<MultiplayerMenu>();
-                return menu != null && menu._menuVisible;
-            }
+            get { return Instance != null && Instance._menuVisible; }
+        }
+
+        private static bool IsGameplayScene()
+        {
+            string scene = UnityEngine.Application.loadedLevelName;
+            return !string.IsNullOrEmpty(scene) && scene.StartsWith("level");
         }
 
         private void Awake()
         {
+            Instance = this;
             _networkManager = UnityEngine.Object.FindObjectOfType<RakeNetworkManager>();
             
             // Build UI at runtime
             _uiBuilder = gameObject.AddComponent<RuntimeUIBuilder>();
             _uiBuilder.Initialize(this);
+        }
+
+        private void OnDestroy()
+        {
+            if (Instance == this) Instance = null;
+            PlayerInputLock.SetMenu(false);
         }
 
         public void OnUIBuilt(RuntimeUIBuilder builder)
@@ -73,30 +85,35 @@ namespace RakeMultiplayer.UI
                 }
             }
 
-            if (Input.GetKeyDown(KeyCode.F1))
+            // F1 opens/closes the menu, but never on top of the console (the console owns
+            // the keyboard then); pressing F1 again still closes an open menu.
+            if (Input.GetKeyDown(KeyCode.F1) &&
+                (!DebugConsole.ConsoleOpen || _menuVisible))
             {
                 ToggleMenu();
             }
 
+            bool hotkeysFree = !DebugConsole.ConsoleOpen;
+
             // Runtime diagnostics: dump weapon/inventory state to the BepInEx log
-            if (Input.GetKeyDown(KeyCode.F8))
+            if (hotkeysFree && Input.GetKeyDown(KeyCode.F8))
             {
                 WeaponDiagnostics.Dump("F8 pressed");
             }
 
             // Dump the local player prefab hierarchy (third-person model availability)
-            if (Input.GetKeyDown(KeyCode.F9))
+            if (hotkeysFree && Input.GetKeyDown(KeyCode.F9))
             {
                 PlayerHierarchyDiagnostics.Dump("F9 pressed");
             }
 
             // Debug: preview the baked remote player body without a second game instance
-            if (Input.GetKeyDown(KeyCode.F10))
+            if (hotkeysFree && Input.GetKeyDown(KeyCode.F10))
             {
                 RemotePlayerPreview.Next();
             }
 
-            if (Input.GetKeyDown(KeyCode.F11))
+            if (hotkeysFree && Input.GetKeyDown(KeyCode.F11))
             {
                 RemotePlayerPreview.Remove();
             }
@@ -104,7 +121,7 @@ namespace RakeMultiplayer.UI
             // Ждем подключения клиента перед показом лобби
             if (_waitingForConnection)
             {
-                _connectionTimer += Time.deltaTime;
+                _connectionTimer += Time.unscaledDeltaTime; // keep ticking while paused
                 
                 if (RakeMultiplayerPlugin.isConnected)
                 {
@@ -254,18 +271,28 @@ namespace RakeMultiplayer.UI
         public void ToggleMenu()
         {
             _menuVisible = !_menuVisible;
-            
+
             RakeMultiplayerPlugin.Log?.LogInfo($"[F1] ToggleMenu. visible={_menuVisible} mainContainer={(_mainContainer != null)} uiBuilder={(_uiBuilder != null)}");
 
             if (_mainContainer != null)
                 _mainContainer.SetActive(_menuVisible);
-            
+
             if (_menuVisible)
             {
+                // A menu needs the mouse and must not move/shoot the hunter behind it.
+                Cursor.lockState = CursorLockMode.None;
+                Cursor.visible = true;
+                PlayerInputLock.SetMenu(true);
                 ShowMainMenu();
             }
             else
             {
+                PlayerInputLock.SetMenu(false);
+                if (IsGameplayScene())
+                {
+                    Cursor.lockState = CursorLockMode.Locked;
+                    Cursor.visible = false;
+                }
                 HideAllPanels();
             }
         }
@@ -426,7 +453,21 @@ namespace RakeMultiplayer.UI
             LoadingScreen.SetProgress(1f);
             yield return new WaitForSeconds(0.35f);
 
-            UnityEngine.Application.LoadLevel(1);
+            // Mark the load as network-driven: otherwise the LoadLevel postfix broadcasts
+            // LevelChange(1) and every client loads the level a second time.
+            RakeNetworkManager.IsApplyingNetworkLevelChange = true;
+            try
+            {
+                UnityEngine.Application.LoadLevel(1);
+            }
+            finally
+            {
+                RakeNetworkManager.IsApplyingNetworkLevelChange = false;
+            }
+
+            // The lobby may start another match without leaving it.
+            _startGameSent = false;
+
             LoadingScreen.SetProgress(1f);
             LoadingScreen.Hide();
         }

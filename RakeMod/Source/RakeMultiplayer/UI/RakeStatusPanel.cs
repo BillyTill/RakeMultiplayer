@@ -24,7 +24,8 @@ namespace RakeMultiplayer.UI
 
         private void Update()
         {
-            if (Input.GetKeyDown(ToggleKey))
+            if (Input.GetKeyDown(ToggleKey) &&
+                (!DebugConsole.ConsoleOpen && !MultiplayerMenu.IsOpen))
             {
                 _visible = !_visible;
                 if (_visible) _refreshTimer = 0f;

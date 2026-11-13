@@ -198,6 +198,11 @@ namespace RakeMultiplayer
             if (_localInstance != null)
             {
                 _localInstance._dead = true;
+                // Restart the corpse delay: the 5 s timer used to run from the first
+                // (non-fatal) ragdoll, so a death during a hit reaction froze the body
+                // in mid-air after a fraction of a second.
+                _localInstance._timer = 0f;
+                _localInstance._frozen = false;
                 return true;
             }
 
@@ -219,6 +224,8 @@ namespace RakeMultiplayer
                 if (_remoteInstances.TryGetValue(playerId, out existing) && existing != null)
                 {
                     existing._dead = true;
+                    existing._timer = 0f;
+                    existing._frozen = false;
                     return true;
                 }
             }

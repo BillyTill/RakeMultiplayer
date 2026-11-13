@@ -447,14 +447,22 @@ namespace RakeMultiplayer.Patches
 
             if (RakeMultiplayerPlugin.isServer)
             {
-                // Remember consumed items so the pickup postfix can broadcast the removal
+                // Remember consumed items so the pickup postfix can broadcast the removal.
+                // Vanilla destroys the GameObject, not the component, so "obj as Item" was
+                // always null and the host never broadcast its pickups.
                 var serverItem = obj as Item;
+                if (serverItem == null)
+                {
+                    var serverGo = obj as GameObject;
+                    if (serverGo != null) serverItem = serverGo.GetComponent<Item>();
+                }
                 if (serverItem != null)
                 {
                     var mgr = RakeNetworkManager.Instance;
                     if (mgr != null)
                     {
-                        ItemPickupSync.MarkConsumed(mgr.GetItemNetworkId(serverItem));
+                        int networkId = mgr.GetItemNetworkId(serverItem);
+                        if (networkId > 0) ItemPickupSync.MarkConsumed(networkId);
                     }
                 }
                 return true; // Host can destroy
@@ -462,12 +470,24 @@ namespace RakeMultiplayer.Patches
 
             if (RakeMultiplayerPlugin.IsApplyingNetworkDestroy) return true; // Network-driven destroy
 
-            // Block client-side destruction of networked Items
+            // Block client-side destruction of networked Items only. Items with no network
+            // id (dropped loot, test arena) are local: blocking them made pickup unlimited
+            // because the vanilla pickup granted ammo but the object never disappeared.
             var item = obj as Item;
+            if (item == null)
+            {
+                var clientGo = obj as GameObject;
+                if (clientGo != null) item = clientGo.GetComponent<Item>();
+            }
             if (item != null)
             {
-                RakeMultiplayerPlugin.Log?.LogInfo($"[3.5] Blocked client Destroy on Item: {item.name}");
-                return false; // Prevent local destroy - wait for server ItemDestroyed
+                var mgr = RakeNetworkManager.Instance;
+                int networkId = mgr != null ? mgr.GetItemNetworkId(item) : 0;
+                if (networkId > 0)
+                {
+                    RakeMultiplayerPlugin.Log?.LogInfo($"[3.5] Blocked client Destroy on Item: {item.name}");
+                    return false; // Prevent local destroy - wait for server ItemDestroyed
+                }
             }
             return true;
         }

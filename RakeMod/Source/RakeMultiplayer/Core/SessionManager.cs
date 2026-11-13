@@ -74,6 +74,7 @@ namespace RakeMultiplayer
 
             _currentState = SessionState.Active;
             _currentNight = 0;
+            WorldPersistence.Clear();
             _sessionTimer = 0f;
             _rakeHealth = 100f;
             _victoryType = VictoryType.None;
@@ -225,7 +226,9 @@ namespace RakeMultiplayer
             // Only react to night start (Day -> Night transition)
             if (phase == Phase.Night)
             {
-                _currentNight = nightNumber + 1; // Convert to 1-based
+                // DayNightManager already counts nights from 1 (it increments before
+                // invoking the event), so the old "+1" skipped the first night.
+                _currentNight = nightNumber;
 
                 if (_currentNight == 1)
                 {

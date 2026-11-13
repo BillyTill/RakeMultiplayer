@@ -31,6 +31,13 @@ namespace RakeMultiplayer
         private static readonly Dictionary<uint, NetworkedTrap> _registry = new Dictionary<uint, NetworkedTrap>();
         private static int _nextTrapId = 1;
 
+        /// <summary>New scene: forget traps from the previous level (ids restart at 1).</summary>
+        public static void ResetSceneState()
+        {
+            _registry.Clear();
+            _nextTrapId = 1;
+        }
+
         public static bool TryGetTrap(uint trapId, out NetworkedTrap trap) => _registry.TryGetValue(trapId, out trap);
 
         public static int GetTrapCount() => _registry.Count;
@@ -98,17 +105,27 @@ namespace RakeMultiplayer
                 return;
             }
 
-            // Only the host's local player is damaged here. Remote players run their
-            // own controllers; player health is not server-authoritative in this mod yet
-            // (documented limitation), so damaging a remote proxy would not sync.
             var netPlayer = other.GetComponentInParent<NetworkedPlayer>();
-            if (netPlayer != null && netPlayer.isLocalPlayer)
+            if (netPlayer != null)
             {
-                var fps = other.GetComponentInParent<FPSController>();
-                if (fps != null)
+                if (netPlayer.isLocalPlayer)
                 {
-                    try { fps.TakeDamage(35, "TrapDamage"); }
-                    catch (Exception ex) { RakeMultiplayerPlugin.Log?.LogWarning($"[3.11] Trap damage failed: {ex.Message}"); }
+                    var fps = other.GetComponentInParent<FPSController>();
+                    if (fps != null)
+                    {
+                        try { fps.TakeDamage(35, "TrapDamage"); }
+                        catch (Exception ex) { RakeMultiplayerPlugin.Log?.LogWarning($"[3.11] Trap damage failed: {ex.Message}"); }
+                    }
+                }
+                else if (netPlayer.PlayerId > 0)
+                {
+                    // A client standing on a trap used to take no damage at all: this
+                    // branch was limited to isLocalPlayer, which is only true for the host.
+                    Vector3 push = netPlayer.transform.position - transform.position;
+                    push.y = 0f;
+                    if (push.sqrMagnitude < 0.01f) push = netPlayer.transform.forward;
+                    RakeNetworkManager.Instance?.ServerPlayerHit(netPlayer.PlayerId, 35, "TrapDamage",
+                        transform.position, push.normalized);
                 }
                 Trigger();
             }

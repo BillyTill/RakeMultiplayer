@@ -84,9 +84,33 @@ namespace RakeMultiplayer.Networking
             return packet.Serialize();
         }
 
-        // TODO: String serialization currently uses BinaryReader.ReadString() without limits.
-        // For production, implement length-prefixed strings:
-        // Write: writer.Write((ushort)str.Length); writer.Write(Encoding.UTF8.GetBytes(str));
-        // Read: int len = reader.ReadUInt16(); if (len > MAX_STRING_LENGTH) throw...; return Encoding.UTF8.GetString(reader.ReadBytes(len));
+        /// <summary>
+        /// Safe replacement for BinaryReader.ReadString(). The 7-bit length prefix lets a
+        /// 20-byte packet claim a 2 GB string, and .NET allocates it before reading bytes
+        /// (OOM in a 32-bit process). This checks the prefix against the bytes actually left.
+        /// </summary>
+        public static string ReadSafeString(BinaryReader reader)
+        {
+            int length = 0;
+            int shift = 0;
+            byte b;
+            do
+            {
+                if (reader.BaseStream.Position >= reader.BaseStream.Length)
+                    throw new System.ArgumentException("Truncated string length");
+                b = reader.ReadByte();
+                length |= (b & 0x7F) << shift;
+                shift += 7;
+                if (shift > 28) throw new System.ArgumentException("String length too large");
+            }
+            while ((b & 0x80) != 0);
+
+            long remaining = reader.BaseStream.Length - reader.BaseStream.Position;
+            if (length < 0 || length > remaining)
+                throw new System.ArgumentException("String length " + length +
+                                                         " exceeds the remaining " + remaining + " bytes");
+
+            return System.Text.Encoding.UTF8.GetString(reader.ReadBytes(length));
+        }
     }
 }

@@ -217,9 +217,6 @@ namespace RakeMultiplayer
 
         private void Update()
         {
-            // ЛОГ ДЛЯ ПРОВЕРКИ, ЧТО UPDATE РАБОТАЕТ (выводить раз в 60 кадров, чтобы не спамить)
-            if (Time.frameCount % 60 == 0)
-                RakeMultiplayerPlugin.Log?.LogInfo($"[Net] Update running. isServer={RakeMultiplayerPlugin.isServer}, _server={(_server != null)}, _client={(_client != null)}");
 
             // Cache references once per second (avoid FindObjectOfType in hot paths)
             _cacheTimer += Time.deltaTime;
@@ -229,6 +226,9 @@ namespace RakeMultiplayer
                 if (_cachedRake == null) _cachedRake = FindObjectOfType<NetworkedRakeAI>();
                 if (_cachedEnemyAI == null) _cachedEnemyAI = FindObjectOfType<Enemy_AI>();
             }
+
+            // Retry door states that arrived while a door was still animating.
+            DoorSync.Update();
 
             if (RakeMultiplayerPlugin.isServer && _server != null)
             {
@@ -255,6 +255,7 @@ namespace RakeMultiplayer
             _knownPlayerIds.Clear();
             _pendingConnects.Clear();
             _networkedItems.Clear();
+            _consumedItemIds.Clear();
             _itemToNetworkId.Clear();
             _mapMarkers.Clear();
             _trapStates.Clear();
@@ -286,6 +287,7 @@ namespace RakeMultiplayer
             _knownPlayerIds.Clear();
             _pendingConnects.Clear();
             _networkedItems.Clear();
+            _consumedItemIds.Clear();
             _itemToNetworkId.Clear();
             _mapMarkers.Clear();
             _trapStates.Clear();
@@ -374,30 +376,58 @@ namespace RakeMultiplayer
                 };
                 _server.Send(connectionId, hostPacket.Serialize());
             _server.Send(connectionId, new RakeOwnerPacket { OwnerId = LobbyState.RakeOwnerId }.Serialize());
+
+                // Late join: send the current door states, otherwise every door is closed
+                // for the newcomer until somebody touches it again.
+                DoorSync.SendSnapshotToPlayer(connectionId + 1);
+
+                // Late join: tell the newcomer about items already taken, otherwise they
+                // see ghost items that cannot be picked up.
+                foreach (var consumedId in _consumedItemIds)
+                {
+                    _server.Send(connectionId, new ItemDestroyedPacket
+                    {
+                        ItemNetworkId = consumedId,
+                        PickerId = 0,
+                        ItemType = string.Empty
+                    }.Serialize());
+                }
                 RakeMultiplayerPlugin.Log?.LogInfo($"[Net] Sent Host info to C{connectionId}: pos={hostPos}");
 
                 // 1. Send existing CLIENTS to the NEW client (use assignedPlayerId = existingId + 1)
                 foreach (var existingId in _connectedClients)
                 {
                     if (existingId == connectionId) continue;
-                    if (_playerStates.ContainsKey(existingId))
+
+                    // Always announce existing players. Requiring a PlayerState entry meant
+                    // a hunter who had not moved yet was unknown to the new client.
+                    Vector3 existingPos = hostPos;
+                    if (_playerStates.TryGetValue(existingId, out var existingState))
                     {
-                        int existingPlayerId = existingId + 1;
-                        var existingPacket = new PlayerConnectedPacket
-                        {
-                            PlayerId = existingPlayerId,
-                            SpawnPosition = _playerStates[existingId].Position,
-                            IsYou = false
-                        };
-                        _server.Send(connectionId, existingPacket.Serialize());
+                        existingPos = existingState.Position;
                     }
+                    else if (PlayerSpawner.Instance != null &&
+                             PlayerSpawner.Instance.TryGetRemotePlayer(existingId + 1, out var existingProxy) &&
+                             existingProxy != null)
+                    {
+                        existingPos = existingProxy.transform.position;
+                    }
+
+                    int existingPlayerId = existingId + 1;
+                    var existingPacket = new PlayerConnectedPacket
+                    {
+                        PlayerId = existingPlayerId,
+                        SpawnPosition = existingPos,
+                        IsYou = false
+                    };
+                    _server.Send(connectionId, existingPacket.Serialize());
                 }
 
                 // 2. Broadcast NEW player to ALL
                 var newPacketForNew = new PlayerConnectedPacket
                 {
                     PlayerId = assignedPlayerId,
-                    SpawnPosition = new Vector3(assignedPlayerId * 2f, 0f, 0f),
+                    SpawnPosition = hostPos,
                     IsYou = true
                 };
                 _server.Send(connectionId, newPacketForNew.Serialize());
@@ -405,7 +435,7 @@ namespace RakeMultiplayer
                 var newPacketForOthers = new PlayerConnectedPacket
                 {
                     PlayerId = assignedPlayerId,
-                    SpawnPosition = new Vector3(assignedPlayerId * 2f, 0f, 0f),
+                    SpawnPosition = hostPos,
                     IsYou = false
                 };
                 var dataForOthers = newPacketForOthers.Serialize();
@@ -417,7 +447,11 @@ namespace RakeMultiplayer
                 // 3. HOST spawns remote player for the NEW client directly
                 if (PlayerSpawner.Instance != null)
                 {
-                    var spawnPos = new Vector3(assignedPlayerId * 2f, 0f, 0f);
+                    // Spawn next to the host instead of the old (2*id, 0, 0) point outside
+                    // the level; the first PlayerState snaps it to the real position.
+                    Vector3 spawnPos = _hostSpawnPositionSet
+                        ? _hostSpawnPosition + new Vector3(assignedPlayerId * 0.8f, 0f, 0f)
+                        : new Vector3(assignedPlayerId * 2f, 0f, 0f);
                     PlayerSpawner.Instance.SpawnRemotePlayer(assignedPlayerId, spawnPos);
                     RakeMultiplayerPlugin.Log?.LogInfo($"[Net] Host spawned remote player for C{connectionId} (PlayerId={assignedPlayerId}) at {spawnPos}");
                 }
@@ -433,6 +467,14 @@ namespace RakeMultiplayer
             RakeMultiplayerPlugin.Log?.LogInfo($"[Net] Server: client {connectionId} disconnected");
             _connectedClients.Remove(connectionId);
             _playerStates.Remove(connectionId);
+
+            // If the departed client owned the Rake, hand it back to the AI. The owner id
+            // used to stay stale, so nobody could send RakeState and the Rake froze forever.
+            if (LobbyState.RakeOwnerId == connectionId + 1)
+            {
+                RakeMultiplayerPlugin.Log?.LogInfo("[RakePlay] owner disconnected, returning the Rake to the AI");
+                SetRakeOwner(0);
+            }
 
             // Remove the host-side proxy of the departed player
             PlayerSpawner.Instance?.RemoveRemotePlayer(connectionId + 1);
@@ -466,7 +508,12 @@ namespace RakeMultiplayer
             try
             {
                 var packet = PacketSerializer.Deserialize(data);
-                RakeMultiplayerPlugin.Log?.LogInfo($"[Net] S<-C{connectionId} {packet.Type} ({data.Length}b)");
+                // PlayerState/RakeState arrive ~20 Hz per player: logging them flooded the
+                // log and caused disk stalls during combat.
+                if (packet.Type != PacketType.PlayerState && packet.Type != PacketType.RakeState)
+                {
+                    RakeMultiplayerPlugin.Log?.LogInfo($"[Net] S<-C{connectionId} {packet.Type} ({data.Length}b)");
+                }
 
                 switch (packet.Type)
                 {
@@ -480,7 +527,7 @@ namespace RakeMultiplayer
                         HandleServerPlayerRagdollRequest(connectionId, (PlayerRagdollRequestPacket)packet);
                         break;
                     case PacketType.PlayerDied:
-                        HandleServerPlayerDied((PlayerDiedPacket)packet);
+                        HandleServerPlayerDied(connectionId, (PlayerDiedPacket)packet);
                         break;
                     case PacketType.DoorAction:
                         DoorSync.HandleServerRequest((DoorActionPacket)packet);
@@ -548,6 +595,16 @@ namespace RakeMultiplayer
             int assignedPlayerId = connectionId + 1;
             packet.PlayerId = assignedPlayerId;
 
+            // A NaN/huge position would poison the transforms of every peer (and the item
+            // proximity checks below).
+            Vector3 pos = packet.Position;
+            if (float.IsNaN(pos.x) || float.IsNaN(pos.y) || float.IsNaN(pos.z) ||
+                Mathf.Abs(pos.x) > 5000f || Mathf.Abs(pos.y) > 5000f || Mathf.Abs(pos.z) > 5000f)
+            {
+                RakeMultiplayerPlugin.Log?.LogWarning("[Net] rejected invalid PlayerState from C" + connectionId);
+                return;
+            }
+
             // Store state by connectionId
             _playerStates[connectionId] = packet;
 
@@ -576,8 +633,9 @@ namespace RakeMultiplayer
         /// </summary>
         private void HandleServerPlayerRagdollRequest(int connectionId, PlayerRagdollRequestPacket packet)
         {
+            // Never trust packet.PlayerId: a client could ragdoll-lock any other player.
+            // The request is always about the sender.
             int playerId = connectionId + 1;
-            if (packet.PlayerId > 0) playerId = packet.PlayerId;
 
             RakeMultiplayerPlugin.Log?.LogInfo("[Ragdoll] Server got request from C" + connectionId +
                                                " for player " + playerId);
@@ -589,12 +647,8 @@ namespace RakeMultiplayer
         {
             RakeMultiplayerPlugin.Log?.LogInfo($"[3.4] Server received DamageRequest from C{connectionId}: shooter={packet.ShooterId}, target={packet.TargetId}, amount={packet.Amount}, type={packet.DamageType}, shooterPos={packet.ShooterPosition}");
 
-            // Use cached Enemy_AI (server-authoritative)
-            if (_cachedEnemyAI == null)
-            {
-                RakeMultiplayerPlugin.Log?.LogWarning("[3.4] No cached Enemy_AI for DamageRequest");
-                return;
-            }
+            // Do NOT gate the whole shot on a live Enemy_AI: after the Rake dies the cached
+            // reference is null, and every client shot (including PvP) was silently dropped.
 
             int shooterId = connectionId + 1;
             if (packet.ShooterId <= 0) packet.ShooterId = shooterId;
@@ -608,7 +662,9 @@ namespace RakeMultiplayer
             Vector3 direction = packet.Direction;
             if (direction.sqrMagnitude < 0.001f)
             {
-                direction = _cachedEnemyAI.transform.position + Vector3.up * 1.2f - origin;
+                direction = _cachedEnemyAI != null
+                    ? _cachedEnemyAI.transform.position + Vector3.up * 1.2f - origin
+                    : Vector3.forward;
             }
             direction.Normalize();
 
@@ -619,11 +675,29 @@ namespace RakeMultiplayer
                 return;
             }
 
-            int amount = Mathf.Clamp(packet.Amount, 1, 300);
+            // The server decides the weapon profile. A modified client used to be able to
+            // send Amount = 300, Pellets = 12 (3600 damage) with any weapon in hand.
             string damageType = string.IsNullOrEmpty(packet.DamageType) ? "SniperShot" : packet.DamageType;
+            int amount;
+            int pellets;
+            float spread;
+            if (string.Equals(damageType, "SniperShot", System.StringComparison.OrdinalIgnoreCase))
+            {
+                amount = 200; pellets = 1; spread = 0f;
+            }
+            else if (string.Equals(damageType, "Bullet", System.StringComparison.OrdinalIgnoreCase))
+            {
+                amount = 17; pellets = 6; spread = 4.5f;
+            }
+            else
+            {
+                amount = Mathf.Clamp(packet.Amount, 1, 100);
+                pellets = Mathf.Clamp(packet.Pellets, 1, 6);
+                spread = Mathf.Clamp(packet.Spread, 0f, 10f);
+            }
 
             // Real ballistics: the server simulates the bullet and applies damage on impact.
-            ProjectileSystem.SpawnShot(origin, direction, packet.Pellets, packet.Spread, amount, damageType, shooterId);
+            ProjectileSystem.SpawnShot(origin, direction, pellets, spread, amount, damageType, shooterId);
 
             // The shot is heard: let the mod AI decide (start a lurk cycle, turn
             // towards the noise). The vanilla "danger" escape is suppressed by
@@ -820,35 +894,53 @@ namespace RakeMultiplayer
                 return;
             }
 
-            // Generous proximity check: a client cannot vacuum items across the map
-            Transform picker = null;
+            // Authoritative proximity check. The old version allowed the pickup when the
+            // proxy was missing (the null branch) and used a 100 m radius otherwise, so a
+            // client could vacuum the whole map.
+            Vector3 pickerPos;
+            bool hasPickerPos = false;
+
             if (playerId == 1)
             {
-                picker = PlayerSpawner.Instance?.LocalPlayer?.transform;
+                var local = PlayerSpawner.Instance != null ? PlayerSpawner.Instance.LocalPlayer : null;
+                if (local != null)
+                {
+                    pickerPos = local.transform.position;
+                    hasPickerPos = true;
+                }
+                else pickerPos = Vector3.zero;
             }
             else if (PlayerSpawner.Instance != null &&
-                     PlayerSpawner.Instance.TryGetRemotePlayer(playerId, out var remote) && remote != null)
+                     PlayerSpawner.Instance.TryGetRemotePlayer(playerId, out var remotePicker) &&
+                     remotePicker != null)
             {
-                picker = remote.transform;
+                pickerPos = remotePicker.transform.position;
+                hasPickerPos = true;
             }
-
-            if (picker == null)
+            else if (_playerStates.TryGetValue(connectionId, out var pickerState) && pickerState != null)
             {
-                // Fallback to the last reported position (proxy not spawned yet, etc.)
-                if (_playerStates.TryGetValue(connectionId, out var st) && st != null)
+                pickerPos = pickerState.Position;
+                hasPickerPos = true;
+            }
+            else pickerPos = Vector3.zero;
+
+            if (!hasPickerPos)
+            {
+                _server.Send(connectionId, new ItemPickupConfirmPacket
                 {
-                    var fallbackPos = st.Position;
-                    if (Vector3.Distance(fallbackPos, item.transform.position) <= 15f)
-                    {
-                        picker = null; // allow
-                    }
-                }
+                    PlayerId = playerId,
+                    ItemNetworkId = packet.ItemNetworkId,
+                    Success = false,
+                    Reason = "NoPosition"
+                }.Serialize());
+                return;
             }
 
-            if (picker != null && Vector3.Distance(picker.position, item.transform.position) > 100f)
+            float pickupDistance = Vector3.Distance(pickerPos, item.transform.position);
+            if (pickupDistance > 3.5f)
             {
                 RakeMultiplayerPlugin.Log?.LogWarning(
-                    $"[3.5] Server rejected pickup: P{playerId} is {Vector3.Distance(picker.position, item.transform.position):F1}m away from item {packet.ItemNetworkId}");
+                    $"[3.5] Server rejected pickup: P{playerId} is {pickupDistance:F1}m away from item {packet.ItemNetworkId}");
                 _server.Send(connectionId, new ItemPickupConfirmPacket
                 {
                     PlayerId = playerId,
@@ -1171,6 +1263,7 @@ namespace RakeMultiplayer
             if (!RakeMultiplayerPlugin.isServer) return;
 
             _networkedItems.Remove(itemNetworkId);
+            if (RakeMultiplayerPlugin.isServer) _consumedItemIds.Add(itemNetworkId);
 
             Item removed = null;
             foreach (var kvp in _itemToNetworkId)
@@ -1195,6 +1288,7 @@ namespace RakeMultiplayer
         public void PrepareForSceneLoad()
         {
             _networkedItems.Clear();
+            _consumedItemIds.Clear();
             _itemToNetworkId.Clear();
             _mapMarkers.Clear();
             _trapStates.Clear();
@@ -1205,6 +1299,7 @@ namespace RakeMultiplayer
 
             RakeMultiplayer.Patches.ItemPickupSync.ClearConsumed();
             NetworkedCamera.ClearRegistry();
+            NetworkedTrap.ResetSceneState();
 
             RakeMultiplayerPlugin.Log?.LogInfo("[Scene] Per-scene network registries reset");
         }
@@ -1306,7 +1401,10 @@ namespace RakeMultiplayer
                     if (playerId == localId) continue;
                     if (spawner.TryGetRemotePlayer(playerId, out _)) continue;
 
-                    spawner.SpawnRemotePlayer(playerId, new Vector3(playerId * 2f, 0f, 0f));
+                    Vector3 missingPos = spawner.LocalPlayer != null
+                        ? spawner.LocalPlayer.transform.position + new Vector3(playerId * 0.8f, 0f, 0f)
+                        : new Vector3(playerId * 2f, 0f, 0f);
+                    spawner.SpawnRemotePlayer(playerId, missingPos);
                     RakeMultiplayerPlugin.Log?.LogInfo($"[Visual] Client spawned missing remote player P{playerId}");
                 }
 
@@ -1339,27 +1437,18 @@ namespace RakeMultiplayer
 
         private void HandleServerLevelChange(int connectionId, LevelChangePacket packet, byte[] rawData)
         {
-            if (packet.LevelIndex <= 0) return;
-
-            RakeMultiplayerPlugin.Log?.LogInfo($"[Scene] Client C{connectionId} requested level {packet.LevelIndex}");
-
-            // Tell every OTHER client (the requester already loaded locally)
-            if (_server != null)
-            {
-                var data = packet.Serialize();
-                foreach (var connId in _connectedClients)
-                {
-                    if (connId != connectionId) _server.Send(connId, data);
-                }
-            }
-
-            // Apply on the host too
-            ApplyNetworkLevelChange(packet.LevelIndex);
+            // Level changes are host-authoritative. A client used to be able to reload an
+            // arbitrary scene for everyone (or spam reloads and kill the session).
+            RakeMultiplayerPlugin.Log?.LogWarning("[Scene] ignored LevelChange from client C" + connectionId);
         }
 
         private void HandleClientLevelChange(LevelChangePacket packet)
         {
             if (packet.LevelIndex <= 0) return;
+
+            // Dedupe: the host's StartGame already loads the same level.
+            if (packet.LevelIndex == UnityEngine.Application.loadedLevel) return;
+
             ApplyNetworkLevelChange(packet.LevelIndex);
         }
 
@@ -1586,6 +1675,10 @@ namespace RakeMultiplayer
                 return;
             }
 
+            // Rate limit: every accepted request starts a coroutine and broadcasts.
+            if (Time.time - _lastRakeAttackTime < 1f) return;
+            _lastRakeAttackTime = Time.time;
+
             var rake = RakeHighlight.FindRake();
             if (rake == null) return;
             Vector3 rakePos = rake.position;
@@ -1612,8 +1705,9 @@ namespace RakeMultiplayer
                 }.Serialize());
 
                 BroadcastRakeSound(0, rakePos);
+                // The Rake melee is always 10 damage; a client could otherwise send 99999.
                 StartCoroutine(ServerRakePlayerHit(packet.TargetPlayerId,
-                                                  packet.Amount > 0 ? packet.Amount : 10,
+                                                  Mathf.Clamp(packet.Amount > 0 ? packet.Amount : 10, 1, 10),
                                                   string.IsNullOrEmpty(packet.DamageType) ? "RakeKick" : packet.DamageType,
                                                   rakePos));
             }
@@ -1998,8 +2092,6 @@ namespace RakeMultiplayer
 
         private void HandleClientPlayerState(PlayerStatePacket packet)
         {
-            RakeMultiplayerPlugin.Log?.LogInfo($"[3.3] Client received PlayerState: playerId={packet.PlayerId}, pos={packet.Position}");
-
             // Find remote player and apply state
             if (PlayerSpawner.Instance != null)
             {
@@ -2008,6 +2100,15 @@ namespace RakeMultiplayer
                     remote.ApplyPosition(packet.Position);
                     remote.ApplyRotation(packet.Rotation);
                     remote.ApplyAnimation(packet.AnimState);
+                }
+                else if (packet.PlayerId > 0 &&
+                         PlayerSpawner.Instance.LocalPlayer != null &&
+                         PlayerSpawner.Instance.LocalPlayer.PlayerId != packet.PlayerId)
+                {
+                    // Late joiner or a player we never heard about (the old code dropped
+                    // these packets forever, so that hunter stayed invisible).
+                    PlayerSpawner.Instance.SpawnRemotePlayer(packet.PlayerId, packet.Position);
+                    _knownPlayerIds.Add(packet.PlayerId);
                 }
             }
         }
@@ -2151,10 +2252,43 @@ namespace RakeMultiplayer
         }
 
         /// <summary>Server: a client reports its own death (it knows its inventory).</summary>
-        private void HandleServerPlayerDied(PlayerDiedPacket packet)
+        private void HandleServerPlayerDied(int connectionId, PlayerDiedPacket packet)
         {
-            if (packet == null || packet.PlayerId <= 0) return;
-            if (PlayerDeathSystem.IsDead(packet.PlayerId)) return; // host already handled it
+            if (packet == null) return;
+
+            // The death is always about the sender: trusting packet.PlayerId let any client
+            // kill the host (PlayerId = 1) or spawn loot for a non-existent player anywhere.
+            int playerId = connectionId + 1;
+            if (playerId != 1 && !_connectedClients.Contains(playerId - 1))
+            {
+                RakeMultiplayerPlugin.Log?.LogWarning("[Death] rejected PlayerDied from unknown C" + connectionId);
+                return;
+            }
+            if (PlayerDeathSystem.IsDead(playerId)) return; // host already handled it
+
+            packet.PlayerId = playerId;
+
+            // Use the server's own view of the body instead of the client-supplied position.
+            if (playerId == 1)
+            {
+                var host = PlayerSpawner.Instance != null ? PlayerSpawner.Instance.LocalPlayer : null;
+                if (host != null)
+                {
+                    packet.Position = host.transform.position;
+                    packet.Rotation = host.transform.rotation;
+                }
+            }
+            else if (_playerStates.TryGetValue(connectionId, out var state))
+            {
+                packet.Position = state.Position;
+                packet.Rotation = state.Rotation;
+            }
+            else if (PlayerSpawner.Instance != null &&
+                     PlayerSpawner.Instance.TryGetRemotePlayer(playerId, out var remote))
+            {
+                packet.Position = remote.transform.position;
+                packet.Rotation = remote.transform.rotation;
+            }
 
             PlayerDeathSystem.ApplyDeath(packet);
             ServerBroadcast(packet.Serialize());
@@ -2169,6 +2303,8 @@ namespace RakeMultiplayer
         }
 
         private readonly HashSet<int> _respawnScheduled = new HashSet<int>();
+        private readonly HashSet<int> _consumedItemIds = new HashSet<int>();
+        private float _lastRakeAttackTime = -999f;
 
         /// <summary>Server: put a dead hunter back at the safehouse after a delay.</summary>
         public void SchedulePlayerRespawn(int playerId)
@@ -2532,12 +2668,41 @@ namespace RakeMultiplayer
                     RakeMultiplayerPlugin.Log?.LogInfo(
                         $"[3.3] Cannot place more than {NetworkedCamera.MaxCameras} cameras at once");
                     break;
+
+                case "NotFound":
+                case "NoPosition":
+                    // The server has no such item (already taken). Remove the local ghost,
+                    // otherwise it stays on the ground forever as an unpickable prop.
+                    RemoveLocalGhostItem(packet.ItemNetworkId);
+                    break;
+
                 default:
                     RakeMultiplayerPlugin.Log?.LogInfo($"[3.3] Pickup rejected: {packet.Reason}");
                     break;
             }
 
             OnPickupRejected?.Invoke(packet.PlayerId, packet.Reason);
+        }
+
+        private void RemoveLocalGhostItem(int itemNetworkId)
+        {
+            Item ghost;
+            if (!_networkedItems.TryGetValue(itemNetworkId, out ghost) || ghost == null) return;
+
+            _networkedItems.Remove(itemNetworkId);
+            _itemToNetworkId.Remove(ghost);
+
+            RakeMultiplayerPlugin.IsApplyingNetworkDestroy = true;
+            try
+            {
+                Destroy(ghost.gameObject);
+            }
+            finally
+            {
+                RakeMultiplayerPlugin.IsApplyingNetworkDestroy = false;
+            }
+
+            RakeMultiplayerPlugin.Log?.LogInfo("[3.5] Removed ghost item " + itemNetworkId);
         }
 
         /// <summary>
@@ -2750,6 +2915,12 @@ namespace RakeMultiplayer
 
         private void HandleServerFireVisuals(int connectionId, FireVisualsPacket packet)
         {
+            // The shooter is always the sender: a client could otherwise spawn tracers,
+            // flashes and gunshots in another player's name anywhere on the map.
+            packet.ShooterId = connectionId + 1;
+            packet.Pellets = (byte)Mathf.Clamp(packet.Pellets, 1, 12);
+            packet.Spread = Mathf.Clamp(packet.Spread, 0f, 10f);
+
             // Play it for the host, then relay to the other clients. The sender
             // ignores its own packet in HandleClientFireVisuals.
             HandleClientFireVisuals(packet);
@@ -2969,12 +3140,13 @@ namespace RakeMultiplayer
                 var packet = _pendingConnects.Dequeue();
                 RakeMultiplayerPlugin.Log?.LogInfo($"[Net] Processing queued PlayerConnected: playerId={packet.PlayerId}, IsYou={packet.IsYou}");
                 
-                // Track known player IDs for UI (client-side)
-                if (!RakeMultiplayerPlugin.isServer)
+                // Track known player IDs for UI (client-side), but never our own: that
+                // created a phantom copy of the local body.
+                if (!RakeMultiplayerPlugin.isServer && !packet.IsYou)
                 {
                     _knownPlayerIds.Add(packet.PlayerId);
                 }
-                
+
                 // Re-call without the queue check (PlayerSpawner is now ready)
                 if (packet.IsYou)
                 {
@@ -2982,6 +3154,12 @@ namespace RakeMultiplayer
                     {
                         PlayerSpawner.Instance.LocalPlayer.SetPlayerId(packet.PlayerId);
                         RakeMultiplayerPlugin.Log?.LogInfo($"[3.3] Local player assigned ID: {packet.PlayerId}");
+                    }
+                    else
+                    {
+                        // Keep the packet: dropping it left PlayerId = 0 forever.
+                        _pendingConnects.Enqueue(packet);
+                        break;
                     }
                 }
                 else

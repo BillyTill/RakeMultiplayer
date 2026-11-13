@@ -158,8 +158,19 @@ namespace RakeMultiplayer
                     fps.playerState = FPSController.Player_state.Full;
                     if (fps.cameraAnimator != null) fps.cameraAnimator.SetBool("Dead", false);
                     if (fps.effectAnimator != null) fps.effectAnimator.SetBool("Blood", false);
-                    if (fps.playerMovement != null) fps.playerMovement.bCanMove = true;
-                    if (fps.camMouseLook != null) fps.camMouseLook.bControl = true;
+                    // FPSController.Update toggles these off while dead (inventory),
+                    // and they were never re-enabled on respawn: the player could not
+                    // move or look after coming back.
+                    if (fps.playerMovement != null)
+                    {
+                        fps.playerMovement.enabled = true;
+                        fps.playerMovement.bCanMove = true;
+                    }
+                    if (fps.camMouseLook != null)
+                    {
+                        fps.camMouseLook.enabled = true;
+                        fps.camMouseLook.bControl = true;
+                    }
                 }
 
                 PlayerRagdoll.ReviveLocal();

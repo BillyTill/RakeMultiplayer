@@ -68,7 +68,13 @@ namespace RakeMultiplayer
         {
             if (_registered && NetId != 0)
             {
-                Registry.Remove(NetId);
+                // Never remove somebody else's entry: id collisions made a destroyed
+                // object unregister the live one.
+                NetIdentity current;
+                if (Registry.TryGetValue(NetId, out current) && current == this)
+                {
+                    Registry.Remove(NetId);
+                }
                 _registered = false;
             }
         }

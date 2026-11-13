@@ -187,6 +187,19 @@ namespace RakeMultiplayer
                 rb.detectCollisions = false;
             }
 
+            // PvP hitbox. The clone has no enabled collider at all: the CharacterController
+            // is off and RemotePlayerVisual destroys the placeholder colliders, so server
+            // projectiles passed straight through other players. A trigger capsule is seen
+            // by Physics.SphereCastAll(QueryTriggerInteraction.Collide) but never blocks
+            // movement, so the host is not pushed around by remote bodies.
+            var hitbox = GetComponent<CapsuleCollider>();
+            if (hitbox == null) hitbox = gameObject.AddComponent<CapsuleCollider>();
+            hitbox.isTrigger = true;
+            hitbox.direction = 1;
+            hitbox.height = 1.8f;
+            hitbox.radius = 0.4f;
+            hitbox.center = new Vector3(0f, 0.9f, 0f);
+
             // Disable ALL cameras and AudioListener on remote player
             var cameras = GetComponentsInChildren<Camera>(true);
             foreach (var cam in cameras)
@@ -293,10 +306,13 @@ namespace RakeMultiplayer
             byte state = 0;
             if (_cachedAnimator != null)
             {
-                if (_cachedAnimator.GetBool("Run")) state |= 1 << 0;
-                if (_cachedAnimator.GetBool("Crouch")) state |= 1 << 1;
-                if (_cachedAnimator.GetBool("Grounded")) state |= 1 << 3;
+                // The vanilla player animator has no Run/Crouch/Grounded bools: it drives
+                // everything with the float "Speed" (0 = idle, 1 = walk, 2 = run).
+                if (_cachedAnimator.GetFloat("Speed") >= 1.5f) state |= 1 << 0;
             }
+
+            var movement = GetComponent<PlayerMovement>();
+            if (movement != null && movement.bRun) state |= 1 << 0;
 
             var wm = GetWeaponManager();
             if (wm != null)
@@ -384,6 +400,15 @@ namespace RakeMultiplayer
                 targetPosition = position;
                 hasTargetPosition = true;
             }
+        }
+
+        /// <summary>Snap the remote body (spawn, teleport, scene change) instead of lerping.</summary>
+        public void ApplyPositionImmediate(Vector3 position)
+        {
+            if (isLocalPlayer) return;
+            targetPosition = position;
+            hasTargetPosition = true;
+            transform.position = position;
         }
 
         public void ApplyRotation(Quaternion rotation)

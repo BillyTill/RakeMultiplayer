@@ -110,7 +110,8 @@ namespace RakeMultiplayer.UI
                 SetVisible(gameplay);
             }
 
-            if (gameplay && Input.GetKeyDown(toggleKey))
+            if (gameplay && !DebugConsole.ConsoleOpen && !MultiplayerMenu.IsOpen &&
+                Input.GetKeyDown(toggleKey))
             {
                 SetVisible(!_visible);
             }

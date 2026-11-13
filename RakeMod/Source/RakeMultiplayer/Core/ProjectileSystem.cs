@@ -125,6 +125,8 @@ namespace RakeMultiplayer
             // ~0 includes the players: their CharacterController lives on the built-in
             // "Ignore Raycast" layer (2), which DefaultRaycastLayers excludes. A thin
             // sphere cast also prevents fast bullets from tunnelling through a body.
+            // Triggers are included by default (Physics.queriesHitTriggers), which the
+            // remote-player hitbox relies on.
             RaycastHit[] hits = Physics.SphereCastAll(previous, 0.06f, direction, distance, ~0);
 
             float best = distance;
@@ -134,7 +136,12 @@ namespace RakeMultiplayer
             for (int i = 0; i < hits.Length; i++)
             {
                 RaycastHit hit = hits[i];
-                if (hit.collider == null || hit.collider.isTrigger) continue;
+                if (hit.collider == null) continue;
+
+                // Remote players expose their PvP hitbox as a trigger (it must not block
+                // movement). Every other trigger (pickups, traps, zones) is not a target.
+                if (hit.collider.isTrigger &&
+                    hit.collider.GetComponentInParent<NetworkedPlayer>() == null) continue;
 
                 if (IsOwnerCollider(hit.collider)) continue;
                 if (hit.distance >= best) continue;

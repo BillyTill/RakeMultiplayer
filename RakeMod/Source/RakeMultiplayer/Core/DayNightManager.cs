@@ -195,7 +195,7 @@ namespace RakeMultiplayer
 
             _phaseTimer = 0f;
 
-            RakeMultiplayerPlugin.Log?.LogInfo($"[DayNightManager] Phase transition: {_currentPhase}, Night #{_nightNumber + 1}");
+            RakeMultiplayerPlugin.Log?.LogInfo($"[DayNightManager] Phase transition: {_currentPhase}, Night #{_nightNumber}");
 
             // Start lighting transition
             _lightTransitionTimer = 0f;

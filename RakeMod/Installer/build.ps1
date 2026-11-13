@@ -13,6 +13,16 @@ $pluginsSrc = Join-Path $root "Rake\BepInEx\plugins"
 $pluginsDst = Join-Path $staging "BepInEx\plugins"
 New-Item -ItemType Directory -Force -Path $pluginsDst | Out-Null
 
+# Always build the DLL that goes into the installer. Packing whatever happens to sit in
+# the game folder could ship a stale/Debug build (the old script never built anything).
+$project = Join-Path $root "RakeMod\Source\RakeMultiplayer\RakeMultiplayer.csproj"
+& dotnet build $project -c Release -p:SkipCopyToGame=true | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "dotnet build failed with $LASTEXITCODE" }
+
+$dllSrc = Join-Path $root "RakeMod\Source\RakeMultiplayer\bin\Release\net35\RakeMultiplayer.dll"
+if (!(Test-Path $dllSrc)) { throw "missing $dllSrc" }
+"dll: $((Get-Item $dllSrc).Length) bytes  sha256=$((Get-FileHash $dllSrc -Algorithm SHA256).Hash)"
+
 $files = @(
     "RakeMultiplayer.dll",
     "Telepathy.dll",
@@ -23,7 +33,8 @@ $files = @(
 )
 
 foreach ($f in $files) {
-    $src = Join-Path $pluginsSrc $f
+    if ($f -eq "RakeMultiplayer.dll") { $src = $dllSrc }
+    else { $src = Join-Path $pluginsSrc $f }
     if (!(Test-Path $src)) { throw "missing $src" }
     Copy-Item $src $pluginsDst -Force
 }

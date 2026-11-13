@@ -126,7 +126,7 @@ namespace RakeMultiplayer.Networking
         {
             PlayerId = reader.ReadInt32();
             Amount = reader.ReadInt32();
-            DamageType = reader.ReadString();
+            DamageType = PacketSerializer.ReadSafeString(reader);
             SourcePosition = new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
         }
     }
@@ -194,17 +194,21 @@ namespace RakeMultiplayer.Networking
 
         public int DoorId;
         public int SenderId;
+        /// <summary>Target doorState (0 = open, 1 = closed).</summary>
+        public int DoorState;
 
         public override void Write(BinaryWriter writer)
         {
             writer.Write(DoorId);
             writer.Write(SenderId);
+            writer.Write(DoorState);
         }
 
         public override void Read(BinaryReader reader)
         {
             DoorId = reader.ReadInt32();
             SenderId = reader.ReadInt32();
+            DoorState = reader.ReadInt32();
         }
     }
 
@@ -312,7 +316,7 @@ namespace RakeMultiplayer.Networking
             Kind = reader.ReadByte();
             TargetPlayerId = reader.ReadInt32();
             Amount = reader.ReadInt32();
-            DamageType = reader.ReadString();
+            DamageType = PacketSerializer.ReadSafeString(reader);
             RakePosition = new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
             FocusPosition = new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
             TargetPosition = new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
@@ -459,7 +463,7 @@ namespace RakeMultiplayer.Networking
             ShooterId = reader.ReadInt32();
             TargetId = reader.ReadInt32();
             Amount = reader.ReadInt32();
-            DamageType = reader.ReadString();
+            DamageType = PacketSerializer.ReadSafeString(reader);
             ShooterPosition = new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
             Direction = new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
             Pellets = reader.ReadByte();
@@ -549,7 +553,7 @@ namespace RakeMultiplayer.Networking
         {
             PlayerId = reader.ReadInt32();
             ItemNetworkId = reader.ReadInt32();
-            ItemType = reader.ReadString();
+            ItemType = PacketSerializer.ReadSafeString(reader);
         }
     }
 
@@ -576,7 +580,7 @@ namespace RakeMultiplayer.Networking
         {
             ItemNetworkId = reader.ReadInt32();
             PickerId = reader.ReadInt32();
-            ItemType = reader.ReadString();
+            ItemType = PacketSerializer.ReadSafeString(reader);
         }
     }
 
@@ -608,7 +612,7 @@ namespace RakeMultiplayer.Networking
             PlayerId = reader.ReadInt32();
             ItemNetworkId = reader.ReadInt32();
             Success = reader.ReadBoolean();
-            Reason = reader.ReadString();
+            Reason = PacketSerializer.ReadSafeString(reader);
         }
     }
 
@@ -644,7 +648,7 @@ namespace RakeMultiplayer.Networking
             IsSetup = reader.ReadBoolean();
             IsResult = reader.ReadBoolean();
             Approved = reader.ReadBoolean();
-            Reason = reader.ReadString();
+            Reason = PacketSerializer.ReadSafeString(reader);
         }
     }
 
@@ -730,7 +734,7 @@ namespace RakeMultiplayer.Networking
             RemainingCount = reader.ReadInt32();
             IsActive = reader.ReadBoolean();
             PickerId = reader.ReadInt32();
-            ItemType = reader.ReadString();
+            ItemType = PacketSerializer.ReadSafeString(reader);
         }
     }
 

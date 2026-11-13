@@ -6,12 +6,19 @@ namespace RakeMultiplayer
 {
     /// <summary>
     /// Syncs Door_obj open/close. Doors are scene objects on every peer, so they only
-    /// need a stable id (sorted by position then name, like items) and an action replay.
+    /// need a stable id (sorted by position then name, like items) and the *target state*.
+    ///
+    /// The old protocol replayed "Action()" and nothing else, so two fast presses, a press
+    /// during the 1 s animation, or a late joiner produced a permanently desynced door.
     /// </summary>
     internal static class DoorSync
     {
         private static readonly Dictionary<int, Door_obj> _byId = new Dictionary<int, Door_obj>();
         private static readonly Dictionary<Door_obj, int> _idByDoor = new Dictionary<Door_obj, int>();
+
+        // doorId -> wanted state, applied as soon as the door finishes its animation
+        private static readonly Dictionary<int, KeyValuePair<int, float>> _pending =
+            new Dictionary<int, KeyValuePair<int, float>>();
 
         /// <summary>True while a remote action is being replayed (never re-broadcast).</summary>
         public static bool IsApplying { get; private set; }
@@ -20,6 +27,7 @@ namespace RakeMultiplayer
         {
             _byId.Clear();
             _idByDoor.Clear();
+            _pending.Clear();
 
             var doors = UnityEngine.Object.FindObjectsOfType<Door_obj>();
             System.Array.Sort(doors, (a, b) =>
@@ -44,7 +52,7 @@ namespace RakeMultiplayer
             RakeMultiplayerPlugin.Log?.LogInfo("[Door] Registered " + _byId.Count + " doors");
         }
 
-        /// <summary>The local player used a door: tell everyone else.</summary>
+        /// <summary>The local player used a door: send the resulting state.</summary>
         public static void OnLocalAction(Door_obj door)
         {
             if (IsApplying || door == null) return;
@@ -59,7 +67,8 @@ namespace RakeMultiplayer
             var packet = new DoorActionPacket
             {
                 DoorId = id,
-                SenderId = local != null ? local.PlayerId : (RakeMultiplayerPlugin.isServer ? 1 : 0)
+                SenderId = local != null ? local.PlayerId : (RakeMultiplayerPlugin.isServer ? 1 : 0),
+                DoorState = (int)door.doorState
             };
 
             var manager = RakeNetworkManager.Instance;
@@ -72,7 +81,7 @@ namespace RakeMultiplayer
         /// <summary>Server: a client used a door. Apply here and relay to everyone.</summary>
         public static void HandleServerRequest(DoorActionPacket packet)
         {
-            ApplyLocal(packet.DoorId);
+            ApplyState(packet.DoorId, packet.DoorState);
             RakeNetworkManager.Instance?.ServerBroadcast(packet.Serialize());
         }
 
@@ -81,19 +90,79 @@ namespace RakeMultiplayer
         {
             var spawner = PlayerSpawner.Instance;
             var local = spawner != null ? spawner.LocalPlayer : null;
-            if (local != null && local.PlayerId == packet.SenderId) return; // already applied locally
+            if (local != null && local.PlayerId != 0 && local.PlayerId == packet.SenderId) return;
 
-            ApplyLocal(packet.DoorId);
+            ApplyState(packet.DoorId, packet.DoorState);
         }
 
-        private static void ApplyLocal(int doorId)
+        /// <summary>Late join: the server sends the current state of every door.</summary>
+        public static void SendSnapshotToPlayer(int playerId)
+        {
+            var manager = RakeNetworkManager.Instance;
+            if (manager == null) return;
+
+            foreach (var pair in _byId)
+            {
+                if (pair.Value == null) continue;
+                var packet = new DoorActionPacket
+                {
+                    DoorId = pair.Key,
+                    SenderId = 1,
+                    DoorState = (int)pair.Value.doorState
+                };
+                manager.ServerSendToPlayer(playerId, packet.Serialize());
+            }
+        }
+
+        /// <summary>Retry pending states (Action is ignored while the door animates).</summary>
+        public static void Update()
+        {
+            if (_pending.Count == 0) return;
+
+            var done = new List<int>();
+            var keys = new List<int>(_pending.Keys);
+            for (int i = 0; i < keys.Count; i++)
+            {
+                int doorId = keys[i];
+                Door_obj door;
+                if (!_byId.TryGetValue(doorId, out door) || door == null)
+                {
+                    done.Add(doorId);
+                    continue;
+                }
+
+                int wanted = _pending[doorId].Key;
+                float deadline = _pending[doorId].Value;
+
+                if ((int)door.doorState == wanted)
+                {
+                    done.Add(doorId);
+                    continue;
+                }
+
+                if (Time.time > deadline)
+                {
+                    done.Add(doorId);
+                    RakeMultiplayerPlugin.Log?.LogWarning("[Door] state sync timed out for door " + doorId);
+                    continue;
+                }
+
+                IsApplying = true;
+                try { door.Action(); }
+                finally { IsApplying = false; }
+            }
+
+            for (int i = 0; i < done.Count; i++) _pending.Remove(done[i]);
+        }
+
+        private static void ApplyState(int doorId, int state)
         {
             Door_obj door;
             if (!_byId.TryGetValue(doorId, out door) || door == null) return;
 
-            IsApplying = true;
-            try { door.Action(); }
-            finally { IsApplying = false; }
+            if ((int)door.doorState == state && !_pending.ContainsKey(doorId)) return;
+
+            _pending[doorId] = new KeyValuePair<int, float>(state, Time.time + 3f);
         }
     }
 }

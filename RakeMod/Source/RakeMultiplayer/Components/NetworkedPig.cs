@@ -118,8 +118,9 @@ namespace RakeMultiplayer
         {
             AssignDeterministicId();
 
-            // Clients must never run the animal AI - the server is authoritative
-            if (!RakeMultiplayerPlugin.isServer)
+            // Clients must never run the animal AI - the server is authoritative.
+            // In single-player (not connected) the vanilla AI must keep running.
+            if (RakeMultiplayerPlugin.isConnected && !RakeMultiplayerPlugin.isServer)
             {
                 if (_agent != null) _agent.enabled = false;
                 if (_animal != null) _animal.enabled = false;

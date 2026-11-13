@@ -77,7 +77,7 @@ namespace RakeMultiplayer
         private void Update()
         {
             // Open with `; close with Escape or 'quit' inside the console.
-            if (!_open && Input.GetKeyDown(KeyCode.BackQuote))
+            if (!_open && !UI.MultiplayerMenu.IsOpen && Input.GetKeyDown(KeyCode.BackQuote))
             {
                 Open();
             }
@@ -681,6 +681,11 @@ namespace RakeMultiplayer
             _open = true;
             _focusInput = true;
             _scrollToBottom = true;
+
+            // The console has clickable suggestions and a text caret, so it needs the mouse.
+            Cursor.lockState = CursorLockMode.None;
+            Cursor.visible = true;
+
             Print("console opened - 'help' for commands, Escape to close");
         }
 
@@ -688,6 +693,20 @@ namespace RakeMultiplayer
         {
             _open = false;
             _input = string.Empty;
+
+            // Give the mouse back to the game, but only in a match and only when no other
+            // modal UI (F1 menu) is still open.
+            if (!UI.MultiplayerMenu.IsOpen && IsGameplayScene())
+            {
+                Cursor.lockState = CursorLockMode.Locked;
+                Cursor.visible = false;
+            }
+        }
+
+        private static bool IsGameplayScene()
+        {
+            string scene = Application.loadedLevelName;
+            return !string.IsNullOrEmpty(scene) && scene.StartsWith("level");
         }
 
         private void HistoryPrev()
@@ -933,6 +952,7 @@ namespace RakeMultiplayer
         private static bool _console;
         private static bool _camera;
         private static bool _ragdoll;
+        private static bool _menu;
         private static bool _applied;
 
         private static CameraMouseLook _look;
@@ -943,6 +963,12 @@ namespace RakeMultiplayer
         public static void SetConsole(bool active)
         {
             _console = active;
+            Apply();
+        }
+
+        public static void SetMenu(bool active)
+        {
+            _menu = active;
             Apply();
         }
 
@@ -970,7 +996,7 @@ namespace RakeMultiplayer
             Apply();
 
             // Another lock (console / debug camera) still owns the input.
-            if (_console || _camera) return;
+            if (_console || _camera || _menu) return;
 
             var spawner = PlayerSpawner.Instance;
             var local = spawner != null ? spawner.LocalPlayer : null;
@@ -988,7 +1014,7 @@ namespace RakeMultiplayer
 
         private static void Apply()
         {
-            bool locked = _console || _camera || _ragdoll;
+            bool locked = _console || _camera || _ragdoll || _menu;
             if (locked == _applied) return;
 
             if (locked)

@@ -72,7 +72,13 @@ namespace RakeMultiplayer
         {
             if (_remotePlayers.ContainsKey(playerId))
             {
-                RakeMultiplayerPlugin.Log?.LogWarning($"[3.3] Remote player {playerId} already spawned");
+                // The proxy already exists (late PlayerConnected, scene reload). Apply the
+                // position instead of dropping it: the old code discarded the real position
+                // and the body lerped across the whole map from (2*id, 0, 0).
+                if (_remotePlayers[playerId] != null)
+                {
+                    _remotePlayers[playerId].ApplyPositionImmediate(spawnPosition);
+                }
                 return;
             }
 

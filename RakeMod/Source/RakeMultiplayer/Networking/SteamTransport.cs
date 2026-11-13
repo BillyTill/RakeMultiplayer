@@ -16,7 +16,7 @@ namespace RakeMultiplayer.Networking
         private readonly Dictionary<int, ulong> _steamByConn = new Dictionary<int, ulong>();
         private readonly Dictionary<ulong, int> _connBySteam = new Dictionary<ulong, int>();
         private readonly Queue<NetMessage> _queue = new Queue<NetMessage>();
-        private readonly byte[] _buffer = new byte[65536];
+        private byte[] _buffer = new byte[65536];
 
         private bool _active;
         private int _nextConn;
@@ -26,7 +26,10 @@ namespace RakeMultiplayer.Networking
         public bool Start(int port)
         {
             _active = true;
-            _nextConn = 0;
+            // Conn 0 is the client-side channel to the host. Server-side peers must
+            // start at 1, because the player id is derived as connectionId + 1 and
+            // host = 1 (otherwise the first Steam client became the host).
+            _nextConn = 1;
             Current = this;
             _steamByConn.Clear();
             _connBySteam.Clear();
@@ -123,6 +126,19 @@ namespace RakeMultiplayer.Networking
                 uint available;
                 while (SteamNative.IsPacketAvailable(out available, channel))
                 {
+                    // ReadP2PPacket refuses to dequeue a message larger than destSize, so an
+                    // oversized packet used to stay in the channel forever and silently
+                    // killed the whole session. Grow the buffer to fit it.
+                    if (available > (uint)_buffer.Length)
+                    {
+                        if (available > 8u * 1024u * 1024u)
+                        {
+                            RakeMultiplayerPlugin.Log?.LogWarning("[Steam] receiving a huge packet: " +
+                                                                 available + " bytes");
+                        }
+                        _buffer = new byte[available];
+                    }
+
                     uint size;
                     ulong remote;
                     if (!SteamNative.ReadPacket(_buffer, out size, out remote, channel)) break;
@@ -151,7 +167,7 @@ namespace RakeMultiplayer.Networking
         public static SteamClientTransport Current { get; private set; }
 
         private readonly Queue<NetMessage> _queue = new Queue<NetMessage>();
-        private readonly byte[] _buffer = new byte[65536];
+        private byte[] _buffer = new byte[65536];
 
         private ulong _owner;
         private bool _connected;
@@ -234,6 +250,19 @@ namespace RakeMultiplayer.Networking
                 uint available;
                 while (SteamNative.IsPacketAvailable(out available, channel))
                 {
+                    // ReadP2PPacket refuses to dequeue a message larger than destSize, so an
+                    // oversized packet used to stay in the channel forever and silently
+                    // killed the whole session. Grow the buffer to fit it.
+                    if (available > (uint)_buffer.Length)
+                    {
+                        if (available > 8u * 1024u * 1024u)
+                        {
+                            RakeMultiplayerPlugin.Log?.LogWarning("[Steam] receiving a huge packet: " +
+                                                                 available + " bytes");
+                        }
+                        _buffer = new byte[available];
+                    }
+
                     uint size;
                     ulong remote;
                     if (!SteamNative.ReadPacket(_buffer, out size, out remote, channel)) break;

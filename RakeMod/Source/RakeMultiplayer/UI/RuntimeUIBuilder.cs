@@ -303,6 +303,32 @@ namespace RakeMultiplayer.UI
 
             _steamP2PToggle = CreateToggle(_settingsPanel.transform, "SteamP2PToggle", "Use Steam P2P", false, new Vector2(0, 30));
 
+            // These controls used to be decorative: nothing read their values.
+            _playerNameInputField.text = RakeMultiplayerPlugin.PlayerName.Value;
+            _playerNameInputField.onEndEdit.AddListener(value =>
+            {
+                string trimmed = (value ?? string.Empty).Trim();
+                if (trimmed.Length == 0) trimmed = "Player";
+                RakeMultiplayerPlugin.PlayerName.Value = trimmed;
+                _playerNameInputField.text = trimmed;
+            });
+
+            _maxPlayersInputField.text = RakeMultiplayerPlugin.MaxPlayers.Value.ToString();
+            _maxPlayersInputField.onEndEdit.AddListener(value =>
+            {
+                int parsed;
+                if (!int.TryParse(value, out parsed)) parsed = RakeMultiplayerPlugin.MaxPlayers.Value;
+                parsed = Mathf.Clamp(parsed, 2, 4);
+                RakeMultiplayerPlugin.MaxPlayers.Value = parsed;
+                _maxPlayersInputField.text = parsed.ToString();
+            });
+
+            _steamP2PToggle.isOn = RakeMultiplayerPlugin.UseSteamP2P.Value;
+            _steamP2PToggle.onValueChanged.AddListener(value =>
+            {
+                RakeMultiplayerPlugin.UseSteamP2P.Value = value;
+            });
+
             CreateButton(_settingsPanel.transform, "SettingsBackBtn", "BACK", new Vector2(460, 48), new Vector2(0, -62), OnBackToMultiplayerClicked, ColPanelLight);
         }
         // ------------------------------------------------------------- steam panels
@@ -845,8 +871,10 @@ namespace RakeMultiplayer.UI
         {
             if (_canvas == null) return;
 
+            // The HUD panel spans y -10..-110; the bar sits below it so the label does
+            // not print over the night timer (the old -100 overlapped it exactly).
             _rakeHpPanel = CreatePanel(_canvas.transform, "RakeHealthPanel", new Vector2(460, 40),
-                new Vector2(0f, -100f), new Vector2(0.5f, 1f), new Vector2(0.5f, 1f));
+                new Vector2(0f, -160f), new Vector2(0.5f, 1f), new Vector2(0.5f, 1f));
             _rakeHpPanel.GetComponent<Image>().color = new Color(0f, 0f, 0f, 0f);
 
             _rakeHpLabel = CreateText(_rakeHpPanel.transform, "RakeName", "THE RAKE", 12,
@@ -867,6 +895,9 @@ namespace RakeMultiplayer.UI
             _rakeHpFill = fillObj.GetComponent<Image>();
             _rakeHpFill.color = ColAccent;
 
+            // Menu panels are siblings created before this one: draw the bar behind
+            // them so it never covers the F1 menu buttons.
+            _rakeHpPanel.transform.SetAsFirstSibling();
             _rakeHpPanel.SetActive(false);
         }
 
@@ -922,7 +953,7 @@ namespace RakeMultiplayer.UI
             var map = MapUI.Create(_canvas);
             if (map != null)
             {
-                RakeMultiplayerPlugin.Log?.LogInfo("[UI] MapUI integrated (toggle with M)");
+                RakeMultiplayerPlugin.Log?.LogInfo("[UI] MapUI integrated (toggle with F3)");
             }
         }
 
