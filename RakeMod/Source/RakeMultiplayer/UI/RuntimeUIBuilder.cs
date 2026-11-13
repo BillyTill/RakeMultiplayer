@@ -31,6 +31,14 @@ namespace RakeMultiplayer.UI
         private GameObject _lobbyPanel;
         private GameObject _settingsPanel;
         private GameObject _joinGamePanel;
+        private GameObject _displayPanel;
+        private Text _displayResText;
+        private Text _displayModeText;
+        private Text _displayRefreshText;
+        private Text _displayQualityText;
+        private Text _displayVSyncText;
+        private Text _displayAAText;
+        private Text _displayStatusText;
 
         private GameObject _steamPanel;
         private GameObject _steamCreatePanel;
@@ -101,27 +109,30 @@ namespace RakeMultiplayer.UI
 
         private void BuildUI()
         {
+            MenuSkin.Init();
+
             var canvasObj = new GameObject("MultiplayerUICanvas");
             UnityEngine.Object.DontDestroyOnLoad(canvasObj);
             _canvas = canvasObj.AddComponent<Canvas>();
             _canvas.renderMode = RenderMode.ScreenSpaceOverlay;
             _canvas.sortingOrder = 32000;
-            RakeMultiplayerPlugin.Log?.LogInfo("[UI] Canvas created (sortingOrder=32000)");
 
             var scaler = canvasObj.AddComponent<CanvasScaler>();
             scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
             scaler.referenceResolution = new Vector2(1920, 1080);
             scaler.screenMatchMode = CanvasScaler.ScreenMatchMode.MatchWidthOrHeight;
+            scaler.matchWidthOrHeight = 0.5f;
 
             canvasObj.AddComponent<GraphicRaycaster>();
 
-            _mainContainer = CreatePanel(canvasObj.transform, "MainContainer", new Vector2(760, 840), Vector2.zero,
-                new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f));
-            _mainContainer.GetComponent<Image>().color = ColBg;
+            _mainContainer = CreatePanel(canvasObj.transform, "MainContainer", Vector2.zero, Vector2.zero, Vector2.zero, Vector2.one);
+            var mainBg = _mainContainer.GetComponent<Image>();
+            mainBg.color = new Color(0f, 0f, 0f, 0f);
             _mainContainer.SetActive(false);
 
-            AddTopBar(_mainContainer.transform, ColAccent, 4f);
-            AddPanelAnimation(_mainContainer, 0f, true);
+            AddBackdropScrim(_mainContainer.transform);
+
+            DisplaySettings.Load();
 
             BuildMainMenu();
             BuildHostPanel();
@@ -129,9 +140,48 @@ namespace RakeMultiplayer.UI
             BuildJoinPanel();
             BuildLobbyPanel();
             BuildSettingsPanel();
+            BuildDisplayPanel();
             BuildSteamPanels();
 
             _menu.SetMainContainer(_mainContainer);
+            RakeMultiplayerPlugin.Log?.LogInfo("[UI] RuntimeUIBuilder initialized. Canvas created.");
+        }
+
+        private static void AddBackdropScrim(Transform parent)
+        {
+            var obj = new GameObject("BackdropScrim", typeof(RectTransform), typeof(Image));
+            obj.transform.SetParent(parent, false);
+            var rt = obj.GetComponent<RectTransform>();
+            rt.anchorMin = Vector2.zero;
+            rt.anchorMax = Vector2.one;
+            rt.offsetMin = Vector2.zero;
+            rt.offsetMax = Vector2.zero;
+            var img = obj.GetComponent<Image>();
+            img.color = new Color(0.015f, 0.012f, 0.008f, 0.46f);
+        }
+
+        private static void AddMenuBoard(Transform parent, Vector2 size, Vector2 pos)
+        {
+            MenuSkin.Init();
+            var obj = new GameObject("MenuBoard", typeof(RectTransform), typeof(Image));
+            obj.transform.SetParent(parent, false);
+            var rt = obj.GetComponent<RectTransform>();
+            rt.sizeDelta = size;
+            rt.anchoredPosition = pos;
+            var img = obj.GetComponent<Image>();
+            img.sprite = MenuSkin.Plate;
+            img.color = new Color(0.19f, 0.17f, 0.14f, 0.88f);
+            var shadow = obj.AddComponent<Shadow>();
+            shadow.effectColor = new Color(0f, 0f, 0f, 0.6f);
+            shadow.effectDistance = new Vector2(10f, -12f);
+            rt.localEulerAngles = new Vector3(0f, 0f, -0.7f);
+        }
+
+        private static void SetCardTilt(Button button, Vector3 angles)
+        {
+            if (button == null) return;
+            var tilt = button.GetComponent<MenuCardTilt>();
+            if (tilt != null) tilt.SetRestAngles(angles);
         }
 
         // ------------------------------------------------------------------ panels
@@ -140,25 +190,37 @@ namespace RakeMultiplayer.UI
         {
             _mainMenuPanel = CreatePanel(_mainContainer.transform, "MainMenuPanel", new Vector2(0, 0), Vector2.zero, Vector2.zero, Vector2.one);
             _mainMenuPanel.GetComponent<Image>().color = new Color(0f, 0f, 0f, 0f);
-            AddPanelAnimation(_mainMenuPanel, 16f);
+            AddPanelAnimation(_mainMenuPanel, 20f);
 
-            CreateText(_mainMenuPanel.transform, "Kicker", "RAKE", 14, new Vector2(0, 344), ColAccent, TextAnchor.MiddleCenter);
-            CreateTitle(_mainMenuPanel.transform, "MULTIPLAYER", 40, new Vector2(0, 306));
-            CreateText(_mainMenuPanel.transform, "Tagline", "THE HUNT BEGINS WITH YOU", 14, new Vector2(0, 266), ColMuted, TextAnchor.MiddleCenter);
+            CreateText(_mainMenuPanel.transform, "Kicker", "RAKE  ·  SESSION CONTROL", 14,
+                new Vector2(0, 470), new Color(0.72f, 0.82f, 0.58f, 0.9f), TextAnchor.MiddleCenter);
+            CreateTitle(_mainMenuPanel.transform, "MULTIPLAYER", 62, new Vector2(0, 400));
+            CreateText(_mainMenuPanel.transform, "Tagline", "One Rake. Three hunters. A very dark woods.", 24,
+                new Vector2(0, 325), ColMuted, TextAnchor.MiddleCenter, 1000f);
+            CreateText(_mainMenuPanel.transform, "Ready", "READY  ·  LAN / STEAM", 13,
+                new Vector2(0, 284), ColOk, TextAnchor.MiddleCenter);
 
-            CreateSeparator(_mainMenuPanel.transform, 232f, 560f);
+            var host = CreateButton(_mainMenuPanel.transform, "HostGameBtn", "Host game", new Vector2(470, 160),
+                new Vector2(-250, 120), OnHostGameClicked);
+            SetCardTilt(host, new Vector3(0f, 0f, -1.6f));
 
-            CreateButton(_mainMenuPanel.transform, "HostGameBtn", "HOST GAME", new Vector2(460, 60), new Vector2(0, 152), OnHostGameClicked);
-            CreateButton(_mainMenuPanel.transform, "JoinGameBtn", "JOIN GAME", new Vector2(460, 60), new Vector2(0, 80), OnJoinGameClicked);
-            CreateButton(_mainMenuPanel.transform, "SettingsBtn", "SETTINGS", new Vector2(460, 60), new Vector2(0, 8), OnSettingsClicked);
-            CreateButton(_mainMenuPanel.transform, "ExitBtn", "EXIT TO GAME", new Vector2(460, 60), new Vector2(0, -64), OnExitClicked, ColPanelLight);
+            var join = CreateButton(_mainMenuPanel.transform, "JoinGameBtn", "Join game", new Vector2(300, 300),
+                new Vector2(270, 50), OnJoinGameClicked);
+            SetCardTilt(join, new Vector3(0f, 0f, 1.0f));
 
-            CreateSeparator(_mainMenuPanel.transform, -140f, 560f);
+            var settings = CreateButton(_mainMenuPanel.transform, "SettingsBtn", "Settings", new Vector2(220, 220),
+                new Vector2(315, -260), OnSettingsClicked);
+            SetCardTilt(settings, new Vector3(0f, 0f, -1.3f));
+
+            var exit = CreateButton(_mainMenuPanel.transform, "ExitBtn", "Exit to game", new Vector2(300, 82),
+                new Vector2(0, -380), OnExitClicked);
+            SetCardTilt(exit, new Vector3(0f, 0f, -0.4f));
 
             CreateText(_mainMenuPanel.transform, "Hint",
-                "F1 - menu   |   Tab - cameras   |   1 Rake + up to 3 hunters", 12, new Vector2(0, -184), ColMuted, TextAnchor.MiddleCenter, 620);
-            CreateText(_mainMenuPanel.transform, "Version", PluginInfo.NAME + "  v" + PluginInfo.VERSION, 11,
-                new Vector2(0, -216), new Color(0.35f, 0.33f, 0.30f, 1f), TextAnchor.MiddleCenter);
+                "F1 - menu   |   Tab - cameras   |   1 Rake + up to 3 hunters", 18,
+                new Vector2(0, -450), ColMuted, TextAnchor.MiddleCenter, 900f);
+            CreateText(_mainMenuPanel.transform, "Version", PluginInfo.NAME + "  v" + PluginInfo.VERSION, 13,
+                new Vector2(0, -480), new Color(0.45f, 0.42f, 0.36f, 1f), TextAnchor.MiddleCenter);
         }
 
         private void BuildHostPanel()
@@ -167,6 +229,7 @@ namespace RakeMultiplayer.UI
             _hostPanel.GetComponent<Image>().color = new Color(0f, 0f, 0f, 0f);
             _hostPanel.SetActive(false);
             AddPanelAnimation(_hostPanel, 16f);
+            AddMenuBoard(_hostPanel.transform, new Vector2(920, 720), new Vector2(0, 24));
 
             CreateTitle(_hostPanel.transform, "CREATE LOBBY", 32, new Vector2(0, 322));
             CreateSeparator(_hostPanel.transform, 282f, 560f);
@@ -192,6 +255,7 @@ namespace RakeMultiplayer.UI
             _multiplayerPanel.GetComponent<Image>().color = new Color(0f, 0f, 0f, 0f);
             _multiplayerPanel.SetActive(false);
             AddPanelAnimation(_multiplayerPanel, 16f);
+            AddMenuBoard(_multiplayerPanel.transform, new Vector2(820, 680), new Vector2(0, 24));
 
             CreateTitle(_multiplayerPanel.transform, "CONNECTION", 32, new Vector2(0, 320));
             CreateSeparator(_multiplayerPanel.transform, 282f, 560f);
@@ -210,6 +274,7 @@ namespace RakeMultiplayer.UI
             _joinGamePanel.GetComponent<Image>().color = new Color(0f, 0f, 0f, 0f);
             _joinGamePanel.SetActive(false);
             AddPanelAnimation(_joinGamePanel, 16f);
+            AddMenuBoard(_joinGamePanel.transform, new Vector2(760, 760), new Vector2(0, 14));
 
             CreateTitle(_joinGamePanel.transform, "JOIN GAME", 32, new Vector2(0, 320));
             CreateSeparator(_joinGamePanel.transform, 282f, 560f);
@@ -234,6 +299,7 @@ namespace RakeMultiplayer.UI
             _lobbyPanel.GetComponent<Image>().color = new Color(0f, 0f, 0f, 0f);
             _lobbyPanel.SetActive(false);
             AddPanelAnimation(_lobbyPanel, 16f);
+            AddMenuBoard(_lobbyPanel.transform, new Vector2(1040, 860), new Vector2(0, 0));
 
             _lobbyTitleText = CreateTitle(_lobbyPanel.transform, "LOBBY", 32, new Vector2(0, 352));
             _lobbySubtitleText = CreateText(_lobbyPanel.transform, "LobbySubtitle", "HOST", 12, new Vector2(0, 324), ColMuted, TextAnchor.MiddleCenter);
@@ -251,7 +317,7 @@ namespace RakeMultiplayer.UI
             _playerListContainer = huntersFrame.transform;
             AddTopBar(huntersFrame.transform, ColAccentDim, 3f);
 
-            _playerListText = CreateText(huntersFrame.transform, "PlayerList", "1. HOST", 14, Vector2.zero,
+            _playerListText = CreateText(huntersFrame.transform, "PlayerList", "1. HOST", 20, Vector2.zero,
                 ColText, TextAnchor.UpperLeft, 292);
             var listRt = _playerListText.GetComponent<RectTransform>();
             listRt.anchorMin = Vector2.zero;
@@ -291,6 +357,7 @@ namespace RakeMultiplayer.UI
             _settingsPanel.GetComponent<Image>().color = new Color(0f, 0f, 0f, 0f);
             _settingsPanel.SetActive(false);
             AddPanelAnimation(_settingsPanel, 16f);
+            AddMenuBoard(_settingsPanel.transform, new Vector2(760, 760), new Vector2(0, 10));
 
             CreateTitle(_settingsPanel.transform, "SETTINGS", 32, new Vector2(0, 320));
             CreateSeparator(_settingsPanel.transform, 282f, 560f);
@@ -301,9 +368,15 @@ namespace RakeMultiplayer.UI
             CreateText(_settingsPanel.transform, "MaxLabel", "MAX PLAYERS (2-4)", 12, new Vector2(0, 138), ColMuted, TextAnchor.MiddleLeft, 460);
             _maxPlayersInputField = CreateInputField(_settingsPanel.transform, "MaxPlayersInput", "4", "4", new Vector2(460, 50), new Vector2(0, 102));
 
-            _steamP2PToggle = CreateToggle(_settingsPanel.transform, "SteamP2PToggle", "Use Steam P2P", false, new Vector2(0, 30));
+            _steamP2PToggle = CreateToggle(_settingsPanel.transform, "SteamP2PToggle", "Use Steam P2P", false, new Vector2(0, 20));
 
-            // These controls used to be decorative: nothing read their values.
+            var displayButton = CreateButton(_settingsPanel.transform, "DisplaySettingsBtn", "Display & graphics", new Vector2(460, 60),
+                new Vector2(0, -100), OnDisplayClicked);
+            SetCardTilt(displayButton, new Vector3(0f, 0f, -0.8f));
+
+            CreateButton(_settingsPanel.transform, "SettingsBackBtn", "Back", new Vector2(460, 52),
+                new Vector2(0, -190), OnBackToMainClicked, ColPanelLight);
+
             _playerNameInputField.text = RakeMultiplayerPlugin.PlayerName.Value;
             _playerNameInputField.onEndEdit.AddListener(value =>
             {
@@ -328,9 +401,82 @@ namespace RakeMultiplayer.UI
             {
                 RakeMultiplayerPlugin.UseSteamP2P.Value = value;
             });
-
-            CreateButton(_settingsPanel.transform, "SettingsBackBtn", "BACK", new Vector2(460, 48), new Vector2(0, -62), OnBackToMultiplayerClicked, ColPanelLight);
         }
+
+        private void BuildDisplayPanel()
+        {
+            _displayPanel = CreatePanel(_mainContainer.transform, "DisplayPanel", Vector2.zero, Vector2.zero, Vector2.zero, Vector2.one);
+            _displayPanel.GetComponent<Image>().color = new Color(0f, 0f, 0f, 0f);
+            _displayPanel.SetActive(false);
+            AddPanelAnimation(_displayPanel, 16f);
+            AddMenuBoard(_displayPanel.transform, new Vector2(900, 920), new Vector2(0, 0));
+
+            CreateTitle(_displayPanel.transform, "DISPLAY & GRAPHICS", 32, new Vector2(0, 388));
+            CreateText(_displayPanel.transform, "DisplaySub", "Changes are applied immediately and saved.", 18,
+                new Vector2(0, 338), ColMuted, TextAnchor.MiddleCenter, 760f);
+            CreateSeparator(_displayPanel.transform, 305f, 700f);
+
+            _displayResText = CreateDisplayRow(_displayPanel.transform, "Resolution", "RESOLUTION", 255,
+                delegate { DisplaySettings.CycleResolution(-1); RefreshDisplayUi(); },
+                delegate { DisplaySettings.CycleResolution(1); RefreshDisplayUi(); });
+
+            _displayModeText = CreateDisplayRow(_displayPanel.transform, "WindowMode", "WINDOW MODE", 165,
+                delegate { DisplaySettings.CycleFullscreen(); RefreshDisplayUi(); },
+                delegate { DisplaySettings.CycleFullscreen(); RefreshDisplayUi(); });
+
+            _displayRefreshText = CreateDisplayRow(_displayPanel.transform, "Refresh", "REFRESH RATE", 75,
+                delegate { DisplaySettings.CycleRefresh(-1); RefreshDisplayUi(); },
+                delegate { DisplaySettings.CycleRefresh(1); RefreshDisplayUi(); });
+
+            _displayQualityText = CreateDisplayRow(_displayPanel.transform, "Quality", "GRAPHICS QUALITY", -15,
+                delegate { DisplaySettings.CycleQuality(-1); RefreshDisplayUi(); },
+                delegate { DisplaySettings.CycleQuality(1); RefreshDisplayUi(); });
+
+            _displayVSyncText = CreateDisplayRow(_displayPanel.transform, "VSync", "V-SYNC", -105,
+                delegate { DisplaySettings.CycleVSync(-1); RefreshDisplayUi(); },
+                delegate { DisplaySettings.CycleVSync(1); RefreshDisplayUi(); });
+
+            _displayAAText = CreateDisplayRow(_displayPanel.transform, "AntiAliasing", "ANTI-ALIASING", -195,
+                delegate { DisplaySettings.CycleAntiAliasing(-1); RefreshDisplayUi(); },
+                delegate { DisplaySettings.CycleAntiAliasing(1); RefreshDisplayUi(); });
+
+            _displayStatusText = CreateText(_displayPanel.transform, "DisplayStatus", "", 16,
+                new Vector2(0, -255), ColOk, TextAnchor.MiddleCenter, 700f);
+
+            CreateButton(_displayPanel.transform, "DisplayApplyBtn", "Apply & save", new Vector2(460, 72),
+                new Vector2(0, -325), OnDisplayApplyClicked);
+
+            CreateButton(_displayPanel.transform, "DisplayBackBtn", "Back to settings", new Vector2(460, 54),
+                new Vector2(0, -410), OnSettingsClicked, ColPanelLight);
+
+            RefreshDisplayUi();
+        }
+
+        private Text CreateDisplayRow(Transform parent, string name, string label, float y, UnityAction previous, UnityAction next)
+        {
+            CreateText(parent, name + "Label", label, 12, new Vector2(0, y + 40), ColMuted, TextAnchor.MiddleCenter, 620);
+            CreateButton(parent, name + "Prev", "<", new Vector2(68, 54), new Vector2(-300, y), previous);
+            CreateButton(parent, name + "Next", ">", new Vector2(68, 54), new Vector2(300, y), next);
+            return CreateText(parent, name + "Value", "", 28, new Vector2(0, y), ColText, TextAnchor.MiddleCenter, 470);
+        }
+
+        public void RefreshDisplayUi()
+        {
+            if (_displayResText != null) _displayResText.text = DisplaySettings.ResolutionLabel;
+            if (_displayModeText != null) _displayModeText.text = DisplaySettings.ModeLabel;
+            if (_displayRefreshText != null) _displayRefreshText.text = DisplaySettings.RefreshLabel;
+            if (_displayQualityText != null) _displayQualityText.text = DisplaySettings.QualityLabel;
+            if (_displayVSyncText != null) _displayVSyncText.text = DisplaySettings.VSyncLabel;
+            if (_displayAAText != null) _displayAAText.text = DisplaySettings.AntiAliasingLabel;
+        }
+
+        private void OnDisplayApplyClicked()
+        {
+            DisplaySettings.SaveAndApply();
+            if (_displayStatusText != null) _displayStatusText.text = "Applied and saved.";
+            RefreshDisplayUi();
+        }
+
         // ------------------------------------------------------------- steam panels
 
         private void BuildSteamPanels()
@@ -341,6 +487,7 @@ namespace RakeMultiplayer.UI
             _steamPanel.GetComponent<Image>().color = new Color(0f, 0f, 0f, 0f);
             _steamPanel.SetActive(false);
             AddPanelAnimation(_steamPanel, 16f);
+            AddMenuBoard(_steamPanel.transform, new Vector2(900, 760), new Vector2(0, 10));
 
             CreateTitle(_steamPanel.transform, "STEAM", 32, new Vector2(0, 330));
             _steamMainStatus = CreateText(_steamPanel.transform, "SteamStatus", "Steam ready", 12,
@@ -363,6 +510,7 @@ namespace RakeMultiplayer.UI
             _steamCreatePanel.GetComponent<Image>().color = new Color(0f, 0f, 0f, 0f);
             _steamCreatePanel.SetActive(false);
             AddPanelAnimation(_steamCreatePanel, 16f);
+            AddMenuBoard(_steamCreatePanel.transform, new Vector2(860, 760), new Vector2(0, 10));
 
             CreateTitle(_steamCreatePanel.transform, "CREATE LOBBY", 32, new Vector2(0, 330));
             CreateSeparator(_steamCreatePanel.transform, 292f, 560f);
@@ -394,6 +542,7 @@ namespace RakeMultiplayer.UI
             _steamBrowsePanel.GetComponent<Image>().color = new Color(0f, 0f, 0f, 0f);
             _steamBrowsePanel.SetActive(false);
             AddPanelAnimation(_steamBrowsePanel, 16f);
+            AddMenuBoard(_steamBrowsePanel.transform, new Vector2(980, 840), new Vector2(0, 0));
 
             CreateTitle(_steamBrowsePanel.transform, "LOBBIES", 32, new Vector2(0, 330));
             _steamBrowseStatus = CreateText(_steamBrowsePanel.transform, "SteamBrowseStatus", "", 12,
@@ -421,6 +570,7 @@ namespace RakeMultiplayer.UI
             _steamPasswordPanel.GetComponent<Image>().color = new Color(0f, 0f, 0f, 0f);
             _steamPasswordPanel.SetActive(false);
             AddPanelAnimation(_steamPasswordPanel, 16f);
+            AddMenuBoard(_steamPasswordPanel.transform, new Vector2(760, 680), new Vector2(0, 20));
 
             CreateTitle(_steamPasswordPanel.transform, "JOIN LOBBY", 32, new Vector2(0, 330));
             _steamPasswordTitle = CreateText(_steamPasswordPanel.transform, "SteamJoinTitle", "", 13,
@@ -539,7 +689,8 @@ namespace RakeMultiplayer.UI
         private void OnCreateSteamClicked() { if (_menu != null) _menu.ShowSteamCreate(); }
         private void OnJoinGameClicked() { if (_menu != null) _menu.ShowMultiplayerPanel(); }
         private void OnSettingsClicked() { if (_menu != null) _menu.ShowSettings(); }
-        private void OnExitClicked() { if (_menu != null) _menu.ToggleMenu(); }
+        private void OnExitClicked() { if (_menu != null) _menu.OnExitButton(); }
+        private void OnDisplayClicked() { if (_menu != null) _menu.ShowDisplay(); }
         private void OnLANClicked() { if (_menu != null) _menu.OnLAN(); }
         private void OnOnlineClicked() { if (_menu != null) _menu.OnOnline(); }
         private void OnBackToMainClicked() { if (_menu != null) _menu.OnBackToMain(); }
@@ -589,29 +740,30 @@ namespace RakeMultiplayer.UI
             bar.GetComponent<Image>().color = color;
         }
 
-        private Text CreateTitle(Transform parent, string text, int fontSize, Vector2 anchoredPos)
-        {
-            return CreateText(parent, "Title", text, fontSize, anchoredPos, ColText, TextAnchor.MiddleCenter);
-        }
-
         private Text CreateText(Transform parent, string name, string text, int fontSize, Vector2 anchoredPos, Color color,
             TextAnchor alignment = TextAnchor.MiddleCenter, float width = 460f)
         {
+            MenuSkin.Init();
             var obj = new GameObject(name, typeof(RectTransform));
             obj.transform.SetParent(parent, false);
             var rt = obj.GetComponent<RectTransform>();
-            rt.sizeDelta = new Vector2(width, fontSize + 14);
+            rt.sizeDelta = new Vector2(width, fontSize + 16);
             rt.anchoredPosition = anchoredPos;
             var txt = obj.AddComponent<Text>();
             txt.text = text;
-            txt.font = Resources.GetBuiltinResource<Font>("Arial.ttf");
+            txt.font = MenuSkin.HandFont;
             txt.fontSize = fontSize;
-            txt.fontStyle = fontSize >= 20 ? FontStyle.Bold : FontStyle.Normal;
+            txt.fontStyle = FontStyle.Normal;
             txt.alignment = alignment;
             txt.color = color;
-            txt.horizontalOverflow = HorizontalWrapMode.Overflow;
+            txt.horizontalOverflow = HorizontalWrapMode.Wrap;
             txt.verticalOverflow = VerticalWrapMode.Overflow;
             return txt;
+        }
+
+        private Text CreateTitle(Transform parent, string text, int fontSize, Vector2 anchoredPos)
+        {
+            return CreateText(parent, "Title", text, Mathf.Max(fontSize, 54), anchoredPos, ColText, TextAnchor.MiddleCenter, 1000f);
         }
 
         private static void CreateSeparator(Transform parent, float y, float width)
@@ -627,57 +779,92 @@ namespace RakeMultiplayer.UI
         private Button CreateButton(Transform parent, string name, string label, Vector2 size, Vector2 anchoredPos,
             UnityAction onClick, Color? background = null)
         {
+            MenuSkin.Init();
+            var style = MenuSkin.StyleFor(name);
+
             var obj = new GameObject(name, typeof(RectTransform), typeof(Image), typeof(Button));
             obj.transform.SetParent(parent, false);
             var rt = obj.GetComponent<RectTransform>();
             rt.sizeDelta = size;
             rt.anchoredPosition = anchoredPos;
 
-            var img = obj.GetComponent<Image>();
-            Color baseColor = background.HasValue ? background.Value : new Color(0.16f, 0.14f, 0.15f, 1f);
-            img.color = baseColor;
+            // invisible hit area; the face below does the drawing
+            var hit = obj.GetComponent<Image>();
+            hit.color = new Color(0f, 0f, 0f, 0f);
+
+            var depth = new GameObject("Depth", typeof(RectTransform), typeof(Image));
+            depth.transform.SetParent(obj.transform, false);
+            var drt = depth.GetComponent<RectTransform>();
+            drt.anchorMin = Vector2.zero;
+            drt.anchorMax = Vector2.one;
+            drt.offsetMin = Vector2.zero;
+            drt.offsetMax = Vector2.zero;
+            drt.anchoredPosition = new Vector2(0f, -8f);
+            var dimg = depth.GetComponent<Image>();
+            dimg.sprite = MenuSkin.SpriteFor(style);
+            dimg.color = new Color(0.035f, 0.028f, 0.02f, 0.94f);
+            var shadow = depth.AddComponent<Shadow>();
+            shadow.effectColor = new Color(0f, 0f, 0f, 0.55f);
+            shadow.effectDistance = new Vector2(5f, -7f);
+
+            var face = new GameObject("Face", typeof(RectTransform), typeof(Image));
+            face.transform.SetParent(obj.transform, false);
+            var frt = face.GetComponent<RectTransform>();
+            frt.anchorMin = Vector2.zero;
+            frt.anchorMax = Vector2.one;
+            frt.offsetMin = Vector2.zero;
+            frt.offsetMax = Vector2.zero;
+            var fimg = face.GetComponent<Image>();
+            fimg.sprite = MenuSkin.SpriteFor(style);
+            fimg.color = style == MenuCardStyle.Reel
+                ? new Color(0.36f, 0.31f, 0.24f, 1f)
+                : Color.white;
+            if (style == MenuCardStyle.Reel) face.AddComponent<SlowSpin>();
+            MenuSkin.DecorateFace(face.transform, style);
+
+            var labelObj = new GameObject("Label", typeof(RectTransform));
+            labelObj.transform.SetParent(obj.transform, false);
+            var lrt = labelObj.GetComponent<RectTransform>();
+            MenuSkin.PlaceLabel(lrt, style);
+            MenuSkin.DecorateLabel(lrt, style);
+
+            var txtObj = new GameObject("Text", typeof(RectTransform));
+            txtObj.transform.SetParent(labelObj.transform, false);
+            var trt = txtObj.GetComponent<RectTransform>();
+            trt.anchorMin = Vector2.zero;
+            trt.anchorMax = Vector2.one;
+            trt.offsetMin = new Vector2(4f, 2f);
+            trt.offsetMax = new Vector2(-4f, -2f);
+            var txt = txtObj.AddComponent<Text>();
+            txt.text = label;
+            txt.font = MenuSkin.HandFont;
+            txt.fontSize = MenuSkin.FontSizeFor(style, size.y);
+            txt.fontStyle = FontStyle.Normal;
+            txt.alignment = TextAnchor.MiddleCenter;
+            txt.color = MenuSkin.TextColorFor(style);
+            txt.horizontalOverflow = HorizontalWrapMode.Wrap;
+            txt.verticalOverflow = VerticalWrapMode.Overflow;
 
             var btn = obj.GetComponent<Button>();
             var colors = btn.colors;
-            colors.normalColor = baseColor;
-            colors.highlightedColor = new Color(0.55f, 0.16f, 0.12f, 1f);
-            colors.pressedColor = new Color(0.35f, 0.08f, 0.06f, 1f);
-            colors.disabledColor = new Color(0.12f, 0.12f, 0.12f, 0.6f);
+            colors.normalColor = Color.white;
+            colors.highlightedColor = new Color(1f, 0.95f, 0.86f, 1f);
+            colors.pressedColor = new Color(0.78f, 0.70f, 0.56f, 1f);
+            colors.disabledColor = new Color(0.55f, 0.55f, 0.55f, 0.45f);
             colors.fadeDuration = 0.08f;
             btn.colors = colors;
-            btn.targetGraphic = img;
+            btn.targetGraphic = hit;
             btn.onClick.AddListener(onClick);
-            obj.AddComponent<ButtonHoverScale>();
 
-            var edge = new GameObject("Edge", typeof(RectTransform), typeof(Image));
-            edge.transform.SetParent(obj.transform, false);
-            var edgeRt = edge.GetComponent<RectTransform>();
-            edgeRt.anchorMin = new Vector2(0f, 0f);
-            edgeRt.anchorMax = new Vector2(0f, 1f);
-            edgeRt.pivot = new Vector2(0f, 0.5f);
-            edgeRt.sizeDelta = new Vector2(3f, 0f);
-            edge.GetComponent<Image>().color = ColAccent;
-
-            var txtObj = new GameObject("Text", typeof(RectTransform));
-            txtObj.transform.SetParent(obj.transform, false);
-            var txtRt = txtObj.GetComponent<RectTransform>();
-            txtRt.anchorMin = Vector2.zero;
-            txtRt.anchorMax = Vector2.one;
-            txtRt.offsetMin = new Vector2(14f, 0f);
-            txtRt.offsetMax = new Vector2(-14f, 0f);
-            var txt = txtObj.AddComponent<Text>();
-            txt.text = label;
-            txt.font = Resources.GetBuiltinResource<Font>("Arial.ttf");
-            txt.fontSize = 16;
-            txt.fontStyle = FontStyle.Bold;
-            txt.alignment = TextAnchor.MiddleLeft;
-            txt.color = ColText;
+            var tilt = obj.AddComponent<MenuCardTilt>();
+            tilt.SetRestAngles(MenuSkin.RestAnglesFor(name));
 
             return btn;
         }
 
         private InputField CreateInputField(Transform parent, string name, string placeholder, string defaultValue, Vector2 size, Vector2 anchoredPos)
         {
+            MenuSkin.Init();
             var obj = new GameObject(name, typeof(RectTransform), typeof(Image), typeof(InputField));
             obj.transform.SetParent(parent, false);
             var rt = obj.GetComponent<RectTransform>();
@@ -685,7 +872,11 @@ namespace RakeMultiplayer.UI
             rt.anchoredPosition = anchoredPos;
 
             var img = obj.GetComponent<Image>();
-            img.color = new Color(0.12f, 0.115f, 0.13f, 1f);
+            img.sprite = MenuSkin.Paper;
+            img.color = Color.white;
+            var shadow = obj.AddComponent<Shadow>();
+            shadow.effectColor = new Color(0f, 0f, 0f, 0.4f);
+            shadow.effectDistance = new Vector2(4f, -5f);
 
             var input = obj.GetComponent<InputField>();
             input.text = defaultValue;
@@ -696,13 +887,13 @@ namespace RakeMultiplayer.UI
             var phRt = phObj.GetComponent<RectTransform>();
             phRt.anchorMin = Vector2.zero;
             phRt.anchorMax = Vector2.one;
-            phRt.offsetMin = new Vector2(12, 0);
-            phRt.offsetMax = new Vector2(-12, 0);
+            phRt.offsetMin = new Vector2(16, 0);
+            phRt.offsetMax = new Vector2(-16, 0);
             var phTxt = phObj.AddComponent<Text>();
             phTxt.text = placeholder;
-            phTxt.font = Resources.GetBuiltinResource<Font>("Arial.ttf");
-            phTxt.fontSize = 15;
-            phTxt.color = new Color(0.45f, 0.43f, 0.40f, 1f);
+            phTxt.font = MenuSkin.HandFont;
+            phTxt.fontSize = 26;
+            phTxt.color = new Color(0.22f, 0.18f, 0.12f, 0.45f);
             phTxt.alignment = TextAnchor.MiddleLeft;
             input.placeholder = phTxt;
 
@@ -711,13 +902,13 @@ namespace RakeMultiplayer.UI
             var txtRt = txtObj.GetComponent<RectTransform>();
             txtRt.anchorMin = Vector2.zero;
             txtRt.anchorMax = Vector2.one;
-            txtRt.offsetMin = new Vector2(12, 0);
-            txtRt.offsetMax = new Vector2(-12, 0);
+            txtRt.offsetMin = new Vector2(16, 0);
+            txtRt.offsetMax = new Vector2(-16, 0);
             var txt = txtObj.AddComponent<Text>();
             txt.text = defaultValue;
-            txt.font = Resources.GetBuiltinResource<Font>("Arial.ttf");
-            txt.fontSize = 15;
-            txt.color = ColText;
+            txt.font = MenuSkin.HandFont;
+            txt.fontSize = 30;
+            txt.color = new Color(0.14f, 0.10f, 0.05f, 1f);
             txt.alignment = TextAnchor.MiddleLeft;
             input.textComponent = txt;
 
@@ -726,11 +917,19 @@ namespace RakeMultiplayer.UI
 
         private Toggle CreateToggle(Transform parent, string name, string label, bool defaultValue, Vector2 anchoredPos)
         {
-            var obj = new GameObject(name, typeof(RectTransform), typeof(Toggle));
+            MenuSkin.Init();
+            var obj = new GameObject(name, typeof(RectTransform), typeof(Image), typeof(Toggle));
             obj.transform.SetParent(parent, false);
             var rt = obj.GetComponent<RectTransform>();
-            rt.sizeDelta = new Vector2(380, 30);
+            rt.sizeDelta = new Vector2(460, 50);
             rt.anchoredPosition = anchoredPos;
+
+            var rootImg = obj.GetComponent<Image>();
+            rootImg.sprite = MenuSkin.Paper;
+            rootImg.color = Color.white;
+            var rootShadow = obj.AddComponent<Shadow>();
+            rootShadow.effectColor = new Color(0f, 0f, 0f, 0.4f);
+            rootShadow.effectDistance = new Vector2(4f, -5f);
 
             var toggle = obj.GetComponent<Toggle>();
             toggle.isOn = defaultValue;
@@ -738,38 +937,42 @@ namespace RakeMultiplayer.UI
             var bgObj = new GameObject("Background", typeof(RectTransform), typeof(Image));
             bgObj.transform.SetParent(obj.transform, false);
             var bgRt = bgObj.GetComponent<RectTransform>();
-            bgRt.sizeDelta = new Vector2(20, 20);
+            bgRt.sizeDelta = new Vector2(34, 34);
             bgRt.anchorMin = new Vector2(0, 0.5f);
             bgRt.anchorMax = new Vector2(0, 0.5f);
-            bgRt.anchoredPosition = new Vector2(10, 0);
-            bgObj.GetComponent<Image>().color = new Color(0.12f, 0.115f, 0.13f, 1f);
+            bgRt.pivot = new Vector2(0.5f, 0.5f);
+            bgRt.anchoredPosition = new Vector2(30, 0);
+            var bgImg = bgObj.GetComponent<Image>();
+            bgImg.sprite = MenuSkin.Plate;
+            bgImg.color = new Color(0.30f, 0.26f, 0.20f, 1f);
 
             var checkObj = new GameObject("Checkmark", typeof(RectTransform), typeof(Image));
             checkObj.transform.SetParent(bgObj.transform, false);
             var checkRt = checkObj.GetComponent<RectTransform>();
-            checkRt.sizeDelta = new Vector2(14, 14);
+            checkRt.sizeDelta = new Vector2(22, 22);
             checkRt.anchorMin = Vector2.zero;
             checkRt.anchorMax = Vector2.one;
             checkRt.offsetMin = Vector2.zero;
             checkRt.offsetMax = Vector2.zero;
             var checkImg = checkObj.GetComponent<Image>();
-            checkImg.color = ColAccent;
+            checkImg.sprite = MenuSkin.Circle;
+            checkImg.color = new Color(0.88f, 0.74f, 0.42f, 1f);
             checkImg.enabled = defaultValue;
             toggle.graphic = checkImg;
-            toggle.targetGraphic = bgObj.GetComponent<Image>();
+            toggle.targetGraphic = bgImg;
 
             var lblObj = new GameObject("Label", typeof(RectTransform));
             lblObj.transform.SetParent(obj.transform, false);
             var lblRt = lblObj.GetComponent<RectTransform>();
             lblRt.anchorMin = Vector2.zero;
             lblRt.anchorMax = Vector2.one;
-            lblRt.offsetMin = new Vector2(40, 0);
-            lblRt.offsetMax = Vector2.zero;
+            lblRt.offsetMin = new Vector2(64, 0);
+            lblRt.offsetMax = new Vector2(-12, 0);
             var lblTxt = lblObj.AddComponent<Text>();
             lblTxt.text = label;
-            lblTxt.font = Resources.GetBuiltinResource<Font>("Arial.ttf");
-            lblTxt.fontSize = 15;
-            lblTxt.color = ColText;
+            lblTxt.font = MenuSkin.HandFont;
+            lblTxt.fontSize = 27;
+            lblTxt.color = new Color(0.14f, 0.10f, 0.05f, 1f);
             lblTxt.alignment = TextAnchor.MiddleLeft;
 
             return toggle;
@@ -781,6 +984,7 @@ namespace RakeMultiplayer.UI
         public GameObject MultiplayerPanel { get { return _multiplayerPanel; } }
         public GameObject LobbyPanel { get { return _lobbyPanel; } }
         public GameObject SettingsPanel { get { return _settingsPanel; } }
+        public GameObject DisplayPanel { get { return _displayPanel; } }
         public GameObject JoinGamePanel { get { return _joinGamePanel; } }
 
         public InputField IPInputField { get { return _ipInputField; } }
@@ -897,17 +1101,17 @@ namespace RakeMultiplayer.UI
         {
             if (_canvas == null) return;
 
-            // The HUD panel spans y -10..-110; the bar sits below it so the label does
-            // not print over the night timer (the old -100 overlapped it exactly).
-            _rakeHpPanel = CreatePanel(_canvas.transform, "RakeHealthPanel", new Vector2(460, 40),
-                new Vector2(0f, -160f), new Vector2(0.5f, 1f), new Vector2(0.5f, 1f));
+            _rakeHpPanel = CreatePanel(_canvas.transform, "RakeHealthPanel", new Vector2(460, 44),
+                new Vector2(0f, -44f), new Vector2(0.5f, 1f), new Vector2(0.5f, 1f));
+            var hpRt = _rakeHpPanel.GetComponent<RectTransform>();
+            hpRt.pivot = new Vector2(0.5f, 1f);
             _rakeHpPanel.GetComponent<Image>().color = new Color(0f, 0f, 0f, 0f);
 
-            _rakeHpLabel = CreateText(_rakeHpPanel.transform, "RakeName", "THE RAKE", 12,
-                new Vector2(0f, 10f), ColAccent, TextAnchor.MiddleCenter, 460f);
+            _rakeHpLabel = CreateText(_rakeHpPanel.transform, "RakeName", "THE RAKE", 16,
+                new Vector2(0f, 14f), ColAccent, TextAnchor.MiddleCenter, 460f);
 
-            var track = CreatePanel(_rakeHpPanel.transform, "RakeHpTrack", new Vector2(460, 10),
-                new Vector2(0f, -8f), new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f));
+            var track = CreatePanel(_rakeHpPanel.transform, "RakeHpTrack", new Vector2(460, 12),
+                new Vector2(0f, -10f), new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f));
             track.GetComponent<Image>().color = new Color(0.10f, 0.09f, 0.10f, 0.95f);
 
             var fillObj = new GameObject("RakeHpFill", typeof(RectTransform), typeof(Image));
@@ -921,8 +1125,6 @@ namespace RakeMultiplayer.UI
             _rakeHpFill = fillObj.GetComponent<Image>();
             _rakeHpFill.color = ColAccent;
 
-            // Menu panels are siblings created before this one: draw the bar behind
-            // them so it never covers the F1 menu buttons.
             _rakeHpPanel.transform.SetAsFirstSibling();
             _rakeHpPanel.SetActive(false);
         }
@@ -987,19 +1189,22 @@ namespace RakeMultiplayer.UI
         {
             if (_canvas == null) return;
 
-            _hudPanel = CreatePanel(_canvas.transform, "HUDPanel", new Vector2(300, 100), new Vector2(0, -60),
-                new Vector2(0.5f, 1f), new Vector2(0.5f, 1f));
+            _hudPanel = CreatePanel(_canvas.transform, "HUDPanel", new Vector2(300, 104),
+                new Vector2(-24f, -24f), new Vector2(1f, 1f), new Vector2(1f, 1f));
+            var hudRt = _hudPanel.GetComponent<RectTransform>();
+            hudRt.pivot = new Vector2(1f, 1f);
+
+            _hudPanel.GetComponent<Image>().color = new Color(0.025f, 0.020f, 0.015f, 0.58f);
             _hudPanel.SetActive(false);
-            _hudPanel.GetComponent<Image>().color = new Color(0f, 0f, 0f, 0.6f);
 
-            _phaseText = CreateTitle(_hudPanel.transform, "DAY", 24, new Vector2(0, 30));
-            _phaseText.color = Color.yellow;
+            _phaseText = CreateText(_hudPanel.transform, "Phase", "DAY", 21,
+                new Vector2(0f, 30f), new Color(1f, 0.76f, 0.38f, 1f), TextAnchor.MiddleRight, 260f);
 
-            _nightText = CreateTitle(_hudPanel.transform, "Night: 0/3", 18, new Vector2(0, 0));
-            _nightText.color = Color.white;
+            _nightText = CreateText(_hudPanel.transform, "Night", "Night: 0/3", 14,
+                new Vector2(0f, 2f), new Color(0.90f, 0.86f, 0.76f, 1f), TextAnchor.MiddleRight, 260f);
 
-            _timerText = CreateTitle(_hudPanel.transform, "05:00", 28, new Vector2(0, -30));
-            _timerText.color = Color.white;
+            _timerText = CreateText(_hudPanel.transform, "Timer", "05:00", 23,
+                new Vector2(0f, -30f), new Color(0.95f, 0.91f, 0.82f, 1f), TextAnchor.MiddleRight, 260f);
         }
     }
 }

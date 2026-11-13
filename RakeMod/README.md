@@ -1,194 +1,60 @@
 # Rake Multiplayer Mod
 
-Cooperative multiplayer mod for **Rake (2015)** by Konsordo. Adds 2–4 player co-op with a server-authoritative Rake AI, a full three-night day/night loop, daytime preparation mechanics (cameras, bait, traps, map) and persistent progression.
+Developer notes for the **1.1.0-alpha.1** cooperative mod.
 
-**Current version: 1.1.0** — Phases 1–4 complete (Day/Night loop, 5-phase Rake AI, Daytime Mechanics, Persistence).
-
----
-
-## Features
-
-### Session & Day/Night (Phase 1)
-- Server-authoritative **Day/Night cycle** with configurable phase durations
-- **3-night session** state machine with victory/defeat conditions
-- Synchronized lighting, fog and a HUD (phase, night counter, timer)
-- Session state survives scene changes (`DayNightManager` + `SessionManager`)
-
-### Rake AI (Phase 2)
-- Full **5-phase Rake AI** shared by all players:
-  - **Follow** — silent stalking, prioritizes isolated hunters
-  - **Stealth** — crouched approach, 2× damage, LOS detection
-  - **Chase** — direct pursuit
-  - **Blocking** — 80% frontal damage reduction for 2–3 s
-  - **Feigned Retreat** — retreats to the cave, then flanks
-- 15 Hz state sync (`RakeStatePacket`), server-authoritative damage
-
-### Daytime Mechanics (Phase 3)
-- **Pig cameras / surveillance cameras**
-  - Place, pick up and monitor cameras
-  - **Maximum 5 cameras deployed at once** (server-enforced, matching the original game)
-  - Battery drain, breakage, Rake alert on break (`QuestTriggerPacket`)
-  - Monitor view auto-switches away from broken/picked-up cameras
-- **Pig-camera**: mount a camera on a trapped pig; it shares the 5-camera quota
-- **Bait**: lures the nearest animal (server-side animal AI)
-- **Traps**: server-authoritative trap zones; a triggered trap **stuns the Rake for 3 seconds**
-- **Minimap** (shown in game scenes, toggle **F3**): cameras = green, traps = red, bait = yellow, safehouse = blue, cave = red
-- **Remote players**: coloured third-person proxies (first-person hands, weapons and cameras are disabled on remote clones)
-
-### Persistence (Phase 4)
-- Per-scene `MapSettings` auto-discovery (spawns, cameras, traps, cave, safehouse)
-- Per-night spawn rotation
-- Inventory, camera/trap state and Rake health persist between nights
-- Day-phase **safehouse respawn** for all hunters
-
----
-
-## Requirements
-
-- **Game**: Rake (2015), original Steam release
-- **OS**: Windows 10/11
-- **BepInEx**: 5.x (Mono / Unity 5.x build)
-- **.NET Framework**: 3.5 profile (Unity 5 Mono). The mod is built as `net35` to match BepInEx/Harmony.
-
----
-
-## Installation
-
-### Automatic
-
-1. Copy the mod folder into your Rake installation (`Steam/steamapps/common/Rake/`).
-2. Run `InstallMod.bat` as Administrator (installs into `BepInEx/plugins`).
-3. Launch the game through Steam.
-
-### Manual
-
-1. Install **BepInEx 5.x** for Unity 5.x and run the game once to generate folders.
-2. Copy `RakeMultiplayer.dll` (and `Telepathy.dll` if not already present) into `Rake/BepInEx/plugins/`.
-3. Launch the game.
-
----
-
-## Usage
-
-### Host
-
-1. Launch Rake.
-2. Open the multiplayer menu (main menu) → **Host Game** → **LAN (Direct IP)**.
-3. Share your IP; press **Start Game** once everyone joined.
-
-### Join
-
-1. Multiplayer menu → **Join Game**.
-2. Enter the host IP and port (default **7777**) → **Connect**.
-
-### In game
-
-| Key | Action |
-|-----|--------|
-| **F3** | Toggle minimap |
-| **F1** | Toggle multiplayer menu |
-| **E** | Interact (including camera setup/pickup) |
-| **I** | Inventory |
-| **F** | Flashlight |
-
----
-
-## Configuration
-
-`BepInEx/config/com.rake.multiplayer.cfg`:
-
-```ini
-[General]
-Enabled = true
-
-[Network]
-Address = 127.0.0.1
-Port = 7777
-MaxPlayers = 4
-IsServer = false
-UseSteamP2P = false
-SteamAppId = 480
-GameSceneName = level1
-```
-
-Day/night durations and camera battery drain are runtime fields on
-`DayNightManager` / `NetworkedCamera` (defaults: 300 s day, 300 s night, 5 %/min battery).
-
----
-
-## Sync rates & authority
-
-| System | Rate | Authority |
-|--------|------|-----------|
-| Player position/rotation | 20 Hz | Client → server → others |
-| Player animation | 10 Hz | Client |
-| Rake state | 15 Hz | **Server** |
-| Camera state | 1 Hz (delta) | **Server** |
-| Camera setup/pickup | event | **Server** (quota validated) |
-| Pigs/animals | 10 Hz (delta) | **Server** |
-| Traps | event | **Server** |
-| Bait placement | event | **Server** |
-| Day/Night + session | 1 Hz + events | **Server** |
-
----
-
-## Known issues / limitations
-
-1. **Remote-player trap damage** — traps damage the host's local player and animals; remote players are not damaged because player health is not yet server-authoritative.
-2. **Pig-camera placement is optimistic** — the requesting client applies the visual immediately; the server still enforces the 5-camera quota and corrects the authoritative pig state.
-3. **Bait visuals** — only the placing client sees the bait projectile; other clients see its map marker and synchronized pig behaviour.
-4. **Steam P2P** is not implemented (LAN/direct IP only).
-5. **Save games** — multiplayer progression is per-session; the game's own save system is not synchronized.
-6. High ping (>200 ms) can cause minor position differences; the state protocol is last-write-wins.
-7. Remote players are shown as simple coloured humanoid proxies - the game ships no third-person body model.
-
----
-
-## Building from source
+## Build
 
 ```powershell
-cd RakeMod
-dotnet build Source/RakeMultiplayer/RakeMultiplayer.csproj -c Release
+dotnet build RakeMod/Source/RakeMultiplayer/RakeMultiplayer.csproj -c Release
 ```
 
-Output: `RakeMod/Source/RakeMultiplayer/bin/Release/net35/RakeMultiplayer.dll`
+Output: `RakeMod/Source/RakeMultiplayer/bin/Release/net35/RakeMultiplayer.dll`.
 
-> The project targets **net35** because Rake runs Unity 5.0 Mono (mscorlib 2.0 / System.Core 3.5).
-> Building against net40 produces a DLL that fails to load some types at runtime (TypeLoadException).
+The plugin targets **net35 / x86** and references the assemblies from
+`Rake/Rake_Data/Managed`. It is a BepInEx 5 plugin; Harmony patches are applied at
+startup.
 
-Reference paths in the `.csproj` point at `D:\Rake Multiplayer\Rake`; adjust them for your installation.
-
-### Tests
+## Tests
 
 ```powershell
-cd test
-dotnet build NetworkedCamera.Tests.csproj
-./bin/Debug/net40/NetworkedCamera.Tests.exe --noresult
+powershell -ExecutionPolicy Bypass -File RakeMod/Tests/run-tests.ps1
 ```
 
-215 headless tests cover packet serialization, camera/trap/pig logic, quotas,
-persistence and integration/stress simulations (3-night loop, 5% loss, 200 ms jitter).
+Packet/runtime smoke checks can also be run from the game:
 
----
+```text
+Rake.exe -batchmode -nctest
+Rake.exe -batchmode -deathtest
+Rake.exe -batchmode -autotest
+```
 
-## Technical details
+## Installer
 
-- **Networking**: Telepathy (TCP), custom packet protocol (`PacketType` 1–32)
-- **Mod loader**: BepInEx 5.x
-- **Patching**: Harmony 2.x
-- **Key classes**: `RakeNetworkManager`, `NetworkedPlayer`, `NetworkedRakeAI`,
-  `NetworkedCamera`, `NetworkedPig`, `NetworkedTrap`, `DayNightManager`,
-  `SessionManager`, `MapSettings`, `WorldPersistence`, `MapUI`
+`RakeMod/Installer/build.ps1` builds the plugin, packs BepInEx + the plugin + Steam
+native DLLs into `payload.pak`, and compiles `RakeMultiplayerSetup.exe`.
 
----
+## UI notes
 
-## Credits
+- `UI/RuntimeUIBuilder.cs` builds the menu: card buttons, paper forms, display
+  settings and the HUD.
+- `UI/MenuSkin.cs` generates the paper/plate textures and loads the embedded
+  camera/reel sprites.
+- `UI/MenuBackdrop.cs` keeps the vanilla menu room visible while hiding its
+  screen-space buttons.
+- `UI/LoadingScreen.cs` is the standalone loading overlay.
+- `UI/DisplaySettings.cs` saves resolution / window / refresh / quality settings in
+  `PlayerPrefs`.
 
-- **Original game**: Konsordo (Nikita Subachev)
-- **Mod framework**: BepInEx Team
-- **Patching**: Harmony (pardeike)
-- **Transport**: Telepathy (vis2k)
+## Development bridge (MCP)
 
-## License
+Launch with `-rakemcp` (or enable `Diagnostics/GameBridge`) to open a local control
+bridge on `127.0.0.1:8765`. The MCP server lives in `tools/game-mcp`; it exposes
+state, UI tree, screenshots, menu navigation, button clicks and input fields.
+This is a development tool and is disabled by default.
 
-For educational purposes only. Not affiliated with Konsordo or the original Rake developers.
+## Game data note
+
+The test copy disables the Unity Configuration dialog by setting
+`PlayerSettings.displayResolutionDialog = 0` in `Rake_Data/mainData`
+(backup: `mainData.bak`). The patch script is
+`tools/disable_resolution_dialog.py`.

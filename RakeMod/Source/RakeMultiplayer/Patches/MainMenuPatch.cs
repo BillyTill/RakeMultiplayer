@@ -12,13 +12,15 @@ namespace RakeMultiplayer.Patches
     [HarmonyPatch("OpenMultiplayer")]
     internal static class MainMenuOpenMultiplayerPatch
     {
-        static bool Prefix()
+        static bool Prefix(MainMenu __instance)
         {
             if (!RakeMultiplayerPlugin.Enabled.Value) return true;
 
             var menu = UnityEngine.Object.FindObjectOfType<MultiplayerMenu>();
             if (menu == null) return true;
 
+            // Keep the vanilla 3D menu room, hide only its screen-space buttons.
+            MenuBackdrop.Enter(menu.UICanvas);
             menu.OpenMenu();
             return false;
         }

@@ -24,6 +24,8 @@ namespace RakeMultiplayer
         internal static ConfigEntry<bool> UseSteamP2P;
         internal static ConfigEntry<string> SteamAppId;
         internal static ConfigEntry<bool> RunInBackground;
+        internal static ConfigEntry<bool> EnableGameBridge;
+        internal static ConfigEntry<int> GameBridgePort;
         internal static ConfigEntry<bool> ControlLighting;
         internal static ConfigEntry<bool> HitReaction;
 
@@ -63,6 +65,11 @@ namespace RakeMultiplayer
             GameSceneName = Config.Bind("Network", "GameSceneName", "level1", "Name of the game scene to load (must match build settings, e.g. level1)");
             RunInBackground = Config.Bind("General", "RunInBackground", true,
                 "Keep simulating while the game window is not focused (lets you host and play on one machine)");
+
+            EnableGameBridge = Config.Bind("Diagnostics", "GameBridge", false,
+                "Start a local HTTP/MCP control bridge on 127.0.0.1:8765 (development only)");
+            GameBridgePort = Config.Bind("Diagnostics", "GameBridgePort", 8765,
+                "Port for the local game bridge");
 
             // The game levels ship their own day/night lighting; overriding it makes
             // night look like day under a black sky. Off by default.
@@ -164,6 +171,36 @@ namespace RakeMultiplayer
             UnityEngine.Object.DontDestroyOnLoad(menuObj);
             menuObj.AddComponent<UI.MultiplayerMenu>();
             Log.LogInfo("[RakeMultiplayer] MultiplayerMenu created in plugin Awake");
+
+            if (EnableGameBridge.Value || Array.IndexOf(Environment.GetCommandLineArgs(), "-rakemcp") >= 0)
+            {
+                var bridgeObj = new GameObject("RakeGameBridge");
+                UnityEngine.Object.DontDestroyOnLoad(bridgeObj);
+                var bridge = bridgeObj.AddComponent<Core.GameBridge>();
+                bridge.Port = GameBridgePort.Value;
+                Log.LogInfo("[RakeMultiplayer] game bridge enabled on port " + bridge.Port);
+            }
+
+            // Test hook: hide the vanilla menu buttons, save the 3D scene, restore.
+            if (Array.IndexOf(Environment.GetCommandLineArgs(), "-raketestbackdrop") >= 0)
+            {
+                RakeMultiplayer.Patches.CoroutineHelper.DelayedCall(3f, UI.MenuBackdrop.CaptureTest);
+            }
+
+            // Test hook: open the menu after level0 loads, then close it.
+            if (Array.IndexOf(Environment.GetCommandLineArgs(), "-raketestmenu") >= 0)
+            {
+                RakeMultiplayer.Patches.CoroutineHelper.DelayedCall(3f, delegate
+                {
+                    var menu = UnityEngine.Object.FindObjectOfType<UI.MultiplayerMenu>();
+                    if (menu != null) menu.OpenMenu();
+                });
+                RakeMultiplayer.Patches.CoroutineHelper.DelayedCall(5f, delegate
+                {
+                    var menu = UnityEngine.Object.FindObjectOfType<UI.MultiplayerMenu>();
+                    if (menu != null) menu.ToggleMenu();
+                });
+            }
 
             // Tab anywhere -> vanilla camera monitor (works for every hunter).
             var cameraViewObj = new UnityEngine.GameObject("RakeCameraView");
@@ -445,6 +482,6 @@ namespace RakeMultiplayer
     {
         public const string GUID = "com.rake.multiplayer";
         public const string NAME = "Rake Multiplayer";
-        public const string VERSION = "1.0.23";
+        public const string VERSION = "1.1.0-alpha.1";
     }
 }

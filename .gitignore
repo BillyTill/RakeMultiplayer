@@ -120,3 +120,17 @@ RakeMultiplayerSetup.exe.sha256
 
 # HUD mockup renders (regenerate with RakeMod/HUD/rake_hud_mock.py)
 RakeMod/HUD/*.png
+
+# Local reference data and design tools
+/extracted/
+/extract_probe/
+/UIPrototype/
+/opencode.json
+
+# Test runner build output
+/RakeMod/Tests/bin/
+/RakeMod/Tests/Runner/bin/
+
+# Installer staging
+/RakeMod/Installer/payload/
+/RakeMod/Installer/payload.pak

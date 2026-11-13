@@ -83,4 +83,9 @@
     <Copy SourceFiles="$(TargetDir)$(TargetName).pdb" DestinationFolder="D:\Rake Multiplayer\Rake\BepInEx\plugins" Condition="Exists('$(TargetDir)$(TargetName).pdb')" />
   </Target>
 
+  <ItemGroup>
+    <EmbeddedResource Include="Assets\camera.png" />
+    <EmbeddedResource Include="Assets\reel.png" />
+  </ItemGroup>
+
 </Project>

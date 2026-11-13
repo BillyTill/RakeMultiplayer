@@ -18,6 +18,7 @@ namespace RakeMultiplayer.UI
         private RakeNetworkManager _networkManager;
         private GameObject _mainContainer;
         private bool _menuVisible = false;
+        private bool _autoOpenSuppressed = false;
         private bool _waitingForConnection = false;
         private float _connectionTimer = 0f;
         private bool _lastIsServer = false;
@@ -37,6 +38,52 @@ namespace RakeMultiplayer.UI
 
         /// <summary>The live menu instance (used by the input gate and the console).</summary>
         public static MultiplayerMenu Instance { get; private set; }
+
+        /// <summary>The runtime uGUI canvas (used by the vanilla-menu backdrop).</summary>
+        public Canvas UICanvas
+        {
+            get { return _uiBuilder != null ? _uiBuilder.Canvas : null; }
+        }
+
+        /// <summary>True while the F1 menu / lobby UI is on screen.</summary>
+        public bool IsMenuVisible
+        {
+            get { return _menuVisible; }
+        }
+
+        /// <summary>Used by the local game bridge / MCP to jump straight to a panel.</summary>
+        public void BridgeShow(string screen)
+        {
+            if (_mainContainer == null) return;
+
+            _menuVisible = true;
+            _mainContainer.SetActive(true);
+            MenuBackdrop.Enter(UICanvas);
+            Cursor.lockState = CursorLockMode.None;
+            Cursor.visible = true;
+            PlayerInputLock.SetMenu(true);
+
+            if (string.IsNullOrEmpty(screen) || screen == "open" || screen == "main")
+            {
+                ShowMainMenu();
+                return;
+            }
+
+            switch (screen.ToLowerInvariant())
+            {
+                case "host": ShowCreateLobby(); break;
+                case "multiplayer":
+                case "connection": ShowMultiplayerPanel(); break;
+                case "join": ShowJoinGamePanel(); break;
+                case "lobby": ShowLobby(); break;
+                case "settings": ShowSettings(); break;
+                case "display": ShowDisplay(); break;
+                case "steam": ShowSteamMain(); break;
+                case "steamcreate": ShowSteamCreate(); break;
+                case "browse": ShowSteamBrowse(); break;
+                default: ShowMainMenu(); break;
+            }
+        }
 
         /// <summary>True while the F1 menu (or any of its panels) is on screen.</summary>
         public static bool IsOpen
@@ -58,6 +105,14 @@ namespace RakeMultiplayer.UI
             // Build UI at runtime
             _uiBuilder = gameObject.AddComponent<RuntimeUIBuilder>();
             _uiBuilder.Initialize(this);
+
+            StartCoroutine(ApplyDisplaySettingsRoutine());
+        }
+
+        private System.Collections.IEnumerator ApplyDisplaySettingsRoutine()
+        {
+            yield return new WaitForSeconds(1.5f);
+            DisplaySettings.ApplySaved();
         }
 
         private void EnsureResultStyles()
@@ -167,6 +222,21 @@ namespace RakeMultiplayer.UI
                     _matchOver = false;
                     ShowLobby();
                 }
+            }
+
+            // The main menu is the multiplayer menu. It has no close button there;
+            // F1 toggling is a gameplay-only action.
+            if (UnityEngine.Application.loadedLevel >= 1)
+            {
+                _autoOpenSuppressed = false;
+            }
+            else if (!_menuVisible && !_autoOpenSuppressed)
+            {
+                OpenMenu();
+            }
+            else if (_menuVisible)
+            {
+                MenuBackdrop.Enter(UICanvas);
             }
 
             // F1 opens/closes the menu, but never on top of the console (the console owns
@@ -376,15 +446,22 @@ namespace RakeMultiplayer.UI
 
             _menuVisible = true;
             _mainContainer.SetActive(true);
+            MenuBackdrop.Enter(UICanvas);
             ShowMainMenu();
 
             Cursor.lockState = CursorLockMode.None;
             Cursor.visible = true;
 
-            RakeMultiplayerPlugin.Log?.LogInfo("[Menu] Opened from the main-menu tile");
+            RakeMultiplayerPlugin.Log?.LogInfo("[Menu] Opened");
         }
         public void ToggleMenu()
         {
+            if (UnityEngine.Application.loadedLevel == 0)
+            {
+                if (!_menuVisible && !_autoOpenSuppressed) OpenMenu();
+                return;
+            }
+
             _menuVisible = !_menuVisible;
 
             RakeMultiplayerPlugin.Log?.LogInfo($"[F1] ToggleMenu. visible={_menuVisible} mainContainer={(_mainContainer != null)} uiBuilder={(_uiBuilder != null)}");
@@ -398,11 +475,13 @@ namespace RakeMultiplayer.UI
                 Cursor.lockState = CursorLockMode.None;
                 Cursor.visible = true;
                 PlayerInputLock.SetMenu(true);
+                MenuBackdrop.Enter(UICanvas);
                 ShowMainMenu();
             }
             else
             {
                 PlayerInputLock.SetMenu(false);
+                MenuBackdrop.Leave();
                 if (IsGameplayScene())
                 {
                     Cursor.lockState = CursorLockMode.Locked;
@@ -416,7 +495,44 @@ namespace RakeMultiplayer.UI
         {
             HideAllPanels();
             if (_uiBuilder != null && _uiBuilder.MainMenuPanel != null)
+            {
                 _uiBuilder.MainMenuPanel.SetActive(true);
+
+                // In the main menu there is no game to return to, so the same button quits.
+                var exit = _uiBuilder.MainMenuPanel.transform.Find("ExitBtn");
+                if (exit != null)
+                {
+                    var texts = exit.GetComponentsInChildren<Text>(true);
+                    if (texts.Length > 0)
+                        texts[0].text = IsGameplayScene() ? "Exit to game" : "Quit game";
+                }
+            }
+            if (!IsGameplayScene()) MenuBackdrop.Enter(UICanvas);
+        }
+
+        public void OnExitButton()
+        {
+            if (IsGameplayScene()) ToggleMenu();
+            else UnityEngine.Application.Quit();
+        }
+
+        public void ShowDisplay()
+        {
+            if (_mainContainer == null) return;
+
+            _menuVisible = true;
+            _mainContainer.SetActive(true);
+            MenuBackdrop.Enter(UICanvas);
+            Cursor.lockState = CursorLockMode.None;
+            Cursor.visible = true;
+            PlayerInputLock.SetMenu(true);
+
+            HideAllPanels();
+            if (_uiBuilder != null && _uiBuilder.DisplayPanel != null)
+            {
+                _uiBuilder.RefreshDisplayUi();
+                _uiBuilder.DisplayPanel.SetActive(true);
+            }
         }
 
         public void ShowMultiplayerPanel()
@@ -464,6 +580,7 @@ namespace RakeMultiplayer.UI
             if (_uiBuilder.MultiplayerPanel) _uiBuilder.MultiplayerPanel.SetActive(false);
             if (_uiBuilder.LobbyPanel) _uiBuilder.LobbyPanel.SetActive(false);
             if (_uiBuilder.SettingsPanel) _uiBuilder.SettingsPanel.SetActive(false);
+            if (_uiBuilder.DisplayPanel) _uiBuilder.DisplayPanel.SetActive(false);
             if (_uiBuilder.JoinGamePanel) _uiBuilder.JoinGamePanel.SetActive(false);
             if (_uiBuilder.HostPanel) _uiBuilder.HostPanel.SetActive(false);
             if (_uiBuilder.SteamPanel) _uiBuilder.SteamPanel.SetActive(false);
@@ -538,6 +655,7 @@ namespace RakeMultiplayer.UI
                     return;
                 }
                 _startGameSent = true;
+                _autoOpenSuppressed = true;
 
                 RakeMultiplayerPlugin.Log?.LogInfo("[Menu] Starting game - broadcasting StartGame to clients");
                 
@@ -551,6 +669,7 @@ namespace RakeMultiplayer.UI
 
                 _menuVisible = false;
                 PlayerInputLock.SetMenu(false);
+                MenuBackdrop.Leave();
                 if (_mainContainer != null) _mainContainer.SetActive(false);
                 HideAllPanels();
 
@@ -820,7 +939,9 @@ namespace RakeMultiplayer.UI
             if (menu == null) return;
 
             menu._menuVisible = false;
+            menu._autoOpenSuppressed = true;
             PlayerInputLock.SetMenu(false);
+            MenuBackdrop.Leave();
             if (menu._mainContainer != null) menu._mainContainer.SetActive(false);
             menu.HideAllPanels();
         }

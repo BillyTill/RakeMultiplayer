@@ -4,38 +4,37 @@ using UnityEngine.UI;
 namespace RakeMultiplayer.UI
 {
     /// <summary>
-    /// Full-screen, horror-styled loading screen that matches the multiplayer menu:
-    /// near-black backdrop, blood-red accents, cream typography, segmented progress
-    /// bar, rotating tips and a slow scan line.
+    /// Full-screen loading screen in the same physical-paper style as the
+    /// multiplayer menu: dark board, torn paper note, hand-written labels, a
+    /// paper progress strip and a slowly turning reel.
     ///
-    /// The overlay lives on its own DontDestroyOnLoad canvas (above the menu canvas),
-    /// so it survives the scene change it is announcing. Show() is safe from any
-    /// main-thread code; all animation is driven internally with unscaled time.
+    /// The overlay lives on its own DontDestroyOnLoad canvas (above the menu
+    /// canvas), so it survives the scene change it is announcing.
     /// </summary>
     public class LoadingScreen : MonoBehaviour
     {
-        // Same palette as RuntimeUIBuilder, so both screens feel like one interface.
-        private static readonly Color ColBg = new Color(0.02f, 0.02f, 0.03f, 1f);
-        private static readonly Color ColPanel = new Color(0.055f, 0.05f, 0.065f, 0.97f);
-        private static readonly Color ColAccent = new Color(0.72f, 0.16f, 0.12f, 1f);
-        private static readonly Color ColAccentDim = new Color(0.35f, 0.10f, 0.08f, 1f);
-        private static readonly Color ColText = new Color(0.93f, 0.90f, 0.84f, 1f);
-        private static readonly Color ColMuted = new Color(0.55f, 0.52f, 0.46f, 1f);
-        private static readonly Color ColTrack = new Color(0.12f, 0.11f, 0.12f, 1f);
+        private static readonly Color ColBg = new Color(0.025f, 0.020f, 0.015f, 1f);
+        private static readonly Color ColBoard = new Color(0.19f, 0.17f, 0.14f, 0.96f);
+        private static readonly Color ColText = new Color(0.94f, 0.90f, 0.81f, 1f);
+        private static readonly Color ColMuted = new Color(0.66f, 0.60f, 0.50f, 1f);
+        private static readonly Color ColInk = new Color(0.15f, 0.11f, 0.06f, 1f);
+        private static readonly Color ColInkMuted = new Color(0.34f, 0.27f, 0.17f, 1f);
+        private static readonly Color ColAmber = new Color(1.00f, 0.70f, 0.38f, 1f);
+        private static readonly Color ColGreen = new Color(0.72f, 0.82f, 0.57f, 1f);
 
         private const float FadeIn = 0.25f;
         private const float FadeOut = 0.35f;
-        private const float TrackWidth = 520f;
+        private const float TrackWidth = 560f;
         private const float MinShowTime = 0.9f;
 
         private static readonly string[] Tips =
         {
-            "TIP: the Rake cannot attack during the day, but it never stops watching.",
-            "TIP: one hunter can become the Rake in the lobby.",
-            "TIP: the Rake senses every hunter, animal and trap within 100 m.",
-            "TIP: sprinting is loud. Sneak (Ctrl) to stay unheard.",
-            "TIP: frontal fire is absorbed while the Rake blocks.",
-            "TIP: a hit throws you into a ragdoll and gives the Rake an opening.",
+            "Tip — the Rake cannot attack during the day, but it never stops watching.",
+            "Tip — one hunter can become the Rake in the lobby.",
+            "Tip — the Rake senses every hunter, animal and trap within 100 m.",
+            "Tip — sprinting is loud. Sneak (Ctrl) to stay unheard.",
+            "Tip — frontal fire is absorbed while the Rake blocks.",
+            "Tip — a hit throws you into a ragdoll and gives the Rake an opening.",
         };
 
         private static LoadingScreen _instance;
@@ -49,17 +48,12 @@ namespace RakeMultiplayer.UI
         private Text _percent;
         private Text _tip;
         private Text _version;
-        private Image _topBar;
-        private Image _bottomBar;
-        private Image _separator;
-        private Image _diamond;
-        private RectTransform _diamondRt;
-        private readonly System.Collections.Generic.List<Image> _corners =
-            new System.Collections.Generic.List<Image>();
-        private Image _scan;
+        private Image _glow;
+        private Image _accentLine;
+        private Image _reel;
+        private RectTransform _reelRt;
         private Image _fill;
         private RectTransform _fillRt;
-        private RectTransform _scanRt;
 
         private string _statusBase = "";
         private float _progress;
@@ -77,7 +71,6 @@ namespace RakeMultiplayer.UI
 
         // ------------------------------------------------------------------ public API
 
-        /// <summary>Show the overlay (fades in if it was hidden).</summary>
         public static void Show(string title, string subtitle, string status, bool indeterminate = false, bool closeMenu = true)
         {
             if (_quitting) return;
@@ -93,7 +86,6 @@ namespace RakeMultiplayer.UI
             _instance._statusBase = string.IsNullOrEmpty(status) ? "" : status;
         }
 
-        /// <summary>0..1; the fill moves towards the value so it never jumps.</summary>
         public static void SetProgress(float progress)
         {
             if (_instance == null) return;
@@ -145,7 +137,6 @@ namespace RakeMultiplayer.UI
 
         private void ShowInternal(string title, string subtitle, string status, bool indeterminate, bool closeMenu)
         {
-            // Level loads close the menu; short connection screens leave it alone.
             if (closeMenu) UI.MultiplayerMenu.CloseForLoad();
 
             _title.text = string.IsNullOrEmpty(title) ? "LOADING" : title.ToUpperInvariant();
@@ -168,7 +159,7 @@ namespace RakeMultiplayer.UI
             gameObject.SetActive(true);
 
             UpdateProgressVisual();
-            UpdateAccentPulse();
+            UpdateGlow();
 
             RakeMultiplayerPlugin.Log?.LogInfo("[UI] Loading screen: " + _title.text +
                                                " (" + _subtitle.text + ")");
@@ -178,7 +169,6 @@ namespace RakeMultiplayer.UI
         {
             if (!_visible) return;
 
-            // Never flash away before the screen has actually been seen.
             float shownFor = Time.unscaledTime - _shownAt;
             if (shownFor < MinShowTime)
             {
@@ -198,7 +188,6 @@ namespace RakeMultiplayer.UI
 
             _time += dt;
 
-            // ---- fade ----
             float fadeSpeed = _targetAlpha > _alpha ? 1f / FadeIn : 1f / FadeOut;
             _alpha = Mathf.MoveTowards(_alpha, _targetAlpha, dt * fadeSpeed);
             _canvasGroup.alpha = _alpha;
@@ -215,7 +204,6 @@ namespace RakeMultiplayer.UI
                 StartFadeOut();
             }
 
-            // ---- progress ----
             if (_indeterminate)
             {
                 float sweep = (Mathf.Sin(_time * 2.2f) + 1f) * 0.5f;
@@ -223,17 +211,14 @@ namespace RakeMultiplayer.UI
             }
             else
             {
-                // Keep the bar alive on its own until someone reports real progress.
                 if (_targetProgress < 0.9f) _targetProgress = Mathf.Min(0.9f, _targetProgress + dt * 0.32f);
                 _progress = Mathf.MoveTowards(_progress, _targetProgress, dt * 0.6f);
             }
             UpdateProgressVisual();
 
-            // ---- status dots ----
             int dots = 1 + (int)(_time * 2.2f) % 3;
             _status.text = _statusBase + new string('.', dots);
 
-            // ---- tips ----
             _tipTimer += dt;
             if (_tipTimer > 6f)
             {
@@ -243,49 +228,27 @@ namespace RakeMultiplayer.UI
                 _tipAlpha = 0f;
             }
             _tipAlpha = Mathf.MoveTowards(_tipAlpha, 1f, dt * 2.5f);
-            var tipColor = ColMuted;
+            var tipColor = ColInk;
             tipColor.a *= _tipAlpha;
             _tip.color = tipColor;
 
-            // ---- spinning marker ----
-            if (_diamondRt != null) _diamondRt.localRotation = Quaternion.Euler(0f, 0f, -_time * 40f);
+            if (_reelRt != null) _reelRt.localRotation = Quaternion.Euler(0f, 0f, -_time * 11f);
 
-            // ---- scan line ----
-            float sweepY = Mathf.Lerp(560f, -560f, Mathf.Repeat(_time * 0.22f, 1f));
-            _scanRt.anchoredPosition = new Vector2(0f, sweepY);
-
-            UpdateAccentPulse();
+            UpdateGlow();
         }
 
-        private void UpdateAccentPulse()
+        private void UpdateGlow()
         {
-            float pulse = 0.62f + 0.38f * (Mathf.Sin(_time * 1.9f) + 1f) * 0.5f;
+            float pulse = 0.62f + 0.38f * (Mathf.Sin(_time * 1.7f) + 1f) * 0.5f;
 
-            var accent = ColAccent;
-            accent.a = pulse;
-            _topBar.color = accent;
+            if (_glow != null)
+                _glow.color = new Color(1f, 0.55f, 0.27f, 0.10f + 0.05f * pulse);
 
-            var dim = ColAccentDim;
-            dim.a = pulse;
-            _bottomBar.color = dim;
+            if (_accentLine != null)
+                _accentLine.color = new Color(1f, 0.70f, 0.38f, 0.28f + 0.18f * pulse);
 
-            var sep = new Color(ColAccent.r, ColAccent.g, ColAccent.b, 0.35f * pulse);
-            _separator.color = sep;
-
-            var corner = new Color(ColAccent.r, ColAccent.g, ColAccent.b, 0.28f + 0.22f * pulse);
-            for (int i = 0; i < _corners.Count; i++) _corners[i].color = corner;
-
-            var diamond = ColAccent;
-            diamond.a = 0.55f + 0.4f * pulse;
-            _diamond.color = diamond;
-
-            var kicker = ColAccent;
-            kicker.a = 0.7f + 0.3f * pulse;
-            _kicker.color = kicker;
-
-            var scan = ColAccent;
-            scan.a = 0.05f + 0.03f * pulse;
-            _scan.color = scan;
+            if (_kicker != null)
+                _kicker.color = new Color(ColGreen.r, ColGreen.g, ColGreen.b, 0.62f + 0.28f * pulse);
         }
 
         private void UpdateProgressVisual()
@@ -295,7 +258,7 @@ namespace RakeMultiplayer.UI
 
             if (_indeterminate)
             {
-                _percent.text = "CONNECTING";
+                _percent.text = "WAITING";
                 return;
             }
 
@@ -307,10 +270,12 @@ namespace RakeMultiplayer.UI
 
         private void BuildUI()
         {
+            MenuSkin.Init();
+
             var canvasObj = gameObject;
             var canvas = canvasObj.AddComponent<Canvas>();
             canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-            canvas.sortingOrder = 33000; // above the multiplayer menu (32000)
+            canvas.sortingOrder = 32001;
 
             var scaler = canvasObj.AddComponent<CanvasScaler>();
             scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
@@ -324,101 +289,83 @@ namespace RakeMultiplayer.UI
             var backdrop = CreateImage(canvasObj.transform, "Backdrop", ColBg);
             Stretch(backdrop.rectTransform);
 
+            _glow = CreateImage(canvasObj.transform, "WarmGlow", Color.white);
+            Stretch(_glow.rectTransform);
+            _glow.sprite = Sprite.Create(BuildRadial(), new Rect(0f, 0f, 128f, 128f), new Vector2(0.5f, 0.5f), 100f);
+            _glow.type = Image.Type.Simple;
+            _glow.color = new Color(1f, 0.55f, 0.27f, 0.14f);
+
             var vignette = CreateImage(canvasObj.transform, "Vignette", Color.white);
             Stretch(vignette.rectTransform);
-            vignette.sprite = Sprite.Create(BuildVignette(), new Rect(0f, 0f, 128f, 128f),
-                new Vector2(0.5f, 0.5f), 100f);
+            vignette.sprite = Sprite.Create(BuildVignette(), new Rect(0f, 0f, 128f, 128f), new Vector2(0.5f, 0.5f), 100f);
             vignette.type = Image.Type.Simple;
 
-            // ---- thin frame ----
-            _topBar = CreateImage(canvasObj.transform, "TopBar", ColAccent);
-            var topRt = _topBar.rectTransform;
-            topRt.anchorMin = new Vector2(0f, 1f);
-            topRt.anchorMax = new Vector2(1f, 1f);
-            topRt.pivot = new Vector2(0.5f, 1f);
-            topRt.anchoredPosition = Vector2.zero;
-            topRt.sizeDelta = new Vector2(0f, 4f);
+            // ---- dark board ----
+            var board = CreateImage(canvasObj.transform, "Board", Color.white);
+            board.sprite = MenuSkin.Plate;
+            board.color = ColBoard;
+            var boardRt = board.rectTransform;
+            boardRt.anchorMin = new Vector2(0.5f, 0.5f);
+            boardRt.anchorMax = new Vector2(0.5f, 0.5f);
+            boardRt.pivot = new Vector2(0.5f, 0.5f);
+            boardRt.sizeDelta = new Vector2(920f, 580f);
+            boardRt.anchoredPosition = new Vector2(0f, 30f);
+            boardRt.localEulerAngles = new Vector3(0f, 0f, -0.6f);
+            var boardShadow = board.gameObject.AddComponent<Shadow>();
+            boardShadow.effectColor = new Color(0f, 0f, 0f, 0.6f);
+            boardShadow.effectDistance = new Vector2(12f, -14f);
 
-            _bottomBar = CreateImage(canvasObj.transform, "BottomBar", ColAccentDim);
-            var bottomRt = _bottomBar.rectTransform;
-            bottomRt.anchorMin = new Vector2(0f, 0f);
-            bottomRt.anchorMax = new Vector2(1f, 0f);
-            bottomRt.pivot = new Vector2(0.5f, 0f);
-            bottomRt.anchoredPosition = Vector2.zero;
-            bottomRt.sizeDelta = new Vector2(0f, 2f);
+            _accentLine = CreateImage(board.transform, "AccentLine", ColAmber);
+            var lineRt = _accentLine.rectTransform;
+            lineRt.anchorMin = new Vector2(0f, 1f);
+            lineRt.anchorMax = new Vector2(1f, 1f);
+            lineRt.pivot = new Vector2(0.5f, 1f);
+            lineRt.offsetMin = new Vector2(40f, 0f);
+            lineRt.offsetMax = new Vector2(-40f, 0f);
+            lineRt.sizeDelta = new Vector2(lineRt.sizeDelta.x, 2f);
+            lineRt.anchoredPosition = Vector2.zero;
 
-            _scan = CreateImage(canvasObj.transform, "ScanLine", new Color(ColAccent.r, ColAccent.g, ColAccent.b, 0.06f));
-            _scanRt = _scan.rectTransform;
-            _scanRt.anchorMin = new Vector2(0f, 0.5f);
-            _scanRt.anchorMax = new Vector2(1f, 0.5f);
-            _scanRt.pivot = new Vector2(0.5f, 0.5f);
-            _scanRt.sizeDelta = new Vector2(0f, 2f);
+            // ---- texts on the board ----
+            _kicker = CreateText(board.transform, "Kicker", "RAKE  ·  FIELD INTERMISSION", 14,
+                new Vector2(0f, 245f), ColGreen, 820f);
 
-            // ---- central panel ----
-            var panel = CreateImage(canvasObj.transform, "Panel", ColPanel);
-            var panelRt = panel.rectTransform;
-            panelRt.anchorMin = new Vector2(0.5f, 0.5f);
-            panelRt.anchorMax = new Vector2(0.5f, 0.5f);
-            panelRt.pivot = new Vector2(0.5f, 0.5f);
-            panelRt.sizeDelta = new Vector2(760f, 360f);
-            panelRt.anchoredPosition = new Vector2(0f, 20f);
+            _title = CreateText(board.transform, "Title", "LOADING", 58,
+                new Vector2(0f, 178f), ColText, 860f);
 
-            var panelTop = CreateImage(panel.transform, "PanelTopBar", ColAccent);
-            var panelTopRt = panelTop.rectTransform;
-            panelTopRt.anchorMin = new Vector2(0f, 1f);
-            panelTopRt.anchorMax = new Vector2(1f, 1f);
-            panelTopRt.pivot = new Vector2(0.5f, 1f);
-            panelTopRt.anchoredPosition = Vector2.zero;
-            panelTopRt.sizeDelta = new Vector2(0f, 3f);
+            _subtitle = CreateText(board.transform, "Subtitle", "", 24,
+                new Vector2(0f, 122f), ColMuted, 760f);
 
-            AddCorners(canvasObj.transform);
-            _diamond = CreateImage(panel.transform, "Diamond", ColAccent);
-            _diamondRt = _diamond.rectTransform;
-            _diamondRt.anchorMin = new Vector2(0.5f, 0.5f);
-            _diamondRt.anchorMax = new Vector2(0.5f, 0.5f);
-            _diamondRt.pivot = new Vector2(0.5f, 0.5f);
-            _diamondRt.sizeDelta = new Vector2(9f, 9f);
-            _diamondRt.anchoredPosition = new Vector2(0f, 154f);
+            _status = CreateText(board.transform, "Status", "Preparing", 22,
+                new Vector2(0f, 72f), ColText, 760f);
 
-            // ---- texts ----
-            _kicker = CreateText(panel.transform, "Kicker", "RAKE  /  MULTIPLAYER", 12,
-                new Vector2(0f, 128f), ColAccent, FontStyle.Bold);
-            _title = CreateText(panel.transform, "Title", "LOADING", 38,
-                new Vector2(0f, 84f), ColText, FontStyle.Bold);
-            _subtitle = CreateText(panel.transform, "Subtitle", "", 12,
-                new Vector2(0f, 48f), ColMuted, FontStyle.Normal);
-
-            _separator = CreateImage(panel.transform, "Separator", new Color(ColAccent.r, ColAccent.g, ColAccent.b, 0.35f));
-            var sepRt = _separator.rectTransform;
-            sepRt.anchorMin = new Vector2(0.5f, 0.5f);
-            sepRt.anchorMax = new Vector2(0.5f, 0.5f);
-            sepRt.sizeDelta = new Vector2(520f, 1f);
-            sepRt.anchoredPosition = new Vector2(0f, 24f);
-
-            _status = CreateText(panel.transform, "Status", "Preparing", 13,
-                new Vector2(0f, -6f), ColMuted, FontStyle.Normal);
-
-            // ---- progress ----
-            var track = CreateImage(panel.transform, "Track", ColTrack);
+            // ---- paper progress strip ----
+            var track = CreateImage(board.transform, "Track", Color.white);
+            track.sprite = MenuSkin.Paper;
+            track.color = new Color(0.90f, 0.84f, 0.70f, 1f);
             var trackRt = track.rectTransform;
             trackRt.anchorMin = new Vector2(0.5f, 0.5f);
             trackRt.anchorMax = new Vector2(0.5f, 0.5f);
-            trackRt.sizeDelta = new Vector2(TrackWidth, 8f);
-            trackRt.anchoredPosition = new Vector2(0f, -52f);
+            trackRt.pivot = new Vector2(0.5f, 0.5f);
+            trackRt.sizeDelta = new Vector2(TrackWidth, 20f);
+            trackRt.anchoredPosition = new Vector2(0f, 8f);
+            var trackShadow = track.gameObject.AddComponent<Shadow>();
+            trackShadow.effectColor = new Color(0f, 0f, 0f, 0.35f);
+            trackShadow.effectDistance = new Vector2(3f, -4f);
 
-            _fill = CreateImage(track.transform, "Fill", ColAccent);
-            _fillRt = _fill.rectTransform;
-            _fillRt.anchorMin = new Vector2(0f, 0f);
-            _fillRt.anchorMax = new Vector2(0f, 1f);
-            _fillRt.pivot = new Vector2(0f, 0.5f);
-            _fillRt.anchoredPosition = Vector2.zero;
-            _fillRt.sizeDelta = new Vector2(0f, 0f);
+            _fill = CreateImage(track.transform, "Fill", Color.white);
+            _fill.sprite = MenuSkin.Gold;
+            var fillRt = _fill.rectTransform;
+            _fillRt = fillRt;
+            fillRt.anchorMin = new Vector2(0f, 0f);
+            fillRt.anchorMax = new Vector2(0f, 1f);
+            fillRt.pivot = new Vector2(0f, 0.5f);
+            fillRt.anchoredPosition = Vector2.zero;
+            fillRt.sizeDelta = new Vector2(0f, 0f);
 
-            // Segment ticks drawn over the fill: a meter, not a plain bar.
-            const int segments = 24;
+            const int segments = 20;
             for (int i = 1; i < segments; i++)
             {
-                var tick = CreateImage(track.transform, "Tick" + i, new Color(0.03f, 0.03f, 0.04f, 0.9f));
+                var tick = CreateImage(track.transform, "Tick" + i, new Color(0.15f, 0.11f, 0.06f, 0.30f));
                 var tickRt = tick.rectTransform;
                 tickRt.anchorMin = new Vector2(0f, 0f);
                 tickRt.anchorMax = new Vector2(0f, 1f);
@@ -427,54 +374,71 @@ namespace RakeMultiplayer.UI
                 tickRt.anchoredPosition = new Vector2(TrackWidth * i / segments, 0f);
             }
 
-            _percent = CreateText(panel.transform, "Percent", "00%", 12,
-                new Vector2(260f, -78f), ColAccent, FontStyle.Bold);
+            _percent = CreateText(board.transform, "Percent", "00%", 22,
+                new Vector2(342f, 8f), ColAmber, 150f);
 
-            // ---- footer ----
-            _tip = CreateText(canvas.transform, "Tip", Tips[0], 12,
-                new Vector2(0f, -258f), ColMuted, FontStyle.Normal, 1100f);
+            // ---- reel ----
+            _reel = CreateImage(board.transform, "Reel", Color.white);
+            _reel.sprite = MenuSkin.Reel;
+            _reel.color = new Color(0.34f, 0.29f, 0.23f, 1f);
+            _reelRt = _reel.rectTransform;
+            _reelRt.anchorMin = new Vector2(0.5f, 0.5f);
+            _reelRt.anchorMax = new Vector2(0.5f, 0.5f);
+            _reelRt.pivot = new Vector2(0.5f, 0.5f);
+            _reelRt.sizeDelta = new Vector2(116f, 116f);
+            _reelRt.anchoredPosition = new Vector2(405f, -180f);
+            _reel.gameObject.AddComponent<SlowSpin>().DegreesPerSecond = -11f;
 
-            _version = CreateText(canvas.transform, "Version",
-                PluginInfo.NAME + "  v" + PluginInfo.VERSION, 11,
-                new Vector2(0f, 0f), new Color(0.35f, 0.33f, 0.30f, 1f), FontStyle.Normal, 400f);
+            // ---- tip paper ----
+            var tipPaper = CreateImage(canvasObj.transform, "TipNote", Color.white);
+            tipPaper.sprite = MenuSkin.Paper;
+            tipPaper.color = new Color(0.96f, 0.90f, 0.76f, 1f);
+            var tipRt = tipPaper.rectTransform;
+            tipRt.anchorMin = new Vector2(0.5f, 0.5f);
+            tipRt.anchorMax = new Vector2(0.5f, 0.5f);
+            tipRt.pivot = new Vector2(0.5f, 0.5f);
+            tipRt.sizeDelta = new Vector2(820f, 120f);
+            tipRt.anchoredPosition = new Vector2(0f, -365f);
+            tipRt.localEulerAngles = new Vector3(0f, 0f, -1.2f);
+            var tipShadow = tipPaper.gameObject.AddComponent<Shadow>();
+            tipShadow.effectColor = new Color(0f, 0f, 0f, 0.55f);
+            tipShadow.effectDistance = new Vector2(8f, -10f);
+
+            CreateText(tipPaper.transform, "TipKicker", "FIELD NOTE", 12,
+                new Vector2(0f, 34f), ColInkMuted, 700f);
+            _tip = CreateText(tipPaper.transform, "Tip", Tips[0], 20,
+                new Vector2(0f, -8f), ColInk, 730f);
+
+            // tape strips on the note
+            AddTape(tipPaper.transform, new Vector2(-360f, 42f), -16f);
+            AddTape(tipPaper.transform, new Vector2(360f, 42f), 14f);
+
+            // ---- version ----
+            _version = CreateText(canvasObj.transform, "Version",
+                PluginInfo.NAME + "  v" + PluginInfo.VERSION, 12,
+                new Vector2(-30f, 20f), new Color(0.45f, 0.40f, 0.33f, 1f), 400f);
             var versionRt = _version.rectTransform;
             versionRt.anchorMin = new Vector2(1f, 0f);
             versionRt.anchorMax = new Vector2(1f, 0f);
             versionRt.pivot = new Vector2(1f, 0f);
-            versionRt.anchoredPosition = new Vector2(-28f, 18f);
+            versionRt.anchoredPosition = new Vector2(-30f, 20f);
             _version.alignment = TextAnchor.LowerRight;
         }
 
-        /// <summary>Thin red brackets in the four screen corners: a framed, filmic feel.</summary>
-        private void AddCorners(Transform parent)
+        private static void AddTape(Transform parent, Vector2 position, float rotation)
         {
-            AddCorner(parent, new Vector2(0f, 1f), 1f, -1f);
-            AddCorner(parent, new Vector2(1f, 1f), -1f, -1f);
-            AddCorner(parent, new Vector2(0f, 0f), 1f, 1f);
-            AddCorner(parent, new Vector2(1f, 0f), -1f, 1f);
+            var tape = CreateImage(parent, "Tape", Color.white);
+            tape.sprite = MenuSkin.Paper;
+            tape.color = new Color(0.80f, 0.74f, 0.58f, 0.65f);
+            var rt = tape.rectTransform;
+            rt.anchorMin = new Vector2(0.5f, 0.5f);
+            rt.anchorMax = new Vector2(0.5f, 0.5f);
+            rt.pivot = new Vector2(0.5f, 0.5f);
+            rt.sizeDelta = new Vector2(70f, 22f);
+            rt.anchoredPosition = position;
+            rt.localEulerAngles = new Vector3(0f, 0f, rotation);
         }
 
-        private void AddCorner(Transform parent, Vector2 anchor, float dx, float dy)
-        {
-            var h = CreateImage(parent, "CornerH", ColAccent);
-            var hRt = h.rectTransform;
-            hRt.anchorMin = anchor;
-            hRt.anchorMax = anchor;
-            hRt.pivot = new Vector2(dx > 0f ? 0f : 1f, 0.5f);
-            hRt.sizeDelta = new Vector2(46f, 2f);
-            hRt.anchoredPosition = new Vector2(dx * 10f, dy * 10f);
-
-            var v = CreateImage(parent, "CornerV", ColAccent);
-            var vRt = v.rectTransform;
-            vRt.anchorMin = anchor;
-            vRt.anchorMax = anchor;
-            vRt.pivot = new Vector2(0.5f, dy > 0f ? 0f : 1f);
-            vRt.sizeDelta = new Vector2(2f, 46f);
-            vRt.anchoredPosition = new Vector2(dx * 10f, dy * 10f);
-
-            _corners.Add(h);
-            _corners.Add(v);
-        }
         private static Texture2D BuildVignette()
         {
             const int size = 128;
@@ -490,9 +454,35 @@ namespace RakeMultiplayer.UI
                     float dx = (x / (size - 1f)) * 2f - 1f;
                     float dy = (y / (size - 1f)) * 2f - 1f;
                     float d = Mathf.Sqrt(dx * dx + dy * dy) / 1.4142f;
-                    float alpha = Mathf.Clamp01((d - 0.42f) / 0.58f);
-                    alpha = alpha * alpha * 0.82f;
+                    float alpha = Mathf.Clamp01((d - 0.38f) / 0.62f);
+                    alpha = alpha * alpha * 0.86f;
                     pixels[y * size + x] = new Color32(0, 0, 0, (byte)(alpha * 255f));
+                }
+            }
+
+            tex.SetPixels32(pixels);
+            tex.Apply(false, true);
+            return tex;
+        }
+
+        private static Texture2D BuildRadial()
+        {
+            const int size = 128;
+            var tex = new Texture2D(size, size, TextureFormat.ARGB32, false);
+            tex.wrapMode = TextureWrapMode.Clamp;
+            tex.filterMode = FilterMode.Bilinear;
+
+            var pixels = new Color32[size * size];
+            for (int y = 0; y < size; y++)
+            {
+                for (int x = 0; x < size; x++)
+                {
+                    float dx = (x / (size - 1f)) * 2f - 1f;
+                    float dy = (y / (size - 1f)) * 2f - 1f;
+                    float d = Mathf.Sqrt(dx * dx + dy * dy) / 1.4142f;
+                    float alpha = Mathf.Clamp01(1f - d);
+                    alpha = alpha * alpha;
+                    pixels[y * size + x] = new Color32(255, 255, 255, (byte)(alpha * 255f));
                 }
             }
 
@@ -521,8 +511,9 @@ namespace RakeMultiplayer.UI
         }
 
         private static Text CreateText(Transform parent, string name, string text, int fontSize,
-            Vector2 anchoredPos, Color color, FontStyle style, float width = 760f)
+            Vector2 anchoredPos, Color color, float width = 760f)
         {
+            MenuSkin.Init();
             var obj = new GameObject(name, typeof(RectTransform));
             obj.transform.SetParent(parent, false);
             var rt = obj.GetComponent<RectTransform>();
@@ -534,12 +525,12 @@ namespace RakeMultiplayer.UI
 
             var txt = obj.AddComponent<Text>();
             txt.text = text;
-            txt.font = Resources.GetBuiltinResource<Font>("Arial.ttf");
+            txt.font = MenuSkin.HandFont;
             txt.fontSize = fontSize;
-            txt.fontStyle = style;
+            txt.fontStyle = FontStyle.Normal;
             txt.alignment = TextAnchor.MiddleCenter;
             txt.color = color;
-            txt.horizontalOverflow = HorizontalWrapMode.Overflow;
+            txt.horizontalOverflow = HorizontalWrapMode.Wrap;
             txt.verticalOverflow = VerticalWrapMode.Overflow;
             return txt;
         }

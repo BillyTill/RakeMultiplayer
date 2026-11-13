@@ -15,6 +15,6 @@ using System.Runtime.InteropServices;
 [assembly: Guid("a1b2c3d4-e5f6-7890-abcd-ef1234567890")]
 
 [assembly: InternalsVisibleTo("RakeMultiplayer.Tests")]
-[assembly: AssemblyVersion("1.0.23.0")]
-[assembly: AssemblyFileVersion("1.0.23.0")]
-[assembly: AssemblyInformationalVersion("1.0.23")]
+[assembly: AssemblyVersion("1.1.0.0")]
+[assembly: AssemblyFileVersion("1.1.0.0")]
+[assembly: AssemblyInformationalVersion("1.1.0-alpha.1")]
