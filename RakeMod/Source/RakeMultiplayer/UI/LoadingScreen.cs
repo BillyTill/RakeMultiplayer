@@ -78,13 +78,13 @@ namespace RakeMultiplayer.UI
         // ------------------------------------------------------------------ public API
 
         /// <summary>Show the overlay (fades in if it was hidden).</summary>
-        public static void Show(string title, string subtitle, string status, bool indeterminate = false)
+        public static void Show(string title, string subtitle, string status, bool indeterminate = false, bool closeMenu = true)
         {
             if (_quitting) return;
 
             var screen = Instance;
             if (screen == null) return;
-            screen.ShowInternal(title, subtitle, status, indeterminate);
+            screen.ShowInternal(title, subtitle, status, indeterminate, closeMenu);
         }
 
         public static void SetStatus(string status)
@@ -143,10 +143,10 @@ namespace RakeMultiplayer.UI
             if (_instance == this) _instance = null;
         }
 
-        private void ShowInternal(string title, string subtitle, string status, bool indeterminate)
+        private void ShowInternal(string title, string subtitle, string status, bool indeterminate, bool closeMenu)
         {
-            // A level is about to load: the menu must never stay over the loader.
-            UI.MultiplayerMenu.CloseForLoad();
+            // Level loads close the menu; short connection screens leave it alone.
+            if (closeMenu) UI.MultiplayerMenu.CloseForLoad();
 
             _title.text = string.IsNullOrEmpty(title) ? "LOADING" : title.ToUpperInvariant();
             _subtitle.text = string.IsNullOrEmpty(subtitle) ? "" : subtitle.ToUpperInvariant();

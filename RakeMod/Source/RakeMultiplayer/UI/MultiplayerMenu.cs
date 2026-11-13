@@ -125,6 +125,9 @@ namespace RakeMultiplayer.UI
                 {
                     _waitingForConnection = false;
                     LoadingScreen.Hide();
+                    _menuVisible = true;
+                    if (_mainContainer != null) _mainContainer.SetActive(true);
+                    ShowMultiplayerPanel();
                     RakeMultiplayerPlugin.Log?.LogError("[Menu] Connection timed out!");
                     
                     // Восстановить кнопку с ошибкой
@@ -283,6 +286,11 @@ namespace RakeMultiplayer.UI
 
         public void ShowLobby()
         {
+            _menuVisible = true;
+            if (_mainContainer != null) _mainContainer.SetActive(true);
+            Cursor.lockState = CursorLockMode.None;
+            Cursor.visible = true;
+
             HideAllPanels();
             if (_uiBuilder != null && _uiBuilder.LobbyPanel != null)
             {
@@ -481,7 +489,7 @@ namespace RakeMultiplayer.UI
             _waitingForConnection = true;
             _connectionTimer = 0f;
 
-            LoadingScreen.Show("CONTACTING THE HOST", "ONLINE", "Handshaking with the host", true);
+            LoadingScreen.Show("CONTACTING THE HOST", "ONLINE", "Handshaking with the host", true, false);
             
             if (_uiBuilder != null && _uiBuilder.ConnectButton != null)
             {
