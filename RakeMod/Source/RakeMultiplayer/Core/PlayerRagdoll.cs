@@ -48,6 +48,21 @@ namespace RakeMultiplayer
         public static bool IsActive { get { return _localInstance != null; } }
         public bool IsCorpseFrozen { get { return _frozen; } }
 
+        /// <summary>True while this player is a ragdoll (hit reaction or corpse).</summary>
+        public static bool IsDown(int playerId)
+        {
+            if (playerId <= 0) return false;
+
+            var spawner = PlayerSpawner.Instance;
+            var local = spawner != null ? spawner.LocalPlayer : null;
+            if (local != null && local.PlayerId == playerId)
+            {
+                return _localInstance != null;
+            }
+
+            return _remoteInstances.ContainsKey(playerId);
+        }
+
         private static readonly string[] PhysicsBones =
         {
             "Bip01 Pelvis", "Bip01 Spine", "Bip01 Spine1", "Bip01 Spine2",

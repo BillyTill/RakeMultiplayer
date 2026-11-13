@@ -302,19 +302,21 @@ namespace RakeMultiplayer
                                                    " rakePos=" + rake.position.ToString("F1"));
             }
 
-            // Move within 25 m: expect Stealth and then a charge.
+            // Put the hunter at melee range and force the charge: this exercises the
+            // wind-up, the single strike and the recovery pause.
             Vector3 toRake = rake.position - desired;
             toRake.y = 0f;
             toRake.Normalize();
-            Vector3 near = rake.position - toRake * 25f;
+            Vector3 near = rake.position - toRake * 2f;
             if (NavMesh.SamplePosition(near, out hit, 20f, NavMesh.AllAreas)) near = hit.position;
             if (manager != null)
                 manager.ServerTeleportPlayer(1, near, Quaternion.LookRotation(rake.position - near));
             else
                 local.transform.position = near;
 
-            RakeMultiplayerPlugin.Log?.LogInfo("[AITest] player moved to 25 m: " + near.ToString("F1"));
+            RakeMultiplayerPlugin.Log?.LogInfo("[AITest] player moved to melee range: " + near.ToString("F1"));
             yield return new WaitForSeconds(1f);
+            ai.ForceAttack();
 
             for (int i = 0; i < 12; i++)
             {

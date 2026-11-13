@@ -615,6 +615,7 @@ namespace RakeMultiplayer
                 string mode = args.Length > 0 ? args[0].ToLowerInvariant() : "";
                 if (mode == "lurk") { rake.ForceLurk(); return "rake ai: lurk forced"; }
                 if (mode == "flee") { rake.ForceFlee(); return "rake ai: flee forced"; }
+                if (mode == "attack") { rake.ForceAttack(); return "rake ai: attack forced"; }
                 return rake.GetAiDebugInfo();
             });
 

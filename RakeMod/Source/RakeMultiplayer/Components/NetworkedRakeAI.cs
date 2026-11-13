@@ -126,10 +126,16 @@ namespace RakeMultiplayer
         private RakeState _clientAudioState = RakeState.Idle;
 
         // Server-authoritative Rake hit
-        private const float AttackInterval = 1.4f;
+        private const float AttackInterval = 1.4f; // legacy pacing, see windup/recovery below
+        private const float AttackWindup = 0.7f;
+        private const float AttackRecovery = 2.0f;
         private const int AttackDamage = 10;
         private const string AttackDamageType = "RakeAttack";
         private float _attackCooldown;
+        private float _attackTimer;
+        private bool _attackSwing;
+        private bool _attackStruck;
+        private bool _clientAttackSwingPrev;
 
         // AI State Machine
         public enum RakeState : byte
@@ -1196,7 +1202,7 @@ namespace RakeMultiplayer
                 FaceTarget(lookDir, 10f);
             }
 
-            if (distance <= attackRange)
+            if (distance <= attackRange && !IsTargetDown(currentTarget))
             {
                 TransitionToState(RakeState.Attack);
                 return;
@@ -1216,6 +1222,21 @@ namespace RakeMultiplayer
                 return;
             }
 
+            // A hunter who is already in the hit-reaction ragdoll (or dead) must not be
+            // hammered. Vanilla hits once and then breaks contact; wait for them to get up.
+            if (IsTargetDown(currentTarget))
+            {
+                TransitionToState(RakeState.Chase);
+                return;
+            }
+
+            float distance = Vector3.Distance(transform.position, currentTarget.position);
+            if (distance > attackRange * 2f)
+            {
+                TransitionToState(RakeState.Chase);
+                return;
+            }
+
             // Face target
             Vector3 lookDir = (currentTarget.position - transform.position).normalized;
             lookDir.y = 0f;
@@ -1224,8 +1245,8 @@ namespace RakeMultiplayer
                 FaceTarget(lookDir, 15f);
             }
 
-            // Enemy_AI has no Attack() method - the attack is the "bAttack" animator
-            // flag. Stop the agent and freeze the walk so the animation plays in place.
+            // The vanilla attack is the "bAttack" animator flag. Keep it true only for
+            // the wind-up, then release it so the swing cannot loop as a machine gun.
             var attackAgent = GetEnemyAgent();
             if (attackAgent != null && attackAgent.isOnNavMesh)
             {
@@ -1235,35 +1256,68 @@ namespace RakeMultiplayer
             if (animator != null)
             {
                 animator.SetFloat("Speed", 0f);
-                animator.SetBool("bAttack", true);
+                animator.SetBool("bAttack", _attackSwing);
             }
 
-            // One hit per AttackInterval while the target stays in range and in front.
-            _attackCooldown -= Time.deltaTime;
-            if (_attackCooldown <= 0f)
+            _attackCooldown = Mathf.Max(0f, _attackCooldown - Time.deltaTime);
+
+            if (!_attackStruck)
             {
-                _attackCooldown = AttackInterval;
-
-                Vector3 toTarget = currentTarget.position - transform.position;
-                float distance = toTarget.magnitude;
-                toTarget.y = 0f;
-                bool inFront = toTarget.sqrMagnitude < 0.01f ||
-                               Vector3.Dot(transform.forward, toTarget.normalized) > 0.2f;
-
-                if (distance <= attackRange + 1.5f && inFront)
+                // Wind-up: roar, then strike once.
+                _attackSwing = true;
+                _attackTimer -= Time.deltaTime;
+                if (_attackTimer <= 0f)
                 {
-                    DealRakeDamage(currentTarget);
+                    _attackStruck = true;
+                    _attackSwing = false;
+                    _attackTimer = AttackRecovery;
+
+                    Vector3 toTarget = currentTarget.position - transform.position;
+                    float strikeDistance = toTarget.magnitude;
+                    toTarget.y = 0f;
+                    bool inFront = toTarget.sqrMagnitude < 0.01f ||
+                                   Vector3.Dot(transform.forward, toTarget.normalized) > 0.2f;
+
+                    if (strikeDistance <= attackRange + 1.5f && inFront &&
+                        !IsTargetDown(currentTarget))
+                    {
+                        DealRakeDamage(currentTarget);
+                        PlayAttackImpact();
+                    }
                 }
             }
-
-            // Attack -> Chase: target escaped (moved out of range)
-            if (Vector3.Distance(transform.position, currentTarget.position) > attackRange * 2f)
+            else
             {
-                TransitionToState(RakeState.Chase);
-                return;
+                // Recovery: a clear pause (and a small backstep) before the next swing.
+                _attackSwing = false;
+                _attackTimer -= Time.deltaTime;
+                if (_attackTimer <= 0f)
+                {
+                    if (distance <= chargeStartDistance)
+                    {
+                        _attackStruck = false;
+                        _attackTimer = AttackWindup;
+                        _attackSwing = true;
+                        _attackCooldown = AttackWindup + AttackRecovery;
+                        PlayAttackRoar();
+                    }
+                    else
+                    {
+                        TransitionToState(RakeState.Chase);
+                        return;
+                    }
+                }
             }
         }
 
+        /// <summary>True while the target is a ragdoll or a corpse.</summary>
+        private bool IsTargetDown(Transform target)
+        {
+            if (target == null) return false;
+            var net = target.GetComponent<NetworkedPlayer>();
+            if (net == null) return false;
+            return PlayerDeathSystem.IsDead(net.PlayerId) || PlayerRagdoll.IsDown(net.PlayerId);
+        }
         /// <summary>
         /// Flee: run directly away from the hunter until it is farther than
         /// fleeStopDistance, then pause before the next lurk cycle.
@@ -1507,6 +1561,7 @@ namespace RakeMultiplayer
             var net = victim.GetComponent<NetworkedPlayer>();
             if (net == null) return;
             if (PlayerDeathSystem.IsDead(net.PlayerId)) return;
+            if (PlayerRagdoll.IsDown(net.PlayerId)) return;
 
             Vector3 away = victim.position - transform.position;
             away.y = 0f;
@@ -1792,7 +1847,7 @@ namespace RakeMultiplayer
                 case RakeState.Attack:
                     animator.speed = 1f;
                     animator.SetBool("bCrouch", false);
-                    animator.SetBool("bAttack", true);
+                    animator.SetBool("bAttack", _attackSwing);
                     animator.SetInteger("WalkType", 1);
                     animator.SetFloat("Speed", 0f);
                     break;
@@ -1905,9 +1960,14 @@ namespace RakeMultiplayer
                 _clientStepTimer = 0f;
             }
 
-            // On the host the state machine already handles chase vocalisations;
-            // this mirror only adds the attack roars there.
-            if (RakeMultiplayerPlugin.isServer && currentState == RakeState.Chase) return;
+            // The host plays its own chase/attack sounds from the state machine.
+            if (RakeMultiplayerPlugin.isServer) return;
+
+            // One roar per swing: the host sends bAttack only during the wind-up, so
+            // its rising edge is the exact moment to roar on a client.
+            bool swing = animator != null && animator.GetBool("bAttack");
+            if (swing && !_clientAttackSwingPrev) PlayAttackRoar();
+            _clientAttackSwingPrev = swing;
 
             if (currentState != _clientAudioState)
             {
@@ -1922,14 +1982,6 @@ namespace RakeMultiplayer
             {
                 _clientVocalTimer = UnityEngine.Random.Range(4f, 7f);
                 PlayChaseVocalization();
-            }
-            else if (currentState == RakeState.Attack)
-            {
-                _clientVocalTimer = 2.5f;
-                if (enemyAI != null && enemyAI.playerAttackRoars != null && enemyAI.playerAttackRoars.Length > 0)
-                {
-                    src.PlayOneShot(enemyAI.playerAttackRoars[UnityEngine.Random.Range(0, enemyAI.playerAttackRoars.Length)]);
-                }
             }
             else
             {
@@ -2076,7 +2128,7 @@ namespace RakeMultiplayer
             }
 
             sb.AppendLine("HEALTH     " + GetCurrentHealth().ToString("F0") + "/" + MaxHealth.ToString("F0"));
-            sb.AppendLine("ATTACK     cooldown=" + _attackCooldown.ToString("F2") + " s   range=" + attackRange.ToString("F1") + " m");
+            sb.AppendLine("ATTACK     cooldown=" + _attackCooldown.ToString("F2") + " s   swing=" + _attackSwing + "   struck=" + _attackStruck + "   range=" + attackRange.ToString("F1") + " m");
             sb.AppendLine("NOISE      cooldown=" + _noiseCooldown.ToString("F1") + " s   hearRange=" + noiseHearRange.ToString("F0") + " m");
             return sb.ToString();
         }
@@ -2111,6 +2163,13 @@ namespace RakeMultiplayer
         {
             if (!IsAiActive || currentTarget == null) return;
             TransitionToState(RakeState.Flee);
+        }
+
+        public void ForceAttack()
+        {
+            if (!IsAiActive) return;
+            if (currentTarget == null) return;
+            TransitionToState(RakeState.Chase);
         }
 
         private void UpdateDead()
@@ -2169,9 +2228,13 @@ namespace RakeMultiplayer
 
                 case RakeState.Attack:
                     if (animator != null) animator.SetBool("bCrouch", false);
-                    // A short wind-up so the first hit is not applied on the same frame
-                    // the state is entered.
-                    _attackCooldown = 0.5f;
+                    // A real wind-up: the first hit lands after AttackWindup, then the
+                    // Rake recovers for AttackRecovery before it can swing again.
+                    _attackStruck = false;
+                    _attackTimer = AttackWindup;
+                    _attackSwing = true;
+                    _attackCooldown = AttackWindup + AttackRecovery;
+                    PlayAttackRoar();
                     break;
 
                 case RakeState.Follow:
@@ -2197,7 +2260,7 @@ namespace RakeMultiplayer
             // The vanilla attack animation is the bAttack flag, not a method call.
             if (animator != null)
             {
-                animator.SetBool("bAttack", newState == RakeState.Attack);
+                animator.SetBool("bAttack", false);
             }
 
             RakeMultiplayerPlugin.Log?.LogInfo($"[AI] State transition: {previousState} -> {currentState}");
@@ -2310,6 +2373,30 @@ namespace RakeMultiplayer
             if (agent != null) agent.Warp(teleportPos);
 
             RakeMultiplayerPlugin.Log?.LogInfo($"[AI] FeignedRetreat teleport behind hunter at {teleportPos}");
+        }
+
+        private void PlayAttackRoar()
+        {
+            var src = audioSource != null ? audioSource : (enemyAI != null ? enemyAI.audioSource : null);
+            if (src == null || enemyAI == null) return;
+
+            var clips = enemyAI.playerAttackRoars;
+            if (clips != null && clips.Length > 0)
+            {
+                src.PlayOneShot(clips[UnityEngine.Random.Range(0, clips.Length)]);
+            }
+        }
+
+        private void PlayAttackImpact()
+        {
+            var src = audioSource != null ? audioSource : (enemyAI != null ? enemyAI.audioSource : null);
+            if (src == null || enemyAI == null) return;
+
+            var clips = enemyAI.playerAttackKicks;
+            if (clips != null && clips.Length > 0)
+            {
+                src.PlayOneShot(clips[UnityEngine.Random.Range(0, clips.Length)]);
+            }
         }
 
         private void PlayChaseVocalization()
