@@ -46,6 +46,18 @@ namespace RakeMultiplayer
 
         private const float SenseRange = 100f;
 
+        /// <summary>
+        /// Distance that counts as "outside the level". The day staging platform sits far
+        /// from every hunter, so a player-controlled Rake beyond this must be moved back.
+        /// </summary>
+        private const float StagingPlatformDistance = 400f;
+
+        /// <summary>
+        /// Safety net during play: only a body this far from every hunter is certainly
+        /// back on the level's staging platform rather than legitimately stalking.
+        /// </summary>
+        private const float StagingSafetyDistance = 1200f;
+
         private static RakePlayerController _instance;
 
         private Transform _rake;
@@ -113,6 +125,8 @@ namespace RakeMultiplayer
         private float _mantleTimer;
         private float _climbVertical;
 
+        private float _stagingCheck;
+        private bool _spawnChecked;
         private float _scanTimer;
         private readonly List<NetworkedPlayer> _players = new List<NetworkedPlayer>();
         private readonly List<Animal_AI> _animals = new List<Animal_AI>();
@@ -230,6 +244,11 @@ namespace RakeMultiplayer
             _rakeAI.SetPlayerControlled(true);
             if (!RakeMultiplayerPlugin.isServer) _rakeAI.SetLocalOwner(true);
 
+            // The level keeps its Rake on a staging platform under the map during the day.
+            // The AI day-spawn routine is skipped once a player takes over, so the player
+            // would otherwise be left standing on that white platform outside the forest.
+            WarpOffStagingPlatform(StagingPlatformDistance);
+
             HideHunter();
 
             var camGo = new GameObject("RakePlayerCamera");
@@ -259,6 +278,48 @@ namespace RakeMultiplayer
             RakeMultiplayerPlugin.Log?.LogInfo("[RakePlay] Player took control of the Rake at " +
                                                rake.position.ToString("F1"));
             return true;
+        }
+
+        /// <summary>
+        /// Player-controlled Rake: move the body from the level's day staging platform
+        /// onto playable ground. Called on takeover and, throttled, during play in case
+        /// the level parks the body again after a phase change.
+        /// </summary>
+        private void WarpOffStagingPlatform(float maxDistance)
+        {
+            if (_rakeAI == null || _rake == null) return;
+
+            if (!_spawnChecked)
+            {
+                _spawnChecked = true;
+                RakeMultiplayerPlugin.Log?.LogInfo("[RakePlay] Spawn check: body " +
+                                                   _rake.position.ToString("F1") + ", nearest hunter " +
+                                                   _rakeAI.DistanceToNearestHunter().ToString("F0") +
+                                                   " m, phase=" + CurrentPhaseName());
+            }
+
+            if (!_rakeAI.IsOutsidePlayableArea(maxDistance)) return;
+
+            bool wasEnabled = _rakeController != null && _rakeController.enabled;
+            if (wasEnabled) _rakeController.enabled = false;
+
+            bool moved = _rakeAI.WarpToPlayableGround();
+
+            if (wasEnabled && _rakeController != null) _rakeController.enabled = true;
+            if (!moved) return;
+
+            _verticalVelocity = 0f;
+            _climbing = false;
+            _jumpActive = false;
+            _climbMove = Vector3.zero;
+            _yaw = _rake.eulerAngles.y;
+        }
+
+        private static string CurrentPhaseName()
+        {
+            DayNightManager dayNight = DayNightManager.Instance;
+            if (dayNight == null) return "none";
+            return dayNight.CurrentPhase == Phase.Day ? "day" : "night";
         }
 
         private void SetupCharacterController()
@@ -522,6 +583,14 @@ namespace RakeMultiplayer
                     _hunterRetry = 0.5f;
                     HideHunter(); // the local player may not exist yet right after a scene load
                 }
+            }
+
+            // The level may re-park the body on the staging platform between phases.
+            _stagingCheck -= dt;
+            if (_stagingCheck <= 0f)
+            {
+                _stagingCheck = 2f;
+                WarpOffStagingPlatform(StagingSafetyDistance);
             }
 
             UpdateCamera(dt);

@@ -345,8 +345,9 @@ namespace RakeMultiplayer
                     return;
                 }
 
-                // Player-controlled Rakes (and the AFK test-arena Rake) must not be teleported
-                // to the forest by the day spawn logic.
+                // Player-controlled Rakes are moved to the forest by RakePlayerController
+                // when they take over (the AI day-spawn path below is skipped for them), so
+                // this must not teleport a player mid-hunt.
                 if (!_playerControlled) UpdateDaySpawn();
 
                 if (!RakeMultiplayerPlugin.isConnected)
@@ -595,8 +596,15 @@ namespace RakeMultiplayer
 
         private float NearestPlayerDistance(Vector3 position)
         {
+            Vector3 nearest;
+            return NearestPlayerDistance(position, out nearest);
+        }
+
+        private float NearestPlayerDistance(Vector3 position, out Vector3 nearestPosition)
+        {
             float best = float.MaxValue;
             bool found = false;
+            nearestPosition = position;
 
             var spawner = PlayerSpawner.Instance;
             if (spawner != null)
@@ -605,6 +613,7 @@ namespace RakeMultiplayer
                 if (local != null)
                 {
                     best = Vector3.Distance(position, local.transform.position);
+                    nearestPosition = local.transform.position;
                     found = true;
                 }
 
@@ -612,12 +621,101 @@ namespace RakeMultiplayer
                 {
                     if (remote == null) continue;
                     float d = Vector3.Distance(position, remote.position);
-                    if (d < best) best = d;
+                    if (d < best)
+                    {
+                        best = d;
+                        nearestPosition = remote.position;
+                    }
                     found = true;
                 }
             }
 
             return found ? best : -1f;
+        }
+
+        /// <summary>Distance from the Rake to the nearest hunter, or -1 when none is known.</summary>
+        public float DistanceToNearestHunter()
+        {
+            return NearestPlayerDistance(transform.position);
+        }
+
+        /// <summary>
+        /// <c>true</c> when the body is outside the playable area. The level keeps its Rake on
+        /// a staging platform under the map until the day spawn moves it, so a body far from
+        /// every hunter (or below them during the day) is not somewhere a player can stand.
+        /// </summary>
+        public bool IsOutsidePlayableArea(float maxDistance)
+        {
+            Vector3 nearest;
+            float distance = NearestPlayerDistance(transform.position, out nearest);
+            if (distance <= 0f) return false;
+            if (distance > maxDistance) return true;
+
+            DayNightManager dayNight = DayNightManager.Instance;
+            bool day = dayNight == null || dayNight.CurrentPhase == Phase.Day;
+            return day && transform.position.y < nearest.y - 30f;
+        }
+
+        /// <summary>
+        /// Move a player-controlled Rake from the staging platform onto playable ground.
+        /// The NavMeshAgent is disabled while a player drives the Rake, so only the
+        /// transform moves here; callers that own a CharacterController should disable it
+        /// around this call.
+        /// </summary>
+        public bool WarpToPlayableGround()
+        {
+            Vector3 target;
+            string source;
+            if (!TryFindForestSpawn(out target, out source))
+            {
+                RakeMultiplayerPlugin.Log?.LogWarning("[RakePlay] Spawn: no forest point found");
+                return false;
+            }
+
+            NavMeshHit hit;
+            if (!NavMesh.SamplePosition(target, out hit, 25f, NavMesh.AllAreas))
+            {
+                RakeMultiplayerPlugin.Log?.LogWarning("[RakePlay] Spawn: '" + source +
+                                                     "' is off the NavMesh: " + target.ToString("F1"));
+                return false;
+            }
+            target = hit.position;
+
+            Vector3 before = transform.position;
+            WarpBody(target);
+
+            RakeMultiplayerPlugin.Log?.LogInfo("[RakePlay] Spawn: Rake moved from " + before.ToString("F1") +
+                                              " to " + target.ToString("F1") + " (source: " + source +
+                                              ", nearest hunter: " +
+                                              NearestPlayerDistance(target).ToString("F0") + " m)");
+            return true;
+        }
+
+        private void WarpBody(Vector3 target)
+        {
+            transform.position = target;
+            targetPosition = target;
+            hasTargetPosition = true;
+
+            // Detach the agent, move the transform, then re-attach: Warp alone can fail
+            // and the agent would snap the body back to its old position next frame.
+            var agent = GetEnemyAgent();
+            if (agent == null) return;
+
+            bool wasEnabled = agent.enabled;
+            if (wasEnabled) agent.enabled = false;
+
+            transform.position = target;
+
+            if (wasEnabled)
+            {
+                agent.enabled = true;
+                if (!agent.Warp(target))
+                {
+                    RakeMultiplayerPlugin.Log?.LogWarning("[AI] Warp failed at " + target.ToString("F1") +
+                                                         " (isOnNavMesh=" + agent.isOnNavMesh + ")");
+                }
+            }
         }
 
         private void MoveToForestSpawn()

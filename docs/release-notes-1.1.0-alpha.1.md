@@ -26,6 +26,11 @@ The installer adds BepInEx 5.4.23.2 (x86), the mod and Telepathy, and creates
   V-Sync and anti-aliasing; saved and re-applied on launch.
 - **HUD:** night phase/timer in the top-right, Rake health bar at the top center.
 
+## Fixes
+
+- The Rake no longer spawns on the level's staging platform under the map during the
+  day: taking the Rake now puts it on forest ground next to the hunters.
+
 ## Screenshots
 
 ![Main menu](https://raw.githubusercontent.com/BillyTill/RakeMultiplayer/master/docs/screenshots/main-menu.jpg)
