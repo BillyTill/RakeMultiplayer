@@ -179,6 +179,24 @@ namespace RakeMultiplayer.Core
                     SendJson(client, RunOnMain(delegate { return SetInput(name, value); }));
                     return;
                 }
+                if (target == "/camera")
+                {
+                    string view = Get(args, "view");
+                    string look = Get(args, "look");
+                    SendJson(client, RunOnMain(delegate { return RakePlayerController.BridgeCamera(view, look); }));
+                    return;
+                }
+                if (target == "/fx")
+                {
+                    SendJson(client, RunOnMain(delegate
+                    {
+                        return RakeCameraEffects.BridgeApply(
+                            Get(args, "mode"), Get(args, "grain"), Get(args, "fov"),
+                            Get(args, "damage"), Get(args, "bright"), Get(args, "heat"),
+                            Get(args, "contrast"));
+                    }));
+                    return;
+                }
                 if (target == "/canvases")
                 {
                     SendJson(client, CanvasesJson());
@@ -452,27 +470,52 @@ namespace RakeMultiplayer.Core
 
         private IEnumerator CaptureRoutine(Action<byte[]> done)
         {
-            try { if (File.Exists(_shotPath)) File.Delete(_shotPath); } catch { }
-
-            // Let panel fade/settle animations finish before the capture.
-            yield return new WaitForSeconds(0.35f);
+            // ReadPixels at the end of the frame is used instead of Application.CaptureScreenshot:
+            // the latter silently fails to write a file on some camera setups (e.g. a camera
+            // parented to an animated bone with post effects).
             yield return new WaitForEndOfFrame();
-            Application.CaptureScreenshot(_shotPath);
 
-            for (int i = 0; i < 60; i++)
+            byte[] png = null;
+            try
             {
-                yield return null;
-                if (!File.Exists(_shotPath)) continue;
+                int width = Screen.width;
+                int height = Screen.height;
+                var tex = new Texture2D(width, height, TextureFormat.RGB24, false);
+                tex.ReadPixels(new Rect(0f, 0f, width, height), 0, 0);
+                tex.Apply();
+                png = tex.EncodeToPNG();
+                UnityEngine.Object.Destroy(tex);
+            }
+            catch (Exception ex)
+            {
+                RakeMultiplayerPlugin.Log?.LogWarning("[Bridge] ReadPixels capture failed: " + ex.Message);
+            }
+
+            if (png == null)
+            {
+                // Fallback: Unity's own screenshot path.
                 try
                 {
-                    byte[] data = File.ReadAllBytes(_shotPath);
-                    try { File.Delete(_shotPath); } catch { }
-                    done(data);
-                    yield break;
+                    if (File.Exists(_shotPath)) File.Delete(_shotPath);
                 }
                 catch { }
+
+                Application.CaptureScreenshot(_shotPath);
+                for (int i = 0; i < 60; i++)
+                {
+                    yield return null;
+                    if (!File.Exists(_shotPath)) continue;
+                    try
+                    {
+                        png = File.ReadAllBytes(_shotPath);
+                        try { File.Delete(_shotPath); } catch { }
+                        break;
+                    }
+                    catch { }
+                }
             }
-            done(null);
+
+            done(png);
         }
 
         private static Dictionary<string, string> ParseQuery(string query)

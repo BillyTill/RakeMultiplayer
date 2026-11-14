@@ -827,7 +827,7 @@ namespace RakeMultiplayer.Patches
         }
 
         [HarmonyPostfix]
-        static void Postfix(Enemy_AI __instance)
+        static void Postfix(Enemy_AI __instance, int amount)
         {
             if (!RakeMultiplayerPlugin.Enabled.Value) return;
             if (ReferenceEquals(__instance, null)) return;
@@ -860,7 +860,7 @@ namespace RakeMultiplayer.Patches
             }
 
             // A player-controlled Rake cannot attack for a moment after being hit.
-            if (RakePlayerController.IsActive) RakePlayerController.NotifyDamageTaken(__instance.transform);
+            if (RakePlayerController.IsActive) RakePlayerController.NotifyDamageTaken(__instance.transform, amount);
 
             // Keep the health bar in sync for every damage source (host weapon, traps...).
             if (RakeMultiplayerPlugin.isConnected && RakeMultiplayerPlugin.isServer)

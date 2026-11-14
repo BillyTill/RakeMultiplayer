@@ -12,5 +12,8 @@ First public alpha of Rake Multiplayer.
 - Display & graphics settings: resolution, window mode, refresh rate, quality,
   V-Sync and anti-aliasing, saved and re-applied on launch.
 - HUD in the top-right corner and a raised Rake health bar.
+- Rake first-person optics: 105° FOV bound to the head bone, colour / black-and-white
+  thermal / night vision, white heat signatures for players and animals, damage grain
+  and edge flash, dirty-glass vignette.
 - The Rake now starts on forest ground instead of the level's staging platform during the day.
 - Steam lobby worldwide search and null-safe lobby rows.

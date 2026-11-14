@@ -108,7 +108,9 @@ namespace RakeMultiplayer
 
         private void Start()
         {
-            StartCoroutine(Watchdog(180f));
+            // Only a batch test needs a watchdog: in a normal session this timer used to
+            // hard-exit the game 180 s after launch, menu included.
+            if (_enabled || _aiTest || _deathTest || _noclipTest) StartCoroutine(Watchdog(180f));
 
             if (_enabled) StartCoroutine(Run());
             else if (_aiTest) StartCoroutine(RunAiTest());
