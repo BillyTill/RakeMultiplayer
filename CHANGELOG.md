@@ -32,3 +32,5 @@ First public alpha of Rake Multiplayer.
 - First person while climbing hides the body, so the raised arms no longer fill the lens.
 - Frame statistics overlay on `F8`: frame, CPU, GPU and render time in milliseconds,
   visible triangles, draw calls and objects.
+- New `[Graphics] TerrainShadows` config option (default `false`): disables the terrain
+  shadow pass on every level and re-applies it after a graphics preset change.

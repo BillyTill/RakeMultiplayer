@@ -27,6 +27,7 @@ namespace RakeMultiplayer
         internal static ConfigEntry<bool> EnableGameBridge;
         internal static ConfigEntry<int> GameBridgePort;
         internal static ConfigEntry<bool> ControlLighting;
+        internal static ConfigEntry<bool> TerrainShadows;
         internal static ConfigEntry<bool> HitReaction;
 
         // Network state (managed by RakeNetworkManager)
@@ -79,10 +80,27 @@ namespace RakeMultiplayer
             ControlLighting = Config.Bind("General", "ControlLighting", false,
                 "Let the mod drive scene ambient light and sun intensity (off = keep the level lighting)");
 
+            // Terrain shadows re-render every tree the terrain draws, which is the most
+            // expensive pass on the forest levels. Off by default; set true to keep them.
+            TerrainShadows = Config.Bind("Graphics", "TerrainShadows", false,
+                "Let the terrain cast shadows (false = disable the terrain shadow pass, recommended on forest levels)");
+
             // Two instances on one machine are unusable otherwise: the unfocused
             // window freezes, so the host stops simulating for the client.
             Application.runInBackground = RunInBackground.Value;
             Log.LogInfo($"[Multiplayer] runInBackground = {Application.runInBackground}");
+
+            // Terrain shadow control: applied on every level load and on quality changes.
+            try
+            {
+                var terrainShadowsGo = new GameObject("TerrainShadowControl");
+                UnityEngine.Object.DontDestroyOnLoad(terrainShadowsGo);
+                terrainShadowsGo.AddComponent<TerrainShadowControl>();
+            }
+            catch (Exception ex)
+            {
+                Log.LogWarning("[Graphics] terrain shadow control failed: " + ex.Message);
+            }
 
             // In-game debug console (toggle with the backquote key)
             try

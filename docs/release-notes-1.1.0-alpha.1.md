@@ -74,6 +74,21 @@ included in `TRIS` (the engine exposes no terrain triangle count).
 
 ![In-game HUD](https://raw.githubusercontent.com/BillyTill/RakeMultiplayer/master/docs/screenshots/hud.jpg)
 
+## Graphics config
+
+`BepInEx/config/com.rake.multiplayer.cfg`:
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `[Graphics] TerrainShadows` | `false` | `false` turns the terrain shadow pass off (the terrain is one huge caster over every tree it draws); `true` keeps the level as shipped |
+
+The value is applied on every level load and again after a graphics preset change, so it
+survives switching quality in the menu. The result is written to the log:
+
+```
+[Graphics] terrain shadows OFF on 1 terrain(s) (was ON for 0, changed 0, 29748 tree instances) [scene Level_1(Day), quality High]
+```
+
 ## Known limitations
 
 - Steam hosting/browsing is still being tested across regions; use LAN if in doubt.
