@@ -14,3 +14,4 @@ First public alpha of Rake Multiplayer.
 - HUD in the top-right corner and a raised Rake health bar.
 - The Rake now starts on forest ground instead of the level's staging platform during the day.
 - Steam lobby worldwide search and null-safe lobby rows.
+- New Rake HUD: ribbed wound health, scratched moon phase ring, ability sockets, torn-ring sense markers.

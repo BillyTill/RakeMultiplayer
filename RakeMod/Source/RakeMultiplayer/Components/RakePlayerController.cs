@@ -1264,6 +1264,8 @@ namespace RakeMultiplayer
             if (_cameraCooldown < DamageAttackLockout) _cameraCooldown = DamageAttackLockout;
             _damageLockout = DamageAttackLockout;
 
+            if (_hudUi != null) _hudUi.PulseDamage();
+
             RakeMultiplayerPlugin.Log?.LogInfo("[RakePlay] Rake hit: attack locked for " +
                                                DamageAttackLockout + " s");
         }
