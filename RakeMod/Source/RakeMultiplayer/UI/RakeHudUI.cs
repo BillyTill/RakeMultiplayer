@@ -173,6 +173,7 @@ namespace RakeMultiplayer.UI
             var plate = NewImage("HealthPlate", root, new Color(0.027f, 0.035f, 0.031f, 0.92f), Tex.Plate(700, 122, 31));
             _hpPlate = plate.rectTransform;
             TopLeft(_hpPlate, 620f, 928f, 690f, 122f);
+            _hpPlate.localRotation = Quaternion.Euler(0f, 0f, -1.1f);
 
             // veins behind the plate, hidden until the Rake is hurt
             _hpVeins = NewImage("Veins", plate.transform, new Color(Blood.r, Blood.g, Blood.b, 0f), Tex.Veins());
@@ -233,7 +234,8 @@ namespace RakeMultiplayer.UI
         private void BuildAbilities(RectTransform root)
         {
             var plate = NewImage("AbilityPlate", root, new Color(0.024f, 0.031f, 0.027f, 0.88f), Tex.Plate(508, 160, 77));
-            TopLeft(plate.rectTransform, 92f, 884f, 496f, 160f);
+            TopLeft(plate.rectTransform, 92f, 884f, 496f, 168f);
+            plate.rectTransform.localRotation = Quaternion.Euler(0f, 0f, 1.6f);
 
             string[] names = { "GRAB", "ANIMAL", "CAMERA", "LEAP" };
             Sprite[] glyphs = { Tex.Claw(), Tex.Paw(), Tex.Eye(), Tex.Leap() };
@@ -241,11 +243,12 @@ namespace RakeMultiplayer.UI
             for (int i = 0; i < 4; i++)
             {
                 float cx = 158f + i * 124f;
-                float cy = 936f;
+                float cy = 930f;
 
                 var socket = NewImage("Socket" + i, plate.transform,
                     new Color(0.035f, 0.043f, 0.039f, 0.92f), Tex.Socket(78, 40 + i));
                 TopLeft(socket.rectTransform, cx - 92f - 39f, cy - 884f - 39f, 78f, 78f);
+                socket.rectTransform.localRotation = Quaternion.Euler(0f, 0f, (i - 1.5f) * 2.2f);
 
                 _socketGlow[i] = NewImage("Glow", socket.transform, new Color(Ember.r, Ember.g, Ember.b, 0.35f),
                     Tex.Ring(96, 3f));
@@ -278,7 +281,7 @@ namespace RakeMultiplayer.UI
                 nrt.anchorMin = new Vector2(0.5f, 0f);
                 nrt.anchorMax = new Vector2(0.5f, 0f);
                 nrt.pivot = new Vector2(0.5f, 1f);
-                nrt.anchoredPosition = new Vector2(0f, -22f);
+                nrt.anchoredPosition = new Vector2(0f, -20f);
                 nrt.sizeDelta = new Vector2(110f, 20f);
 
                 _abilityStates[i] = NewText("State", socket.transform, "READY", 16, Ember, TextAnchor.MiddleCenter);
@@ -286,7 +289,7 @@ namespace RakeMultiplayer.UI
                 srt.anchorMin = new Vector2(0.5f, 0f);
                 srt.anchorMax = new Vector2(0.5f, 0f);
                 srt.pivot = new Vector2(0.5f, 1f);
-                srt.anchoredPosition = new Vector2(0f, -44f);
+                srt.anchoredPosition = new Vector2(0f, -40f);
                 srt.sizeDelta = new Vector2(110f, 20f);
             }
         }
@@ -308,6 +311,13 @@ namespace RakeMultiplayer.UI
                 holder.pivot = new Vector2(0.5f, 0.5f);
                 holder.sizeDelta = new Vector2(110f, 110f);
 
+                var halo = NewImage("Halo", holder, new Color(1f, 1f, 1f, 0.55f), Tex.MarkerHalo());
+                var hrt = halo.rectTransform;
+                hrt.anchorMin = new Vector2(0.5f, 0.5f);
+                hrt.anchorMax = new Vector2(0.5f, 0.5f);
+                hrt.anchoredPosition = Vector2.zero;
+                hrt.sizeDelta = new Vector2(112f, 112f);
+
                 var icon = NewImage("Icon", holder, BloodHot, Tex.PreyRing());
                 var irt = icon.rectTransform;
                 irt.anchorMin = new Vector2(0.5f, 0.5f);
@@ -315,7 +325,10 @@ namespace RakeMultiplayer.UI
                 irt.anchoredPosition = Vector2.zero;
                 irt.sizeDelta = new Vector2(108f, 108f);
 
-                var label = NewText("Distance", holder, "0 m", 16, BoneDim, TextAnchor.MiddleCenter);
+                var label = NewText("Distance", holder, "0 m", 17, BoneDim, TextAnchor.MiddleCenter);
+                var outline = label.gameObject.AddComponent<Outline>();
+                outline.effectColor = new Color(0f, 0f, 0f, 0.85f);
+                outline.effectDistance = new Vector2(1f, -1f);
                 var lrt = label.rectTransform;
                 lrt.anchorMin = new Vector2(0.5f, 0.5f);
                 lrt.anchorMax = new Vector2(0.5f, 0.5f);
@@ -407,7 +420,8 @@ namespace RakeMultiplayer.UI
             _phaseKicker.color = accent;
             _phaseSubtitle.text = night ? "THE HUNT IS ON" : "THE RAKE SLEEPS";
             _phaseSubtitle.color = new Color(BoneDim.r, BoneDim.g, BoneDim.b, 0.8f);
-            _moon.color = night ? Bone : new Color(0.72f, 0.78f, 0.70f, 1f);
+            _moon.sprite = night ? Tex.Crescent(160) : Tex.Sun(160);
+            _moon.color = night ? Bone : new Color(0.78f, 0.82f, 0.70f, 1f);
 
             bool hasCycle = dayNight != null && dayNight.IsRunning;
             float left = hasCycle ? dayNight.GetRemainingTime() : 0f;
@@ -564,31 +578,41 @@ namespace RakeMultiplayer.UI
             root.localRotation = Quaternion.identity;
 
             var icon = _markerIcons[index];
+
+            // Every marker points away from the screen centre along its radius.
+            float dirX = nx * BandRadiusX;
+            float dirY = nz * BandRadiusY;
             icon.rectTransform.localRotation =
-                Quaternion.Euler(0f, 0f, Mathf.Atan2(-nx * BandRadiusX, -nz * BandRadiusY) * Mathf.Rad2Deg);
+                Quaternion.Euler(0f, 0f, Mathf.Atan2(dirY, dirX) * Mathf.Rad2Deg - 90f);
             float pulse = 0.5f + 0.5f * Mathf.Sin(_time * 2.6f + index);
             float alpha = 0.5f + 0.4f * (1f - distance / 100f);
 
+            // Red = player or trap; animals stay bone-coloured.
             if (kind == 0)
             {
                 icon.sprite = Tex.PreyRing();
-                icon.color = new Color(Mathf.Lerp(0.55f, 0.73f, pulse), 0.11f, 0.08f, alpha);
-                icon.rectTransform.sizeDelta = new Vector2(108f, 108f);
-                _markerText[index].color = BoneDim;
+                icon.color = new Color(0.86f, 0.10f, 0.07f, Mathf.Lerp(0.75f, 1f, pulse));
+                icon.rectTransform.sizeDelta = new Vector2(124f, 124f);
+                _markerText[index].color = new Color(0.90f, 0.24f, 0.18f, 0.95f);
+
+                float scale = 1f + 0.06f * pulse;
+                icon.rectTransform.localScale = new Vector3(scale, scale, 1f);
             }
             else if (kind == 1)
             {
                 icon.sprite = Tex.Chevrons();
-                icon.color = new Color(0.77f, 0.74f, 0.67f, alpha * 0.75f);
-                icon.rectTransform.sizeDelta = new Vector2(44f, 44f);
-                _markerText[index].color = new Color(BoneDim.r, BoneDim.g, BoneDim.b, 0.6f);
+                icon.color = new Color(0.84f, 0.81f, 0.73f, Mathf.Lerp(0.7f, 0.95f, pulse));
+                icon.rectTransform.sizeDelta = new Vector2(54f, 54f);
+                icon.rectTransform.localScale = Vector3.one;
+                _markerText[index].color = new Color(BoneDim.r, BoneDim.g, BoneDim.b, 0.7f);
             }
             else
             {
                 icon.sprite = Tex.Cross();
-                icon.color = new Color(0.59f, 0.57f, 0.52f, alpha * 0.7f);
-                icon.rectTransform.sizeDelta = new Vector2(32f, 32f);
-                _markerText[index].color = new Color(BoneDim.r, BoneDim.g, BoneDim.b, 0.55f);
+                icon.color = new Color(0.88f, 0.09f, 0.06f, 0.95f);
+                icon.rectTransform.sizeDelta = new Vector2(50f, 50f);
+                icon.rectTransform.localScale = Vector3.one;
+                _markerText[index].color = new Color(0.90f, 0.24f, 0.18f, 0.95f);
             }
 
             _markerText[index].text = Mathf.RoundToInt(distance) + " m";
@@ -785,27 +809,34 @@ namespace RakeMultiplayer.UI
                     var tex = NewTex(w, h);
                     var px = new Color32[w * h];
                     var rnd = new System.Random(seed);
-                    float radius = Mathf.Min(w, h) * 0.22f;
-
-                    // jittered rounded rectangle
-                    float[] noise = new float[16];
-                    for (int i = 0; i < noise.Length; i++) noise[i] = (float)rnd.NextDouble();
+                    float radius = Mathf.Min(w, h) * 0.16f;
 
                     for (int y = 0; y < h; y++)
                     {
                         for (int x = 0; x < w; x++)
                         {
                             float nx = x / (float)w, ny = y / (float)h;
-                            float wobble = (Mathf.Sin(nx * 9.1f + seed) + Mathf.Sin(ny * 7.7f - seed)) * 1.8f;
+
+                            // Torn outline: three harmonics plus per-pixel roughness.
+                            float wobble = Mathf.Sin(nx * 17.3f + seed) * 3.4f
+                                           + Mathf.Sin(ny * 13.7f - seed * 0.7f) * 2.8f
+                                           + Mathf.Sin((nx + ny) * 31.1f + seed * 1.3f) * 2.2f
+                                           + ((x * 73856093 ^ y * 19349663 ^ seed * 83492791) % 1000) / 1000f * 5.2f - 2.6f;
 
                             float dx = Mathf.Max(Mathf.Abs(x - w * 0.5f) - (w * 0.5f - radius), 0f);
                             float dy = Mathf.Max(Mathf.Abs(y - h * 0.5f) - (h * 0.5f - radius), 0f);
                             float d = Mathf.Sqrt(dx * dx + dy * dy) - radius + wobble;
 
                             float a = Mathf.Clamp01(0.5f - d) * 0.97f;
+
+                            // a few bites out of the edge
+                            float bx = (x - w * (0.12f + 0.76f * ((seed * 37) % 100) / 100f));
+                            float by = (y - h * 0.5f);
+                            if (a > 0f && bx * bx + by * by < 90f) a *= 0.25f;
+
                             if (a <= 0.01f) continue;
 
-                            float shade = 0.92f + 0.08f * Mathf.Sin(nx * 21f) * Mathf.Sin(ny * 17f);
+                            float shade = 0.90f + 0.10f * Mathf.Sin(nx * 27f) * Mathf.Sin(ny * 19f);
                             byte v = (byte)(Mathf.Clamp01(shade) * 255f);
                             px[y * w + x] = new Color32(v, v, v, (byte)(a * 255f));
                         }
@@ -835,12 +866,40 @@ namespace RakeMultiplayer.UI
                             float dx = (x - c) / c, dy = (y - c) / c;
                             float ang = Mathf.Atan2(dy, dx);
                             float r = Mathf.Sqrt(dx * dx + dy * dy);
-                            float edge = 0.86f
-                                         + 0.05f * Mathf.Sin(ang * 5f + phase[0])
-                                         + 0.04f * Mathf.Sin(ang * 8f + phase[1]);
-                            float a = Mathf.Clamp01((edge - r) * 18f);
+                            float edge = 0.84f
+                                         + 0.08f * Mathf.Sin(ang * 5f + phase[0])
+                                         + 0.06f * Mathf.Sin(ang * 9f + phase[1])
+                                         + 0.04f * Mathf.Sin(ang * 15f + phase[2])
+                                         + (((x * 73856093 ^ y * 19349663 ^ seed * 83492791) % 1000) / 1000f - 0.5f) * 0.06f;
+                            float a = Mathf.Clamp01((edge - r) * 16f);
                             if (a <= 0.01f) continue;
                             px[y * size + x] = new Color32(255, 255, 255, (byte)(a * 255f));
+                        }
+                    }
+
+                    tex.SetPixels32(px);
+                    tex.Apply(false, true);
+                    return FromTexture(tex);
+                });
+            }
+
+            public static Sprite MarkerHalo()
+            {
+                return Get("markerhalo", delegate
+                {
+                    const int size = 128;
+                    var tex = NewTex(size, size);
+                    var px = new Color32[size * size];
+                    float c = size * 0.5f;
+                    for (int y = 0; y < size; y++)
+                    {
+                        for (int x = 0; x < size; x++)
+                        {
+                            float dx = (x - c) / c, dy = (y - c) / c;
+                            float d = Mathf.Sqrt(dx * dx + dy * dy);
+                            float a = Mathf.Clamp01(1f - d);
+                            a = a * a * 0.55f;
+                            px[y * size + x] = new Color32(0, 0, 0, (byte)(a * 255f));
                         }
                     }
 
@@ -1082,6 +1141,33 @@ namespace RakeMultiplayer.UI
                             if (a <= 0.01f) continue;
                             px[y * size + x] = new Color32(255, 255, 255, (byte)(a * 255f));
                         }
+                    }
+
+                    tex.SetPixels32(px);
+                    tex.Apply(false, true);
+                    return FromTexture(tex);
+                });
+            }
+
+            public static Sprite Sun(int size)
+            {
+                return Get("sun" + size, delegate
+                {
+                    var tex = NewTex(size, size);
+                    var px = new Color32[size * size];
+                    float c = size * 0.5f;
+                    var col = new Color(1f, 1f, 1f, 1f);
+
+                    Disc(px, size, size, c, c, size * 0.20f, col);
+                    for (int i = 0; i < 12; i++)
+                    {
+                        float a = Mathf.Deg2Rad * (i * 30f + 15f);
+                        float r0 = size * 0.27f;
+                        float r1 = size * 0.36f + (i % 2) * size * 0.03f;
+                        Line(px, size, size,
+                            c + Mathf.Cos(a) * r0, c + Mathf.Sin(a) * r0,
+                            c + Mathf.Cos(a) * r1, c + Mathf.Sin(a) * r1,
+                            2.2f, new Color(1f, 1f, 1f, 0.75f));
                     }
 
                     tex.SetPixels32(px);

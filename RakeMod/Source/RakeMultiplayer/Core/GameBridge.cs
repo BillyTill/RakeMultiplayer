@@ -183,7 +183,8 @@ namespace RakeMultiplayer.Core
                 {
                     string view = Get(args, "view");
                     string pitch = Get(args, "pitch");
-                    SendJson(client, RunOnMain(delegate { return RakePlayerController.BridgeCamera(view, pitch); }));
+                    string look = Get(args, "look");
+                    SendJson(client, RunOnMain(delegate { return RakePlayerController.BridgeCamera(view, pitch, look); }));
                     return;
                 }
                 if (target == "/hud")

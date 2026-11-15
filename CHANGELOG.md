@@ -22,3 +22,6 @@ First public alpha of Rake Multiplayer.
 - Development watchdog no longer closes a normal session after 180 seconds.
 - First-person camera now follows the animated head bone (the skeleton keeps updating while the body is hidden).
 - First person: the eye sits slightly in front of the head so the Rake body can stay visible without the camera clipping into it.
+- HUD reshaped: torn plate edges, crooked panels and tilted ability sockets.
+- Target markers: bigger, with a dark backing, red for players and traps, and always oriented away from the screen centre.
+- Session phase now follows the loaded level: a Day scene starts on Day 1 with a sun icon instead of claiming night.

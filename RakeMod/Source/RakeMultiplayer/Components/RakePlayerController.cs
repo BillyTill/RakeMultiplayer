@@ -843,7 +843,7 @@ namespace RakeMultiplayer
         }
 
         /// <summary>Dev bridge: switch first/third person and report the camera state.</summary>
-        public static string BridgeCamera(string view, string pitch)
+        public static string BridgeCamera(string view, string pitch, string look)
         {
             if (_instance == null) return "{\"ok\":false,\"error\":\"rake camera is not active\"}";
 
@@ -855,6 +855,40 @@ namespace RakeMultiplayer
                     System.Globalization.CultureInfo.InvariantCulture, out pitchValue))
             {
                 _instance._pitch = Mathf.Clamp(pitchValue, -70f, 65f);
+            }
+
+            if (!string.IsNullOrEmpty(look) && _instance._camera != null)
+            {
+                Vector3 eye = _instance._camera.transform.position;
+                Vector3 target = eye;
+
+                if (look.Equals("animal", System.StringComparison.OrdinalIgnoreCase))
+                {
+                    float best = float.MaxValue;
+                    var animals = Object.FindObjectsOfType<Animal_AI>();
+                    for (int i = 0; i < animals.Length; i++)
+                    {
+                        if (animals[i] == null) continue;
+                        float d = Vector3.Distance(eye, animals[i].transform.position);
+                        if (d < best) { best = d; target = animals[i].transform.position + Vector3.up * 0.6f; }
+                    }
+                }
+                else if (look.Equals("trap", System.StringComparison.OrdinalIgnoreCase))
+                {
+                    float best = float.MaxValue;
+                    var traps = Object.FindObjectsOfType<Trap_proj>();
+                    for (int i = 0; i < traps.Length; i++)
+                    {
+                        if (traps[i] == null) continue;
+                        float d = Vector3.Distance(eye, traps[i].transform.position);
+                        if (d < best) { best = d; target = traps[i].transform.position + Vector3.up * 0.3f; }
+                    }
+                }
+
+                Vector3 to = target - eye;
+                _instance._yaw = Mathf.Atan2(to.x, to.z) * Mathf.Rad2Deg;
+                _instance._pitch = -Mathf.Atan2(to.y, new Vector2(to.x, to.z).magnitude) * Mathf.Rad2Deg;
+                if (_instance._rake != null) _instance._rake.rotation = Quaternion.Euler(0f, _instance._yaw, 0f);
             }
 
             string head = _instance._head != null ? _instance._head.name : string.Empty;

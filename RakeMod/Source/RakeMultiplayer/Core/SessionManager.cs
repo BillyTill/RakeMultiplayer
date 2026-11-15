@@ -107,14 +107,22 @@ namespace RakeMultiplayer
             // Find NetworkedRakeAI
             _networkedRake = FindObjectOfType<NetworkedRakeAI>();
 
-            // Start first night
+            // Start on the phase the loaded level actually shows: the game ships
+            // Level_X(Day) and Level_X(Night). Starting "night" on a day scene made the HUD
+            // claim night in broad daylight.
+            bool nightScene = UnityEngine.Application.loadedLevelName != null &&
+                              UnityEngine.Application.loadedLevelName.IndexOf("night",
+                                  System.StringComparison.OrdinalIgnoreCase) >= 0;
+
             if (_dayNightManager != null)
             {
-                _dayNightManager.StartCycle(isNight: true, startingNight: 1);
+                _dayNightManager.StartCycle(isNight: nightScene, startingNight: nightScene ? 1 : 0);
             }
 
             BroadcastSessionState();
-            RakeMultiplayerPlugin.Log?.LogInfo("[SessionManager] Session started - Night 1 begins");
+            RakeMultiplayerPlugin.Log?.LogInfo("[SessionManager] Session started on " +
+                                               (nightScene ? "Night 1" : "Day 1") +
+                                               " (scene '" + UnityEngine.Application.loadedLevelName + "')");
         }
 
         /// <summary>
