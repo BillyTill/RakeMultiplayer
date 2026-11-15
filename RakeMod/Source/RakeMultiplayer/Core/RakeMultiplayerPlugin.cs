@@ -229,6 +229,11 @@ namespace RakeMultiplayer
             UnityEngine.Object.DontDestroyOnLoad(batchTestObj);
             batchTestObj.AddComponent<BatchTestDriver>();
 
+            // Dark restyle of the vanilla pause menu.
+            var pauseSkinObj = new UnityEngine.GameObject("PauseMenuSkin");
+            UnityEngine.Object.DontDestroyOnLoad(pauseSkinObj);
+            pauseSkinObj.AddComponent<UI.PauseMenuSkin>();
+
             // InitializeNetworking() УБРАН — сеть только через UI
             // Если Enabled = false, сеть не стартует, но патчи применены (F1 работает)
 

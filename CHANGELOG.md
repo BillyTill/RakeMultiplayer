@@ -25,3 +25,4 @@ First public alpha of Rake Multiplayer.
 - HUD reshaped: torn plate edges, crooked panels and tilted ability sockets.
 - Target markers: bigger, with a dark backing, red for players and traps, and always oriented away from the screen centre.
 - Session phase now follows the loaded level: a Day scene starts on Day 1 with a sun icon instead of claiming night.
+- Pause menu restyled: torn plate, bone type, ember continue button; vanilla panel hidden, its actions kept.

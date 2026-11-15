@@ -187,6 +187,21 @@ namespace RakeMultiplayer.Core
                     SendJson(client, RunOnMain(delegate { return RakePlayerController.BridgeCamera(view, pitch, look); }));
                     return;
                 }
+                if (target == "/pause")
+                {
+                    string on = Get(args, "on");
+                    SendJson(client, RunOnMain(delegate
+                    {
+                        var menu = UnityEngine.Object.FindObjectOfType<GamePauseMenu>();
+                        if (menu == null) return "{\"ok\":false,\"error\":\"no pause menu\"}";
+
+                        bool want = on == "1" || string.Equals(on, "true", StringComparison.OrdinalIgnoreCase);
+                        menu.isPaused = want;
+                        if (menu.menu != null) menu.menu.SetActive(want);
+                        return "{\"ok\":true,\"paused\":" + (menu.isPaused ? "true" : "false") + "}";
+                    }));
+                    return;
+                }
                 if (target == "/hud")
                 {
                     SendJson(client, RunOnMain(delegate { return RakeHudUI.BridgePulse(); }));
