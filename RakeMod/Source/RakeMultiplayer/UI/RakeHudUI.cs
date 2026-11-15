@@ -61,11 +61,14 @@ namespace RakeMultiplayer.UI
         private readonly List<RectTransform> _markerRoots = new List<RectTransform>(MarkerPoolSize);
 
         private Image _bloodOverlay;
+        private RawImage _grain;
 
         private float _slowRefresh;
         private float _fastRefresh;
         private float _time;
         private float _damage;
+
+        public static RakeHudUI Instance { get; private set; }
 
         private static Font _cachedFont;
 
@@ -78,6 +81,7 @@ namespace RakeMultiplayer.UI
 
             var hud = go.AddComponent<RakeHudUI>();
             hud._owner = owner;
+            Instance = hud;
 
             try
             {
@@ -148,6 +152,17 @@ namespace RakeMultiplayer.UI
 
             _bloodOverlay = NewImage("Blood", root, new Color(1f, 1f, 1f, 0f), Tex.BloodVignette());
             Stretch(_bloodOverlay.rectTransform);
+
+            // Hit grain: a tiled noise layer that only shows while damage is fresh.
+            var grainGo = new GameObject("Grain", typeof(RectTransform), typeof(RawImage));
+            grainGo.transform.SetParent(root, false);
+            var grt = (RectTransform)grainGo.transform;
+            Stretch(grt);
+
+            _grain = grainGo.GetComponent<RawImage>();
+            _grain.texture = Tex.NoiseTexture();
+            _grain.uvRect = new Rect(0f, 0f, 3f, 3f);
+            _grain.color = new Color(1f, 1f, 1f, 0f);
         }
 
         private void BuildHealth(RectTransform root)
@@ -313,6 +328,14 @@ namespace RakeMultiplayer.UI
 
         // ---------------------------------------------------------------- runtime
 
+        /// <summary>Dev bridge helper.</summary>
+        public static string BridgePulse()
+        {
+            if (Instance == null) return "{\"ok\":false,\"error\":\"hud is not active\"}";
+            Instance.PulseDamage();
+            return "{\"ok\":true}";
+        }
+
         public void PulseDamage()
         {
             _damage = 1f;
@@ -335,7 +358,7 @@ namespace RakeMultiplayer.UI
             _fade = Mathf.MoveTowards(_fade, 1f, dt * 4f);
             if (_group != null) _group.alpha = _fade;
 
-            _damage = Mathf.MoveTowards(_damage, 0f, dt * 1.6f);
+            _damage = Mathf.MoveTowards(_damage, 0f, dt * 0.9f);
 
             _slowRefresh -= dt;
             if (_slowRefresh <= 0f)
@@ -454,6 +477,17 @@ namespace RakeMultiplayer.UI
             if (_bloodOverlay != null)
             {
                 _bloodOverlay.color = new Color(1f, 1f, 1f, Mathf.Clamp01(_damage) * 0.75f);
+            }
+
+            if (_grain != null)
+            {
+                float grain = Mathf.Clamp01(_damage) * 0.45f;
+                _grain.color = new Color(1f, 1f, 1f, grain);
+                if (grain > 0.01f)
+                {
+                    float g = Time.unscaledTime;
+                    _grain.uvRect = new Rect(Mathf.Repeat(g * 3.1f, 1f), Mathf.Repeat(g * 5.7f, 1f), 3f, 3f);
+                }
             }
 
             if (_hpPlate != null)
@@ -622,6 +656,41 @@ namespace RakeMultiplayer.UI
         private static class Tex
         {
             private static readonly Dictionary<string, Sprite> Cache = new Dictionary<string, Sprite>();
+
+            private static readonly Dictionary<string, Texture2D> TexCache = new Dictionary<string, Texture2D>();
+
+            private static Texture2D GetTex(string key, Func<Texture2D> make)
+            {
+                Texture2D tex;
+                if (TexCache.TryGetValue(key, out tex) && tex != null) return tex;
+                tex = make();
+                TexCache[key] = tex;
+                return tex;
+            }
+
+            /// <summary>Animated film grain for hits (tiled, point filtered).</summary>
+            public static Texture2D NoiseTexture()
+            {
+                return GetTex("noise", delegate
+                {
+                    const int size = 256;
+                    var tex = new Texture2D(size, size, TextureFormat.RGBA32, false);
+                    var px = new Color32[size * size];
+                    var rnd = new System.Random(1234);
+
+                    for (int i = 0; i < px.Length; i++)
+                    {
+                        byte v = (byte)rnd.Next(0, 256);
+                        px[i] = new Color32(v, v, v, (byte)rnd.Next(30, 150));
+                    }
+
+                    tex.SetPixels32(px);
+                    tex.Apply(false, true);
+                    tex.wrapMode = TextureWrapMode.Repeat;
+                    tex.filterMode = FilterMode.Point;
+                    return tex;
+                });
+            }
 
             private static Sprite Get(string key, Func<Sprite> make)
             {
@@ -850,7 +919,7 @@ namespace RakeMultiplayer.UI
                         float cy = (float)rnd.NextDouble() * h;
                         float nx = cx / w * 2f - 1f, ny = cy / h * 2f - 1f;
                         if (Mathf.Sqrt(nx * nx + ny * ny) < 0.7f) continue;
-                        Disc(px, w, h, cx, cy, 1.5f + (float)rnd.NextDouble() * 5f, new Color(120, 16, 10, 0.55f));
+                        Disc(px, w, h, cx, cy, 1.5f + (float)rnd.NextDouble() * 5f, new Color(0.47f, 0.06f, 0.04f, 0.55f));
                     }
 
                     tex.SetPixels32(px);

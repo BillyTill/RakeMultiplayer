@@ -59,6 +59,7 @@ The installer adds BepInEx 5.4.23.2 (x86), the mod and Telepathy, and creates
 | `Tab` | Cycle cameras |
 | `F3` | Minimap |
 | `Ctrl` | Sneak |
+| `V` | First / third person (first person uses a 105° eye bound to the head bone) |
 | `` ` `` | Developer console |
 
 Steam is optional for LAN play. Radmin VPN / Hamachi work: enter the host's VPN IP.

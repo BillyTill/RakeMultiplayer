@@ -15,3 +15,8 @@ First public alpha of Rake Multiplayer.
 - The Rake now starts on forest ground instead of the level's staging platform during the day.
 - Steam lobby worldwide search and null-safe lobby rows.
 - New Rake HUD: ribbed wound health, scratched moon phase ring, ability sockets, torn-ring sense markers.
+- Rake first-person camera: 105° field of view bound to the head bone, so the walk and
+  run animation is the head bob instead of a synthetic sway.
+- Hits: blood creeps in from the screen edges and a film-grain layer pulses for a
+  second, on top of the HUD.
+- Development watchdog no longer closes a normal session after 180 seconds.

@@ -46,6 +46,10 @@ namespace RakeMultiplayer
 
         private const float SenseRange = 100f;
 
+        /// <summary>The Rake sees much wider than a hunter.</summary>
+        private const float FirstPersonFov = 105f;
+        private const float ThirdPersonFov = 68f;
+
         /// <summary>
         /// Distance that counts as "outside the level". The day staging platform sits far
         /// from every hunter, so a player-controlled Rake beyond this must be moved back.
@@ -72,6 +76,12 @@ namespace RakeMultiplayer
         private float _pitch;
         private float _distance = 4.6f;
         private bool _firstPerson;
+
+        // First-person camera rides the head bone: the walk/run animation is the bob.
+        private Transform _head;
+        private bool _cameraOnHead;
+        private Vector3 _headEyeLocal;
+        private Quaternion _headEyeRot = Quaternion.identity;
 
         private readonly List<Renderer> _rakeRenderers = new List<Renderer>();
         private bool _rakeVisible = true;
@@ -261,6 +271,9 @@ namespace RakeMultiplayer
             }
             _camera.nearClipPlane = 0.05f;
             _camera.enabled = true;
+
+            _camera.fieldOfView = ThirdPersonFov;
+            _head = FindHeadBone(rake);
 
             _yaw = rake.eulerAngles.y;
             _pitch = 12f;
@@ -753,18 +766,37 @@ namespace RakeMultiplayer
         {
             if (_camera == null) return;
 
-            Quaternion rotation = Quaternion.Euler(_pitch, _yaw, 0f);
+            // Wider eyes in first person; blended so the switch is not a jump cut.
+            float targetFov = _firstPerson ? FirstPersonFov : ThirdPersonFov;
+            _camera.fieldOfView = dt > 0f
+                ? Mathf.MoveTowards(_camera.fieldOfView, targetFov, dt * 240f)
+                : targetFov;
 
             if (_firstPerson)
             {
                 SetRakeVisible(false);
+
+                if (_head != null)
+                {
+                    // The camera rides the head bone: the walk / run / attack animation is the
+                    // head bob, so no synthetic sway is added on top of it.
+                    if (!_cameraOnHead) AttachCameraToHead();
+
+                    _camera.transform.localPosition = _headEyeLocal;
+                    _camera.transform.localRotation = _headEyeRot * Quaternion.Euler(_pitch, 0f, 0f);
+                    return;
+                }
+
                 _camera.transform.position = _rake.position + Vector3.up * 1.72f;
-                _camera.transform.rotation = rotation;
+                _camera.transform.rotation = Quaternion.Euler(_pitch, _yaw, 0f);
                 return;
             }
 
+            if (_cameraOnHead) DetachCameraFromHead();
+
             SetRakeVisible(true);
 
+            Quaternion rotation = Quaternion.Euler(_pitch, _yaw, 0f);
             Vector3 pivot = _rake.position + Vector3.up * 1.65f;
             Vector3 position = pivot - rotation * Vector3.forward * _distance;
 
@@ -773,6 +805,79 @@ namespace RakeMultiplayer
 
             _camera.transform.position = position;
             _camera.transform.rotation = rotation;
+        }
+
+        private void AttachCameraToHead()
+        {
+            if (_head == null || _camera == null) return;
+
+            Quaternion view = Quaternion.Euler(0f, _yaw, 0f);
+            Vector3 eye = _head.position + Vector3.up * 0.13f + _rake.forward * 0.09f;
+
+            _camera.transform.SetParent(_head, true);
+            _camera.transform.position = eye;
+            _camera.transform.rotation = view;
+
+            // Kept in head-local space: the skeleton may use any axis convention.
+            _headEyeLocal = _head.InverseTransformPoint(eye);
+            _headEyeRot = Quaternion.Inverse(_head.rotation) * view;
+            _cameraOnHead = true;
+        }
+
+        private void DetachCameraFromHead()
+        {
+            if (_camera == null) return;
+            _camera.transform.SetParent(null, true);
+            _cameraOnHead = false;
+        }
+
+        private static Transform FindHeadBone(Transform rake)
+        {
+            if (rake == null) return null;
+
+            var animator = rake.GetComponent<Animator>();
+            if (animator != null && animator.isHuman)
+            {
+                Transform humanoid = animator.GetBoneTransform(HumanBodyBones.Head);
+                if (humanoid != null) return humanoid;
+            }
+
+            Transform[] all = rake.GetComponentsInChildren<Transform>(true);
+            Transform fallback = null;
+            for (int i = 0; i < all.Length; i++)
+            {
+                Transform candidate = all[i];
+                if (candidate == null) continue;
+
+                string name = candidate.name.ToLowerInvariant();
+                if (name.IndexOf("head", System.StringComparison.OrdinalIgnoreCase) < 0) continue;
+                if (name.IndexOf("nub", System.StringComparison.OrdinalIgnoreCase) >= 0) continue;
+
+                // "Bip001 Head" is the skeleton's head; anything else is a fallback.
+                if (name.EndsWith(" head")) return candidate;
+                if (fallback == null) fallback = candidate;
+            }
+
+            return fallback;
+        }
+
+        /// <summary>Dev bridge: switch first/third person and report the camera state.</summary>
+        public static string BridgeCamera(string view)
+        {
+            if (_instance == null) return "{\"ok\":false,\"error\":\"rake camera is not active\"}";
+
+            if (string.Equals(view, "fp", System.StringComparison.OrdinalIgnoreCase)) _instance._firstPerson = true;
+            else if (string.Equals(view, "tp", System.StringComparison.OrdinalIgnoreCase)) _instance._firstPerson = false;
+
+            string head = _instance._head != null ? _instance._head.name : string.Empty;
+            string fov = _instance._camera != null
+                ? Mathf.RoundToInt(_instance._camera.fieldOfView).ToString()
+                : "0";
+
+            return "{\"ok\":true,\"view\":\"" + (_instance._firstPerson ? "fp" : "tp") + "\"," +
+                   "\"fov\":" + fov + "," +
+                   "\"onHead\":" + (_instance._cameraOnHead ? "true" : "false") + "," +
+                   "\"head\":\"" + head + "\"}";
         }
 
         // -------------------------------------------------------------------- combat

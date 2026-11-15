@@ -179,6 +179,17 @@ namespace RakeMultiplayer.Core
                     SendJson(client, RunOnMain(delegate { return SetInput(name, value); }));
                     return;
                 }
+                if (target == "/camera")
+                {
+                    string view = Get(args, "view");
+                    SendJson(client, RunOnMain(delegate { return RakePlayerController.BridgeCamera(view); }));
+                    return;
+                }
+                if (target == "/hud")
+                {
+                    SendJson(client, RunOnMain(delegate { return RakeHudUI.BridgePulse(); }));
+                    return;
+                }
                 if (target == "/canvases")
                 {
                     SendJson(client, CanvasesJson());
