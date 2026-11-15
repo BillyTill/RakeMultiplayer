@@ -1040,7 +1040,7 @@ namespace RakeMultiplayer
                     var grab = new RakeGrabPacket
                     {
                         PlayerId = victimId,
-                        RakePosition = transform.position,
+                        RakePosition = _rake != null ? _rake.position : transform.position,
                         FocusPosition = focus
                     };
                     RakeNetworkManager.Instance?.ServerBroadcast(grab.Serialize());
@@ -1388,7 +1388,7 @@ namespace RakeMultiplayer
                 TargetPlayerId = targetPlayerId,
                 Amount = amount,
                 DamageType = damageType ?? string.Empty,
-                RakePosition = transform.position,
+                RakePosition = _rake != null ? _rake.position : transform.position,
                 FocusPosition = focusPosition,
                 TargetPosition = targetPosition
             };
@@ -1399,11 +1399,15 @@ namespace RakeMultiplayer
         }
         private void FaceInstant(Vector3 worldPosition)
         {
-            Vector3 dir = worldPosition - transform.position;
+            // The controller object is a plain root at the origin; the body is _rake.
+            // Rotating the controller used to drag the HUD (a child of it) across the screen.
+            if (_rake == null) return;
+
+            Vector3 dir = worldPosition - _rake.position;
             dir.y = 0f;
             if (dir.sqrMagnitude > 0.001f)
             {
-                transform.rotation = Quaternion.LookRotation(dir);
+                _rake.rotation = Quaternion.LookRotation(dir);
             }
         }
 

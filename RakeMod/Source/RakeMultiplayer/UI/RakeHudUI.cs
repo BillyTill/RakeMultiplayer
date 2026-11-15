@@ -32,6 +32,7 @@ namespace RakeMultiplayer.UI
 
         private RakePlayerController _owner;
 
+        private GameObject _canvasGo;
         private CanvasGroup _group;
         private float _fade;
 
@@ -101,8 +102,10 @@ namespace RakeMultiplayer.UI
         {
             _font = FontForHud();
 
-            var canvasGo = new GameObject("RakeHudCanvas", typeof(Canvas), typeof(CanvasScaler));
-            canvasGo.transform.SetParent(transform, false);
+            // Root canvas: as a child of the controller it inherited its rotation and the
+            // whole HUD slid across the screen when the Rake turned to face an attacker.
+            _canvasGo = new GameObject("RakeHudCanvas", typeof(Canvas), typeof(CanvasScaler));
+            var canvasGo = _canvasGo;
 
             var canvas = canvasGo.GetComponent<Canvas>();
             canvas.renderMode = RenderMode.ScreenSpaceOverlay;
@@ -339,6 +342,11 @@ namespace RakeMultiplayer.UI
         public void PulseDamage()
         {
             _damage = 1f;
+        }
+
+        private void OnDestroy()
+        {
+            if (_canvasGo != null) Destroy(_canvasGo);
         }
 
         private void Update()
