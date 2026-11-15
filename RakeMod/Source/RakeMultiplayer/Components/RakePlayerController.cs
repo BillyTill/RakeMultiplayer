@@ -48,6 +48,9 @@ namespace RakeMultiplayer
 
         /// <summary>The Rake sees much wider than a hunter.</summary>
         private const float FirstPersonFov = 105f;
+
+        /// <summary>How far in front of the head bone the eye sits, so it is not inside the skull.</summary>
+        private const float FirstPersonForward = 0.38f;
         private const float ThirdPersonFov = 68f;
 
         /// <summary>
@@ -78,11 +81,9 @@ namespace RakeMultiplayer
         private float _distance = 4.6f;
         private bool _firstPerson;
 
-        // First-person camera rides the head bone: the walk/run animation is the bob.
+        // First-person camera takes its position from the head bone (real bob) but keeps a
+        // fixed world orientation, so the head's animated rotation does not swing the view.
         private Transform _head;
-        private bool _cameraOnHead;
-        private Vector3 _headEyeLocal;
-        private Quaternion _headEyeRot = Quaternion.identity;
 
         private readonly List<Renderer> _rakeRenderers = new List<Renderer>();
         private bool _rakeVisible = true;
@@ -786,25 +787,17 @@ namespace RakeMultiplayer
 
             if (_firstPerson)
             {
-                SetRakeVisible(false);
+                // The body stays visible: looking down shows the creature's own chest and arms.
+                SetRakeVisible(true);
 
-                if (_head != null)
-                {
-                    // The camera rides the head bone: the walk / run / attack animation is the
-                    // head bob, so no synthetic sway is added on top of it.
-                    if (!_cameraOnHead) AttachCameraToHead();
+                Vector3 eye = _head != null
+                    ? _head.position + Vector3.up * 0.12f + _rake.forward * FirstPersonForward
+                    : _rake.position + Vector3.up * 1.72f;
 
-                    _camera.transform.localPosition = _headEyeLocal;
-                    _camera.transform.localRotation = _headEyeRot * Quaternion.Euler(_pitch, 0f, 0f);
-                    return;
-                }
-
-                _camera.transform.position = _rake.position + Vector3.up * 1.72f;
+                _camera.transform.position = eye;
                 _camera.transform.rotation = Quaternion.Euler(_pitch, _yaw, 0f);
                 return;
             }
-
-            if (_cameraOnHead) DetachCameraFromHead();
 
             SetRakeVisible(true);
 
@@ -817,30 +810,6 @@ namespace RakeMultiplayer
 
             _camera.transform.position = position;
             _camera.transform.rotation = rotation;
-        }
-
-        private void AttachCameraToHead()
-        {
-            if (_head == null || _camera == null) return;
-
-            Quaternion view = Quaternion.Euler(0f, _yaw, 0f);
-            Vector3 eye = _head.position + Vector3.up * 0.13f + _rake.forward * 0.09f;
-
-            _camera.transform.SetParent(_head, true);
-            _camera.transform.position = eye;
-            _camera.transform.rotation = view;
-
-            // Kept in head-local space: the skeleton may use any axis convention.
-            _headEyeLocal = _head.InverseTransformPoint(eye);
-            _headEyeRot = Quaternion.Inverse(_head.rotation) * view;
-            _cameraOnHead = true;
-        }
-
-        private void DetachCameraFromHead()
-        {
-            if (_camera == null) return;
-            _camera.transform.SetParent(null, true);
-            _cameraOnHead = false;
         }
 
         private static Transform FindHeadBone(Transform rake)
@@ -874,12 +843,19 @@ namespace RakeMultiplayer
         }
 
         /// <summary>Dev bridge: switch first/third person and report the camera state.</summary>
-        public static string BridgeCamera(string view)
+        public static string BridgeCamera(string view, string pitch)
         {
             if (_instance == null) return "{\"ok\":false,\"error\":\"rake camera is not active\"}";
 
             if (string.Equals(view, "fp", System.StringComparison.OrdinalIgnoreCase)) _instance._firstPerson = true;
             else if (string.Equals(view, "tp", System.StringComparison.OrdinalIgnoreCase)) _instance._firstPerson = false;
+
+            float pitchValue;
+            if (float.TryParse(pitch, System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture, out pitchValue))
+            {
+                _instance._pitch = Mathf.Clamp(pitchValue, -70f, 65f);
+            }
 
             string head = _instance._head != null ? _instance._head.name : string.Empty;
             string fov = _instance._camera != null
@@ -896,7 +872,7 @@ namespace RakeMultiplayer
 
             return "{\"ok\":true,\"view\":\"" + (_instance._firstPerson ? "fp" : "tp") + "\"," +
                    "\"fov\":" + fov + "," +
-                   "\"onHead\":" + (_instance._cameraOnHead ? "true" : "false") + "," +
+                   "\"onHead\":" + (_instance._head != null ? "true" : "false") + "," +
                    "\"parent\":\"" + parent + "\"," +
                    "\"head\":\"" + head + "\"," +
                    "\"cam\":\"" + camPos + "\"," +
