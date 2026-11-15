@@ -209,6 +209,127 @@ namespace RakeMultiplayer.Core
                     SendJson(client, RunOnMain(delegate { return RakePlayerController.BridgeProbe(pyaw, pheight); }));
                     return;
                 }
+                if (target == "/gfx")
+                {
+                    string shadows = Get(args, "shadows");
+                    string shadowDist = Get(args, "shadowdist");
+                    string far = Get(args, "far");
+                    string lod = Get(args, "lod");
+                    string maxLod = Get(args, "maxlod");
+                    string aa = Get(args, "aa");
+                    string texLimit = Get(args, "texlimit");
+                    string pixelLights = Get(args, "pixellights");
+                    string trees = Get(args, "trees");
+                    string fog = Get(args, "fog");
+                    string softVeg = Get(args, "softveg");
+
+                    SendJson(client, RunOnMain(delegate
+                    {
+                        float f;
+                        int i;
+
+                        if (!string.IsNullOrEmpty(shadows))
+                        {
+                            int.TryParse(shadows, out i);
+                            LightShadows quality = i <= 0 ? LightShadows.None
+                                : (i == 1 ? LightShadows.Hard : LightShadows.Soft);
+                            Light[] lights = UnityEngine.Object.FindObjectsOfType<Light>();
+                            for (int l = 0; l < lights.Length; l++)
+                            {
+                                if (lights[l] == null || lights[l].type != LightType.Directional) continue;
+                                lights[l].shadows = quality;
+                            }
+                        }
+
+                        if (!string.IsNullOrEmpty(shadowDist) &&
+                            float.TryParse(shadowDist, System.Globalization.NumberStyles.Float,
+                                System.Globalization.CultureInfo.InvariantCulture, out f))
+                        {
+                            QualitySettings.shadowDistance = f;
+                        }
+
+                        if (!string.IsNullOrEmpty(far) &&
+                            float.TryParse(far, System.Globalization.NumberStyles.Float,
+                                System.Globalization.CultureInfo.InvariantCulture, out f))
+                        {
+                            Camera[] cameras = UnityEngine.Object.FindObjectsOfType<Camera>();
+                            for (int c = 0; c < cameras.Length; c++)
+                            {
+                                if (cameras[c] != null && cameras[c].enabled) cameras[c].farClipPlane = f;
+                            }
+                        }
+
+                        if (!string.IsNullOrEmpty(lod) &&
+                            float.TryParse(lod, System.Globalization.NumberStyles.Float,
+                                System.Globalization.CultureInfo.InvariantCulture, out f))
+                        {
+                            QualitySettings.lodBias = f;
+                        }
+
+                        if (!string.IsNullOrEmpty(maxLod))
+                        {
+                            int.TryParse(maxLod, out i);
+                            QualitySettings.maximumLODLevel = i;
+                        }
+
+                        if (!string.IsNullOrEmpty(aa))
+                        {
+                            int.TryParse(aa, out i);
+                            QualitySettings.antiAliasing = i;
+                        }
+
+                        if (!string.IsNullOrEmpty(texLimit))
+                        {
+                            int.TryParse(texLimit, out i);
+                            QualitySettings.masterTextureLimit = i;
+                        }
+
+                        if (!string.IsNullOrEmpty(pixelLights))
+                        {
+                            int.TryParse(pixelLights, out i);
+                            QualitySettings.pixelLightCount = i;
+                        }
+
+                        if (!string.IsNullOrEmpty(fog))
+                        {
+                            int.TryParse(fog, out i);
+                            RenderSettings.fog = i != 0;
+                        }
+
+                        if (!string.IsNullOrEmpty(softVeg))
+                        {
+                            int.TryParse(softVeg, out i);
+                            QualitySettings.softVegetation = i != 0;
+                        }
+
+                        if (!string.IsNullOrEmpty(trees))
+                        {
+                            bool draw = trees != "0";
+                            Terrain[] terrains = Terrain.activeTerrains;
+                            for (int t2 = 0; t2 < terrains.Length; t2++)
+                            {
+                                if (terrains[t2] != null) terrains[t2].drawTreesAndFoliage = draw;
+                            }
+                        }
+
+                        Camera main = Camera.main;
+                        var sb = new System.Text.StringBuilder("{\"ok\":true");
+                        sb.Append(",\"far\":").Append(main != null ? main.farClipPlane.ToString("0.#",
+                            System.Globalization.CultureInfo.InvariantCulture) : "-");
+                        sb.Append(",\"lodBias\":").Append(QualitySettings.lodBias.ToString("0.##",
+                            System.Globalization.CultureInfo.InvariantCulture));
+                        sb.Append(",\"maxLod\":").Append(QualitySettings.maximumLODLevel);
+                        sb.Append(",\"aa\":").Append(QualitySettings.antiAliasing);
+                        sb.Append(",\"texLimit\":").Append(QualitySettings.masterTextureLimit);
+                        sb.Append(",\"pixelLights\":").Append(QualitySettings.pixelLightCount);
+                        sb.Append(",\"shadowDistance\":").Append(QualitySettings.shadowDistance.ToString("0.#",
+                            System.Globalization.CultureInfo.InvariantCulture));
+                        sb.Append(",\"fog\":").Append(RenderSettings.fog ? "true" : "false");
+                        sb.Append('}');
+                        return sb.ToString();
+                    }));
+                    return;
+                }
                 if (target == "/stats")
                 {
                     string on = Get(args, "on");
