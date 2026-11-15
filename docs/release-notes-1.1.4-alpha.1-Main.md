@@ -1,4 +1,4 @@
-# Rake Multiplayer 1.1.3-alpha.1-Main
+# Rake Multiplayer 1.1.4-alpha.1-Main
 
 > **Main build.** This release is built from the `master` (Main) branch: graphics
 > presets, the day/night level change, the HUD phase fix and the climbing guards.
@@ -131,6 +131,25 @@ survives switching quality in the menu. The result is written to the log:
   already exists in the dictionary`). Unity reuses instance ids after a scene load, so a
   stale camera key compared equal to a fresh one; the camera timing copy can no longer
   throw, and the frame timings keep updating across day/night transitions.
+
+## Fixes in 1.1.4
+
+- **The Rake attack is a grab again.** It used to only send damage: the hunter could keep
+  running, the camera never turned and the Rake swung on a loop. Now the hunter is held for
+  the 1.2 s wind-up (movement frozen, mouse look taken away, camera turned to the Rake),
+  hit once, and the grab ends with a 5 s break before another grab can start. Works for the
+  host and for clients - the client plays the grab on its own machine.
+- **The pause menu buttons work.** The plate canvas had no `GraphicRaycaster`, so clicks
+  never reached CONTINUE or EXIT TO MENU.
+- **CONTINUE really resumes**: the vanilla `Continue()` hides its own panel but leaves
+  `isPaused` true, and the mod's plate follows that flag, so it stayed on top of a running
+  game.
+- **EXIT TO MENU leaves the match properly**: disconnects, aborts the session, stops the
+  day/night cycle (it is DontDestroyOnLoad and otherwise kept changing levels over the menu),
+  restores `Time.timeScale` and hides the plate. The main menu is the shipped
+  `MainMenu_v2`, so the scene check now accepts level 0 instead of a name that does not exist.
+- **"Ignore collision failed" spam** in the log is gone: the ragdoll only pairs colliders
+  that are enabled, instead of asking Unity to ignore disabled ones every hit.
 
 ## Known limitations
 

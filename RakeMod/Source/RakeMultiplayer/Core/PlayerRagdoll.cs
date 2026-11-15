@@ -421,10 +421,16 @@ namespace RakeMultiplayer
                 Collider a = ragdollColliders[i];
                 if (a == null) continue;
 
+                // Unity refuses to pair inactive colliders and logs "Ignore collision
+                // failed" for every such call; disabled colliders (weapon, hidden clone)
+                // never produce contacts anyway.
+                if (!a.enabled || !a.gameObject.activeInHierarchy) continue;
+
                 for (int j = 0; j < playerColliders.Length; j++)
                 {
                     Collider b = playerColliders[j];
                     if (b == null || b == a) continue;
+                    if (!b.enabled || !b.gameObject.activeInHierarchy) continue;
                     Physics.IgnoreCollision(a, b, true);
                 }
             }

@@ -127,7 +127,8 @@ namespace RakeMultiplayer
 
         // Server-authoritative Rake hit
         private const float AttackInterval = 1.4f; // legacy pacing, see windup/recovery below
-        private const float AttackWindup = 0.7f;
+        // Vanilla grabs the hunter for 1.2 s before the hit lands (playerHountWaitTime).
+        private const float AttackWindup = 1.2f;
         private const float AttackRecovery = 2.0f;
         private const int AttackDamage = 10;
         private const string AttackDamageType = "RakeAttack";
@@ -135,6 +136,7 @@ namespace RakeMultiplayer
         private float _attackTimer;
         private bool _attackSwing;
         private bool _attackStruck;
+        private bool _grabSent;
         private bool _clientAttackSwingPrev;
 
         // AI State Machine
@@ -1585,57 +1587,66 @@ namespace RakeMultiplayer
                 animator.SetBool("bAttack", _attackSwing);
             }
 
-            if (!_attackStruck)
+            if (_attackStruck) return;
+
+            // The vanilla grab: from the first wind-up frame the hunter is held - frozen,
+            // mouse look taken away, camera turned to the Rake - and only then hit once.
+            // Without it the hunter simply outran every swing and the Rake swung forever.
+            if (!_grabSent)
             {
-                // Wind-up: roar, then strike once.
-                _attackSwing = true;
-                _attackTimer -= Time.deltaTime;
-                if (_attackTimer <= 0f)
-                {
-                    _attackStruck = true;
-                    _attackSwing = false;
-                    _attackTimer = AttackRecovery;
-
-                    Vector3 toTarget = currentTarget.position - transform.position;
-                    float strikeDistance = toTarget.magnitude;
-                    toTarget.y = 0f;
-                    bool inFront = toTarget.sqrMagnitude < 0.01f ||
-                                   Vector3.Dot(transform.forward, toTarget.normalized) > 0.2f;
-
-                    bool clearLine = HasLineOfSight(transform.position + Vector3.up * 1.2f,
-                                                    currentTarget.position + Vector3.up * 1.2f,
-                                                    currentTarget);
-
-                    if (strikeDistance <= attackRange + 1.5f && inFront && clearLine &&
-                        !IsTargetDown(currentTarget))
-                    {
-                        DealRakeDamage(currentTarget);
-                        PlayAttackImpact();
-                    }
-                }
+                _grabSent = true;
+                BeginGrab(currentTarget);
             }
-            else
+
+            _attackSwing = true;
+            _attackTimer -= Time.deltaTime;
+            if (_attackTimer > 0f) return;
+
+            _attackStruck = true;
+            _attackSwing = false;
+            _attackTimer = AttackRecovery;
+
+            Vector3 toTarget = currentTarget.position - transform.position;
+            float strikeDistance = toTarget.magnitude;
+            toTarget.y = 0f;
+            bool inFront = toTarget.sqrMagnitude < 0.01f ||
+                           Vector3.Dot(transform.forward, toTarget.normalized) > 0.2f;
+
+            bool clearLine = HasLineOfSight(transform.position + Vector3.up * 1.2f,
+                                            currentTarget.position + Vector3.up * 1.2f,
+                                            currentTarget);
+
+            // Vanilla reaches 5 m, our attack range is the melee distance.
+            if (strikeDistance <= attackRange + 2f && inFront && clearLine &&
+                !IsTargetDown(currentTarget))
             {
-                // Recovery: a clear pause (and a small backstep) before the next swing.
-                _attackSwing = false;
-                _attackTimer -= Time.deltaTime;
-                if (_attackTimer <= 0f)
-                {
-                    if (distance <= attackRange)
-                    {
-                        _attackStruck = false;
-                        _attackTimer = AttackWindup;
-                        _attackSwing = true;
-                        _attackCooldown = AttackWindup + AttackRecovery;
-                        PlayAttackRoar();
-                    }
-                    else
-                    {
-                        TransitionToState(RakeState.Chase);
-                        return;
-                    }
-                }
+                DealRakeDamage(currentTarget);
+                PlayAttackImpact();
             }
+
+            // One hit and out, like the vanilla hunt: the grab is over, the hunter gets
+            // time to get up before the Rake can grab again.
+            _attackCooldown = 5f;
+            TransitionToState(RakeState.Chase);
+        }
+
+        /// <summary>
+        /// Freezes the hunter and turns their camera to the Rake for the wind-up. Runs on
+        /// the victim's own machine: the host locally, a client through the grab packet.
+        /// </summary>
+        private void BeginGrab(Transform victim)
+        {
+            if (victim == null) return;
+            if (!RakeMultiplayerPlugin.isServer) return;
+
+            var net = victim.GetComponent<NetworkedPlayer>();
+            if (net == null || net.PlayerId <= 0) return;
+
+            Vector3 focus = enemyAI != null && enemyAI.focusPoint != null
+                ? enemyAI.focusPoint.position
+                : transform.position + Vector3.up * 1.6f;
+
+            RakeNetworkManager.Instance?.ServerGrabPlayer(net.PlayerId, transform.position, focus);
         }
 
         /// <summary>True while the target is a ragdoll or a corpse.</summary>
@@ -2541,6 +2552,33 @@ namespace RakeMultiplayer
         }
 
         /// <summary>
+        /// Dev bridge: place the Rake in front of the nearest hunter and grab immediately.
+        /// </summary>
+        public bool ForceGrabNow()
+        {
+            if (!IsAiActive) return false;
+
+            var spawner = PlayerSpawner.Instance;
+            var local = spawner != null ? spawner.LocalPlayer : null;
+            if (local == null) return false;
+
+            currentTarget = local.transform;
+
+            Vector3 pos = local.transform.position + local.transform.forward * 1.8f;
+            NavMeshHit hit;
+            if (NavMesh.SamplePosition(pos, out hit, 6f, NavMesh.AllAreas)) pos = hit.position;
+            WarpAiBody(pos);
+
+            Vector3 flat = local.transform.position - transform.position;
+            flat.y = 0f;
+            if (flat.sqrMagnitude > 0.01f) transform.rotation = Quaternion.LookRotation(flat);
+
+            _attackCooldown = 0f;
+            TransitionToState(RakeState.Attack);
+            return true;
+        }
+
+        /// <summary>
         /// Dev bridge: start the next stalk task without waiting for the 60-90 s pause.
         /// Used to verify that a level change left the AI able to move.
         /// </summary>
@@ -2651,6 +2689,7 @@ namespace RakeMultiplayer
                     // A real wind-up: the first hit lands after AttackWindup, then the
                     // Rake recovers for AttackRecovery before it can swing again.
                     _attackStruck = false;
+                    _grabSent = false;
                     _attackTimer = AttackWindup;
                     _attackSwing = true;
                     _attackCooldown = AttackWindup + AttackRecovery;

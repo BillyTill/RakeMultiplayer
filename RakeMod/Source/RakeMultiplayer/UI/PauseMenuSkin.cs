@@ -93,7 +93,10 @@ namespace RakeMultiplayer.UI
                 new[] { "Bahnschrift SemiCondensed", "Bahnschrift", "Segoe UI Semibold", "Arial" }, 32);
             if (_font == null) _font = Resources.GetBuiltinResource<Font>("Arial.ttf");
 
-            _canvas = new GameObject("RakePauseCanvas", typeof(Canvas), typeof(CanvasScaler), typeof(CanvasGroup));
+            // Without a GraphicRaycaster the canvas never receives pointer events, so
+            // both buttons were dead: the plate only reacted to Escape.
+            _canvas = new GameObject("RakePauseCanvas", typeof(Canvas), typeof(CanvasScaler),
+                typeof(CanvasGroup), typeof(GraphicRaycaster));
             DontDestroyOnLoad(_canvas);
             var canvas = _canvas.GetComponent<Canvas>();
             canvas.renderMode = RenderMode.ScreenSpaceOverlay;
@@ -124,11 +127,44 @@ namespace RakeMultiplayer.UI
             var line = NewImage("Line", plate.transform, new Color(Ember.r, Ember.g, Ember.b, 0.55f), Skin.Solid());
             TopLeft(line.rectTransform, 290f, 148f, 200f, 2f);
 
-            MakeButton(plate.transform, "CONTINUE", 200f, delegate { _game.Continue(); }, true);
-            MakeButton(plate.transform, "EXIT TO MENU", 288f, delegate { _game.Exit(); }, false);
+            MakeButton(plate.transform, "CONTINUE", 200f, ContinueGame, true);
+            MakeButton(plate.transform, "EXIT TO MENU", 288f, ExitToMenu, false);
 
             var hint = NewText("Hint", plate.transform, "ESC  ·  RESUME", 15, BoneDim, TextAnchor.MiddleCenter);
             TopLeft(hint.rectTransform, 40f, 400f, 700f, 22f);
+        }
+
+        /// <summary>
+        /// Resume the game. GamePauseMenu.Continue() hides the vanilla panel but leaves
+        /// isPaused true, and this skin is driven by isPaused, so the plate stayed on top
+        /// of a running game and the button looked dead.
+        /// </summary>
+        private void ContinueGame()
+        {
+            if (_game == null)
+            {
+                _shown = false;
+                Hide();
+                return;
+            }
+
+            _game.isPaused = false;
+            _game.Continue();
+        }
+
+        /// <summary>
+        /// The vanilla exit only calls Application.LoadLevel(0). In a modded session that
+        /// left the peer connected, kept Time.timeScale at 0 and left this plate (it is
+        /// DontDestroyOnLoad) on top of the main menu.
+        /// </summary>
+        private void ExitToMenu()
+        {
+            _shown = false;
+            Hide();
+
+            if (_game != null) _game.Continue();
+
+            UI.MultiplayerMenu.ExitToMainMenu("pause menu");
         }
 
         private void MakeButton(Transform parent, string label, float y, Action action, bool primary)

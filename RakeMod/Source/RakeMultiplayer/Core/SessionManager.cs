@@ -149,6 +149,24 @@ namespace RakeMultiplayer
         }
 
         /// <summary>
+        /// Drop the session without declaring a winner (player left to the main menu).
+        /// The day/night manager is DontDestroyOnLoad, so a running cycle would keep
+        /// switching levels over the menu.
+        /// </summary>
+        public void AbortSession()
+        {
+            _isRunning = false;
+            _currentState = SessionState.Waiting;
+            _currentNight = 0;
+            _sessionTimer = 0f;
+
+            if (_dayNightManager == null) _dayNightManager = DayNightManager.Instance;
+            if (_dayNightManager != null) _dayNightManager.StopCycle();
+
+            RakeMultiplayerPlugin.Log?.LogInfo("[SessionManager] Session aborted (left to the main menu)");
+        }
+
+        /// <summary>
         /// Update Rake health (called when DamageApplied is received)
         /// </summary>
         public void UpdateRakeHealth(float health)

@@ -338,9 +338,163 @@ namespace RakeMultiplayer.Core
                     }));
                     return;
                 }
+                if (target == "/raycast")
+                {
+                    float rx, ry;
+                    float.TryParse(Get(args, "x"), System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out rx);
+                    float.TryParse(Get(args, "y"), System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out ry);
+
+                    SendJson(client, RunOnMain(delegate
+                    {
+                        var data = new UnityEngine.EventSystems.PointerEventData(
+                            UnityEngine.EventSystems.EventSystem.current);
+                        data.position = new Vector2(rx, ry);
+                        data.pressPosition = data.position;
+
+                        var hits = new System.Collections.Generic.List<UnityEngine.EventSystems.RaycastResult>();
+                        var canvases = UnityEngine.Object.FindObjectsOfType<Canvas>();
+                        var sb = new System.Text.StringBuilder(256);
+                        sb.Append("{\"ok\":true,\"hits\":[");
+
+                        bool first = true;
+                        for (int i = 0; i < canvases.Length; i++)
+                        {
+                            var raycaster = canvases[i].GetComponent<UnityEngine.UI.GraphicRaycaster>();
+                            if (raycaster == null || !canvases[i].isActiveAndEnabled) continue;
+
+                            hits.Clear();
+                            raycaster.Raycast(data, hits);
+                            for (int h = 0; h < hits.Count; h++)
+                            {
+                                var go = hits[h].gameObject;
+                                if (go == null) continue;
+                                if (!first) sb.Append(',');
+                                first = false;
+                                sb.Append("{\"canvas\":\"").Append(Esc(canvases[i].name))
+                                  .Append("\",\"name\":\"").Append(Esc(go.name))
+                                  .Append("\",\"button\":")
+                                  .Append(go.GetComponent<UnityEngine.UI.Button>() != null ? "true" : "false")
+                                  .Append('}');
+                            }
+                        }
+
+                        sb.Append("]}");
+                        return sb.ToString();
+                    }));
+                    return;
+                }
+                if (target == "/hit")
+                {
+                    string kind = Get(args, "type");
+                    if (string.IsNullOrEmpty(kind)) kind = "RakeAttack";
+
+                    SendJson(client, RunOnMain(delegate
+                    {
+                        var rakeGo = RakeHighlight.FindRake();
+                        var ai = rakeGo != null ? rakeGo.GetComponent<NetworkedRakeAI>() : null;
+                        if (ai == null) return "{\"ok\":false,\"error\":\"no rake\"}";
+
+                        var spawner = PlayerSpawner.Instance;
+                        var local = spawner != null ? spawner.LocalPlayer : null;
+                        if (local == null) return "{\"ok\":false,\"error\":\"no local player\"}";
+
+                        bool hit = ai.AttackPlayer(local.transform, 10, kind);
+                        return "{\"ok\":" + (hit ? "true" : "false") +
+                               ",\"ragdoll\":" + (PlayerRagdoll.IsActive ? "true" : "false") +
+                               ",\"hp\":" + (local.GetComponent<FPSController>() != null ? local.GetComponent<FPSController>().Health.ToString() : "-") + "}";
+                    }));
+                    return;
+                }
+                if (target == "/tpp")
+                {
+                    float px, py, pz;
+                    float.TryParse(Get(args, "x"), System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out px);
+                    float.TryParse(Get(args, "y"), System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out py);
+                    float.TryParse(Get(args, "z"), System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out pz);
+
+                    SendJson(client, RunOnMain(delegate
+                    {
+                        var spawner = PlayerSpawner.Instance;
+                        var local = spawner != null ? spawner.LocalPlayer : null;
+                        if (local == null) return "{\"ok\":false,\"error\":\"no local player\"}";
+
+                        // A CharacterController overwrites a transform move, so detach it
+                        // for the single frame the teleport takes.
+                        var controller = local.GetComponent<CharacterController>();
+                        bool wasEnabled = controller != null && controller.enabled;
+                        if (controller != null) controller.enabled = false;
+
+                        local.transform.position = new Vector3(px, py, pz);
+
+                        if (controller != null) controller.enabled = wasEnabled;
+
+                        return "{\"ok\":true,\"pos\":\"" +
+                               local.transform.position.ToString("F1") + "\"}";
+                    }));
+                    return;
+                }
+                if (target == "/clickat")
+                {
+                    float cx, cy;
+                    float.TryParse(Get(args, "x"), System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out cx);
+                    float.TryParse(Get(args, "y"), System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out cy);
+
+                    SendJson(client, RunOnMain(delegate
+                    {
+                        var data = new UnityEngine.EventSystems.PointerEventData(
+                            UnityEngine.EventSystems.EventSystem.current);
+                        data.position = new Vector2(cx, cy);
+                        data.pressPosition = data.position;
+
+                        var hits = new System.Collections.Generic.List<UnityEngine.EventSystems.RaycastResult>();
+                        var canvases = UnityEngine.Object.FindObjectsOfType<Canvas>();
+
+                        for (int i = 0; i < canvases.Length; i++)
+                        {
+                            var raycaster = canvases[i].GetComponent<UnityEngine.UI.GraphicRaycaster>();
+                            if (raycaster == null || !canvases[i].isActiveAndEnabled) continue;
+
+                            hits.Clear();
+                            raycaster.Raycast(data, hits);
+                            for (int h = 0; h < hits.Count; h++)
+                            {
+                                var go = hits[h].gameObject;
+                                if (go == null) continue;
+
+                                var button = go.GetComponent<UnityEngine.UI.Button>();
+                                if (button == null) button = go.GetComponentInParent<UnityEngine.UI.Button>();
+                                if (button == null) continue;
+
+                                UnityEngine.EventSystems.ExecuteEvents.Execute(button.gameObject, data,
+                                    UnityEngine.EventSystems.ExecuteEvents.pointerClickHandler);
+                                return "{\"ok\":true,\"clicked\":\"" + Esc(button.name) + "\"}";
+                            }
+                        }
+
+                        return "{\"ok\":false,\"error\":\"no button under the pointer\"}";
+                    }));
+                    return;
+                }
+                if (target == "/leave")
+                {
+                    SendJson(client, RunOnMain(delegate
+                    {
+                        UI.MultiplayerMenu.ExitToMainMenu("dev bridge");
+                        return "{\"ok\":true}";
+                    }));
+                    return;
+                }
                 if (target == "/ai")
                 {
                     string go = Get(args, "go");
+                    string attack = Get(args, "atk");
 
                     SendJson(client, RunOnMain(delegate
                     {
@@ -350,6 +504,7 @@ namespace RakeMultiplayer.Core
 
                         string forced = "";
                         if (!string.IsNullOrEmpty(go)) forced = ai.ForceTask() ? "started" : "inactive";
+                        if (!string.IsNullOrEmpty(attack)) forced = ai.ForceGrabNow() ? "attack" : "inactive";
 
                         var culture = System.Globalization.CultureInfo.InvariantCulture;
                         Vector3 pos = ai.transform.position;

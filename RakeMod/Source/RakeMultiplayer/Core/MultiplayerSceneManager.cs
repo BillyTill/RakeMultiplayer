@@ -87,8 +87,10 @@ namespace RakeMultiplayer
             {
                 OnLobbySceneLoaded();
             }
-            else if (sceneName == mainMenuScene)
+            else if (sceneName == mainMenuScene || Application.loadedLevel == 0 ||
+                     sceneName.StartsWith(mainMenuScene, System.StringComparison.OrdinalIgnoreCase))
             {
+                // The shipped menu scene is "MainMenu_v2", so name equality alone missed it.
                 OnMainMenuSceneLoaded();
             }
         }
@@ -201,7 +203,10 @@ namespace RakeMultiplayer
 
         public void LoadMainMenuScene()
         {
-            Application.LoadLevel(mainMenuScene);
+            // The menu scene in this build is MainMenu_v2; fall back to index 0 instead of
+            // loading a name that does not exist.
+            if (Application.CanStreamedLevelBeLoaded(mainMenuScene)) Application.LoadLevel(mainMenuScene);
+            else Application.LoadLevel(0);
         }
     }
 }

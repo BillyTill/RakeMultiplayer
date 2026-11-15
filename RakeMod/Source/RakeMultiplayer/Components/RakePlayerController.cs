@@ -1229,13 +1229,10 @@ namespace RakeMultiplayer
             {
                 if (victimId > 0)
                 {
-                    var grab = new RakeGrabPacket
-                    {
-                        PlayerId = victimId,
-                        RakePosition = _rake != null ? _rake.position : transform.position,
-                        FocusPosition = focus
-                    };
-                    RakeNetworkManager.Instance?.ServerBroadcast(grab.Serialize());
+                    // ServerGrabPlayer also handles the host as the victim; the plain
+                    // broadcast skipped the host, so it was never frozen.
+                    RakeNetworkManager.Instance?.ServerGrabPlayer(
+                        victimId, _rake != null ? _rake.position : transform.position, focus);
                 }
             }
             else

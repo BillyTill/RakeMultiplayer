@@ -2315,6 +2315,32 @@ namespace RakeMultiplayer
             StartCoroutine(RakeGrabRoutine(focus));
         }
 
+        /// <summary>
+        /// Server: run the vanilla grab on a hunter - freeze them and turn their camera to
+        /// the Rake. The host does it locally, a client gets the packet. Used by both the
+        /// AI attack and a player-controlled Rake.
+        /// </summary>
+        public void ServerGrabPlayer(int playerId, Vector3 rakePosition, Vector3 focusPosition)
+        {
+            if (!RakeMultiplayerPlugin.isServer || playerId <= 0) return;
+
+            var spawner = PlayerSpawner.Instance;
+            var local = spawner != null ? spawner.LocalPlayer : null;
+
+            if (local != null && local.PlayerId == playerId)
+            {
+                StartCoroutine(RakeGrabRoutine(focusPosition));
+                return;
+            }
+
+            ServerBroadcast(new RakeGrabPacket
+            {
+                PlayerId = playerId,
+                RakePosition = rakePosition,
+                FocusPosition = focusPosition
+            }.Serialize());
+        }
+
         private System.Collections.IEnumerator RakeGrabRoutine(Vector3 focusPosition)
         {
             var spawner = PlayerSpawner.Instance;

@@ -732,6 +732,10 @@ namespace RakeMultiplayer.UI
             {
                 _networkManager.Disconnect();
             }
+            else
+            {
+                RakeNetworkManager.Instance?.Disconnect();
+            }
             LoadingScreen.Hide();
             _startGameSent = false; // Allow starting a new game
             LobbyState.HostIsRake = false;
@@ -930,6 +934,36 @@ namespace RakeMultiplayer.UI
             };
             _networkManager?.ClientSend(request.Serialize());
             RakeMultiplayerPlugin.Log?.LogInfo("[Lobby] Requested Rake role: " + request.TakeRole);
+        }
+
+        /// <summary>
+        /// Leaves the match and returns to the main menu. Every "back to menu" path goes
+        /// through here: the vanilla GamePauseMenu.Exit() only calls LoadLevel(0), which in
+        /// a modded session left the peer connected and the day/night cycle running.
+        /// </summary>
+        public static void ExitToMainMenu(string reason)
+        {
+            RakeMultiplayerPlugin.Log?.LogInfo("[Menu] Exit to main menu (" + reason + ")");
+
+            Time.timeScale = 1f;
+            PlayerInputLock.SetMenu(false);
+            LoadingScreen.Hide();
+
+            var session = SessionManager.Instance;
+            if (session != null) session.AbortSession();
+
+            var dayNight = DayNightManager.Instance;
+            if (dayNight != null) dayNight.StopCycle();
+
+            var menu = Instance;
+            if (menu != null)
+            {
+                menu._matchOver = false;
+                menu.OnLeaveLobby();
+                return;
+            }
+
+            if (UnityEngine.Application.loadedLevel != 0) UnityEngine.Application.LoadLevel(0);
         }
 
         /// <summary>Close the F1 menu (used when a level starts loading).</summary>

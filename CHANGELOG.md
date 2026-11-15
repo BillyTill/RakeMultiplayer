@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.1.4-alpha.1-Main - 2026-11-15
+
+Rake attacks are grabs again (the hunter is held, the camera turns, one hit per
+grab), the pause menu buttons work, and leaving to the main menu cleans the session.
+
 ## 1.1.3-alpha.1-Main - 2026-11-15
 
 Fixes the Rake AI standing still next to the hunters during the day, and stops a
