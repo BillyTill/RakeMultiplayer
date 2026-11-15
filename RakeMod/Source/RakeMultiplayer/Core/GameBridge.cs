@@ -227,7 +227,9 @@ namespace RakeMultiplayer.Core
                             float size;
                             if (!float.TryParse(cell, System.Globalization.NumberStyles.Float,
                                 System.Globalization.CultureInfo.InvariantCulture, out size)) size = 80f;
-                            return BatchDiagnostics.Merge(size);
+                            string lodArg = Get(args, "lod");
+                            bool withLod = lodArg == "1" || string.Equals(lodArg, "true", StringComparison.OrdinalIgnoreCase);
+                            return BatchDiagnostics.Merge(size, withLod);
                         }
                         return BatchDiagnostics.Report();
                     }));

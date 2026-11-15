@@ -338,15 +338,16 @@ namespace RakeMultiplayer
 
         private static readonly List<GameObject> _batches = new List<GameObject>();
         private static readonly List<MeshRenderer> _swallowed = new List<MeshRenderer>();
+        private static readonly List<LODGroup> _disabledLods = new List<LODGroup>();
 
         /// <summary>
         /// Combines static meshes that share a material into one mesh per material and
         /// spatial cell. Cells keep frustum culling working, so distant forest chunks are
         /// still skipped. Geometry is baked into world space.
         /// </summary>
-        public static string Merge(float cellSize)
+        public static string Merge(float cellSize, bool includeLod)
         {
-            if (cellSize <= 1f) cellSize = 80f;
+            if (cellSize < 0f) cellSize = 80f; // 0 = one batch for the whole level
 
             MeshRenderer[] renderers = Object.FindObjectsOfType<MeshRenderer>();
             var groups = new Dictionary<string, BatchGroup>();
@@ -363,7 +364,12 @@ namespace RakeMultiplayer
                 MeshRenderer renderer = renderers[i];
                 if (renderer == null || !renderer.enabled) continue;
                 if (renderer.isPartOfStaticBatch) { skippedBatched++; continue; }
-                if (renderer.GetComponentInParent<LODGroup>() != null) { skippedLod++; continue; }
+                LODGroup lod = renderer.GetComponentInParent<LODGroup>();
+                if (lod != null)
+                {
+                    if (!includeLod) { skippedLod++; continue; }
+                    if (!_disabledLods.Contains(lod)) _disabledLods.Add(lod);
+                }
                 if (renderer.GetComponent<Animator>() != null || renderer.GetComponent<Rigidbody>() != null)
                 {
                     skippedDynamic++;
@@ -387,8 +393,13 @@ namespace RakeMultiplayer
                 if (broken) { skippedNull++; continue; }
 
                 Vector3 position = filter.transform.position;
-                int cx = Mathf.FloorToInt(position.x / cellSize);
-                int cz = Mathf.FloorToInt(position.z / cellSize);
+                int cx = 0;
+                int cz = 0;
+                if (cellSize > 1f)
+                {
+                    cx = Mathf.FloorToInt(position.x / cellSize);
+                    cz = Mathf.FloorToInt(position.z / cellSize);
+                }
 
                 for (int s = 0; s < mesh.subMeshCount; s++)
                 {
@@ -484,6 +495,11 @@ namespace RakeMultiplayer
                 if (_swallowed[i] != null) _swallowed[i].enabled = false;
             }
 
+            for (int i = 0; i < _disabledLods.Count; i++)
+            {
+                if (_disabledLods[i] != null) _disabledLods[i].enabled = false;
+            }
+
             RakeMultiplayerPlugin.Log?.LogInfo("[Batch] " + created + " batches, " + mergedMeshes +
                                                " instances, hid " + _swallowed.Count + " renderers" +
                                                " (skipped: lod " + skippedLod + ", dynamic " + skippedDynamic +
@@ -508,6 +524,12 @@ namespace RakeMultiplayer
             }
             int hidden = _swallowed.Count;
             _swallowed.Clear();
+
+            for (int i = 0; i < _disabledLods.Count; i++)
+            {
+                if (_disabledLods[i] != null) _disabledLods[i].enabled = true;
+            }
+            _disabledLods.Clear();
 
             for (int i = 0; i < _batches.Count; i++)
             {
