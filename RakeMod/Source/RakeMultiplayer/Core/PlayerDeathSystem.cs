@@ -94,6 +94,10 @@ namespace RakeMultiplayer
             {
                 manager?.BroadcastPlayerDied(packet);
                 manager?.SchedulePlayerRespawn(playerId);
+
+                // The host never receives its own PlayerDied packet, so the "all hunters
+                // down" check was only evaluated when a client was the last to die.
+                SessionManager.Instance?.NotifyHunterDied(playerId);
             }
             else
             {
@@ -183,7 +187,19 @@ namespace RakeMultiplayer
                     {
                         fps.camMouseLook.enabled = true;
                         fps.camMouseLook.bControl = true;
+
+                        // The ragdoll leaves the view wherever the body died - often
+                        // staring at the ground. Level it out on respawn.
+                        fps.camMouseLook.m_CameraTargetRot = Quaternion.identity;
+                        if (fps.camMouseLook.camera != null)
+                        {
+                            fps.camMouseLook.camera.localRotation = Quaternion.identity;
+                        }
                     }
+
+                    // If the ragdoll was destroyed before it could restore the cameras
+                    // (level change mid-death), turn the view cameras back on here.
+                    fps.CameraRander(true);
                 }
 
                 PlayerRagdoll.ReviveLocal();

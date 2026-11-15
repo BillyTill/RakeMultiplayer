@@ -94,8 +94,13 @@ namespace RakeMultiplayer.UI
         private static bool IsGameplayScene()
         {
             if (!RakeMultiplayerPlugin.isConnected) return false;
+
+            // Levels are Level_1(Day) .. Level_5(Night); the case-sensitive check never
+            // matched, so the minimap was never shown.
+            if (UnityEngine.Application.loadedLevel >= 1) return true;
             string scene = UnityEngine.Application.loadedLevelName;
-            return !string.IsNullOrEmpty(scene) && scene.StartsWith("level");
+            return !string.IsNullOrEmpty(scene) &&
+                   scene.IndexOf("level", System.StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
         private void Update()

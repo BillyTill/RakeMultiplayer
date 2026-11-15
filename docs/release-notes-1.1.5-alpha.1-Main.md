@@ -1,4 +1,4 @@
-# Rake Multiplayer 1.1.4-alpha.1-Main
+# Rake Multiplayer 1.1.5-alpha.1-Main
 
 > **Main build.** This release is built from the `master` (Main) branch: graphics
 > presets, the day/night level change, the HUD phase fix and the climbing guards.
@@ -150,6 +150,51 @@ survives switching quality in the menu. The result is written to the log:
   `MainMenu_v2`, so the scene check now accepts level 0 instead of a name that does not exist.
 - **"Ignore collision failed" spam** in the log is gone: the ragdoll only pairs colliders
   that are enabled, instead of asking Unity to ignore disabled ones every hit.
+
+## Fixes in 1.1.5
+
+A full-cycle audit (connect -> lobby -> match -> day/night -> death/respawn -> results -> menu)
+looked for the same class of bug we kept hitting: half-wired state, things that survive a level
+load when they should not, and things that reset when they should not.
+
+**The day/night levels were never recognised** (`StartsWith("level")` against `Level_1(Day)`).
+That one check silently disabled most of the post-load setup: no `MapSettings`, no dawn
+safehouse respawn, no inventory restore across the phase change, no minimap (F3). Fixed.
+
+**The results screen could not be dismissed.** The session stayed `GameOver`, so the overlay
+re-armed the moment the lobby loaded: RETURN TO LOBBY looped and START GAME was unreachable
+until a restart. The session now returns to `Waiting`, the overlay only arms inside a match,
+and a client no longer disconnects itself when it clicks the button.
+
+**Other match-breaking fixes**
+- The server's health map survived a level change, so a client could be killed by the first
+  trap after dawn as if it were 9999 damage.
+- A client is returned to the menu when the host leaves instead of sitting in a frozen match.
+- A client-owned Rake now freezes the host too when it grabs them.
+- Pausing during a level change no longer leaves `Time.timeScale` at 0 (a live-looking but
+  frozen level).
+- The day/night clock runs on real time: one player opening the pause menu no longer stops
+  the 300 s night for everybody.
+- The Rake no longer stands still for other players for ~17 s after a level change.
+- The grab only starts when the hit can actually land (no more 1.8 s freeze behind a wall
+  with no damage).
+- The results screen freezes the player and hides the Rake health bar.
+- Input locks and the debug free camera are reset/released on every level load.
+- A trap now stuns a human Rake; a death that arrives before the spawner is up clamps the
+  health instead of vanishing; the host dying counts for the "Rake wins" check.
+
+**Pause menu**
+- The vanilla pause panel flashed for one frame; it is now deactivated in the same frame.
+- The camera no longer follows the cursor while paused or on the results screen (the mouse
+  look component is disabled, not just its control flag, so the accumulated axis cannot snap
+  the view on resume).
+
+**Hardening**
+- `StartGamePacket` uses the capped string reader (a peer could ask the 32-bit host to
+  allocate ~2 GB on connect).
+- Dropped loot is deduplicated per weapon type; trap placement is bounds- and distance-checked.
+- HUD night counter follows the configured night count; the weapon diagnostic dump moved to
+  F9 (it shared F8 with the performance overlay); the lobby title is no longer overwritten.
 
 ## Known limitations
 

@@ -163,6 +163,7 @@ namespace RakeMultiplayer
         private bool _climbing;
         private UI.RakeHudUI _hudUi;
         private float _damageLockout;
+        private float _stunLockout;
         private bool _preyInReach;
         private Vector3 _climbNormal = Vector3.forward;
         private Vector3 _climbDir = Vector3.forward;
@@ -631,6 +632,7 @@ namespace RakeMultiplayer
             _cameraCooldown = Mathf.Max(0f, _cameraCooldown - dt);
             _jumpCooldown = Mathf.Max(0f, _jumpCooldown - dt);
             _damageLockout = Mathf.Max(0f, _damageLockout - dt);
+            _stunLockout = Mathf.Max(0f, _stunLockout - dt);
             // A stuck or NaN release timer used to lock the Rake out of every wall for the
             // rest of the match; clamp it instead of trusting the value.
             _climbReleaseTimer -= dt;
@@ -638,7 +640,7 @@ namespace RakeMultiplayer
             else if (_climbReleaseTimer > ClimbReleaseTime) _climbReleaseTimer = ClimbReleaseTime;
             _attackAnimation = Mathf.Max(0f, _attackAnimation - dt);
 
-            if (!DebugConsole.ConsoleOpen && !_actionLocked)
+            if (!DebugConsole.ConsoleOpen && !_actionLocked && _stunLockout <= 0f)
             {
                 if (Input.GetKeyDown(KeyCode.V)) _firstPerson = !_firstPerson;
 
@@ -1708,6 +1710,19 @@ namespace RakeMultiplayer
             if (_instance == null) return;
             if (rake != null && _instance._rake != rake) return;
             _instance.ApplyDamageLockout();
+        }
+
+        /// <summary>
+        /// A trap caught the human Rake. The AI stun state is never ticked while a player
+        /// owns the body, so the controller has to hold the input itself.
+        /// </summary>
+        public static void ApplyStun(float seconds)
+        {
+            if (_instance == null) return;
+
+            _instance._stunLockout = Mathf.Max(_instance._stunLockout, Mathf.Max(0.1f, seconds));
+            _instance._playerCooldown = Mathf.Max(_instance._playerCooldown, 0.5f);
+            RakeMultiplayerPlugin.Log?.LogInfo("[RakePlay] stunned for " + seconds.ToString("F1") + " s");
         }
 
         private void ApplyDamageLockout()

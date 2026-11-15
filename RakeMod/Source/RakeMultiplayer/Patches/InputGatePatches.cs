@@ -38,6 +38,17 @@ namespace RakeMultiplayer
     internal static class GateGamePauseMenuUpdate
     {
         private static bool Prefix() { return !InputGate.Blocked; }
+
+        /// <summary>
+        /// The mod draws its own pause plate. The vanilla panel is activated in this very
+        /// Update, so hide it before the frame is rendered instead of a frame later.
+        /// </summary>
+        private static void Postfix(GamePauseMenu __instance)
+        {
+            if (!RakeMultiplayerPlugin.Enabled.Value) return;
+            if (__instance == null || !__instance.isPaused) return;
+            if (__instance.menu != null && __instance.menu.activeSelf) __instance.menu.SetActive(false);
+        }
     }
 
     [HarmonyPatch(typeof(PauseManager), "Update")]

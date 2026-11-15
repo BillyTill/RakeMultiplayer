@@ -170,10 +170,15 @@ namespace RakeMultiplayer
             if (!RakeMultiplayerPlugin.isServer) return;
 
             float phaseDuration = (_currentPhase == Phase.Day) ? DayDuration : NightDuration;
-            _phaseTimer += Time.deltaTime;
+
+            // Real time on purpose: one peer opening the pause menu used to freeze the
+            // 300 s night for everybody, with no phase packet ever sent again.
+            float dt = Time.unscaledDeltaTime;
+            float before = _phaseTimer;
+            _phaseTimer += dt;
 
             // Broadcast timer updates periodically (every second)
-            if (Mathf.FloorToInt(_phaseTimer) != Mathf.FloorToInt(_phaseTimer - Time.deltaTime))
+            if (Mathf.FloorToInt(_phaseTimer) != Mathf.FloorToInt(before))
             {
                 BroadcastPhaseChange();
             }

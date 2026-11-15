@@ -230,6 +230,8 @@ namespace RakeMultiplayer
             // Retry door states that arrived while a door was still animating.
             DoorSync.Update();
 
+            TickRespawns();
+
             if (RakeMultiplayerPlugin.isServer && _server != null)
             {
                 ProcessServerMessages();
@@ -261,6 +263,9 @@ namespace RakeMultiplayer
             _trapStates.Clear();
             _activeBaitTransforms.Clear();
             _pendingPickups.Clear();
+
+            // Positions belong to the level that is being unloaded.
+            _playerStates.Clear();
             _hostSpawnPositionSet = false;
 
             RakeMultiplayerPlugin.isConnected = false;
@@ -340,6 +345,16 @@ namespace RakeMultiplayer
                     case NetEventType.Disconnected:
                         RakeMultiplayerPlugin.Log?.LogWarning("[Net] Client: disconnected from server");
                         RakeMultiplayerPlugin.isConnected = false;
+
+                        // The host left mid-match: without this the client keeps a frozen
+                        // Rake, a countdown that never moves and no way out but the pause
+                        // menu. AbortSession runs first on a voluntary exit, so the state
+                        // is already Waiting and we do not fight the menu path.
+                        if (SessionManager.Instance != null &&
+                            SessionManager.Instance.CurrentState == SessionState.Active)
+                        {
+                            UI.MultiplayerMenu.ExitToMainMenu("host disconnected");
+                        }
                         break;
                 }
             }
@@ -667,7 +682,8 @@ namespace RakeMultiplayer
             // HOST: apply state to local remote player (if exists)
             if (PlayerSpawner.Instance != null && PlayerSpawner.Instance.TryGetRemotePlayer(assignedPlayerId, out var remote))
             {
-                remote.ApplyPosition(packet.Position);
+                // A teleport must snap: lerping dragged the body across the whole level.
+                remote.ApplyPositionImmediate(packet.Position);
                 remote.ApplyRotation(packet.Rotation);
                 remote.ApplyAnimation(packet.AnimState);
             }
@@ -1203,6 +1219,44 @@ namespace RakeMultiplayer
             // Clients may place bait (2) and trap (1) markers; other marker types are server-owned.
             if (packet.MarkerType == 1) // Trap
             {
+                // Same sanity checks the bait path already had: a spoofed client could
+                // otherwise plant armed traps anywhere, including under other players.
+                if (float.IsNaN(packet.Position.x) || float.IsNaN(packet.Position.y) ||
+                    float.IsNaN(packet.Position.z) || packet.Position.sqrMagnitude > 100000000f)
+                {
+                    RakeMultiplayerPlugin.Log?.LogWarning("[3.11] Rejected trap with an invalid position");
+                    return;
+                }
+
+                Vector3 senderPosition = Vector3.zero;
+                bool senderKnown = false;
+
+                PlayerStatePacket senderState;
+                if (_playerStates.TryGetValue(connectionId, out senderState))
+                {
+                    senderPosition = senderState.Position;
+                    senderKnown = true;
+                }
+                else
+                {
+                    NetworkedPlayer senderRemote;
+                    if (PlayerSpawner.Instance != null &&
+                        PlayerSpawner.Instance.TryGetRemotePlayer(connectionId + 1, out senderRemote) &&
+                        senderRemote != null)
+                    {
+                        senderPosition = senderRemote.transform.position;
+                        senderKnown = true;
+                    }
+                }
+
+                if (senderKnown && Vector3.Distance(senderPosition, packet.Position) > 12f)
+                {
+                    RakeMultiplayerPlugin.Log?.LogWarning("[3.11] Rejected trap placed " +
+                        Vector3.Distance(senderPosition, packet.Position).ToString("F0") +
+                        " m away from C" + connectionId);
+                    return;
+                }
+
                 var trap = NetworkedTrap.SpawnServerTrap(packet.Position);
                 if (trap == null)
                 {
@@ -1352,6 +1406,12 @@ namespace RakeMultiplayer
             RakeMultiplayer.Patches.ItemPickupSync.ClearConsumed();
             NetworkedCamera.ClearRegistry();
             NetworkedTrap.ResetSceneState();
+
+            // The Rake owner is teleported by the level change; the anti-teleport check
+            // compared the new position with the old level and dropped every snapshot
+            // (the Rake stood still for everyone else for ~17 s).
+            _lastRakeOwnerTime = -1f;
+            _lastRakeOwnerPosition = Vector3.zero;
 
             RakeMultiplayerPlugin.Log?.LogInfo("[Scene] Per-scene network registries reset");
         }
@@ -1509,6 +1569,11 @@ namespace RakeMultiplayer
         public void ServerReturnToLobby()
         {
             if (!RakeMultiplayerPlugin.isServer) return;
+
+            // The session was GameOver. Leaving it in that state re-armed the results
+            // overlay the instant level 0 loaded, so RETURN TO LOBBY looped forever and a
+            // new match could not be started.
+            SessionManager.Instance?.ForceState(SessionState.Waiting, 0, 100f, VictoryType.None);
 
             var packet = new LevelChangePacket { LevelIndex = 0 };
             ServerBroadcast(packet.Serialize());
@@ -1686,6 +1751,7 @@ namespace RakeMultiplayer
             if (LobbyState.RakeOwnerId == clamped) return;
 
             LobbyState.RakeOwnerId = clamped;
+            _lastRakeOwnerTime = -1f;
             RakeMultiplayerPlugin.Log?.LogInfo("[Lobby] Rake owner set to P" + clamped);
             ServerBroadcast(new RakeOwnerPacket { OwnerId = clamped }.Serialize());
             RakeControlSync.Apply("host changed the Rake owner");
@@ -1801,12 +1867,9 @@ namespace RakeMultiplayer
                     ? packet.FocusPosition
                     : rakePos + Vector3.up * 1.6f;
 
-                ServerBroadcast(new RakeGrabPacket
-                {
-                    PlayerId = packet.TargetPlayerId,
-                    RakePosition = rakePos,
-                    FocusPosition = focus
-                }.Serialize());
+                // ServerGrabPlayer freezes the host locally and broadcasts to clients;
+                // the plain broadcast skipped the host, so it was never grabbed.
+                ServerGrabPlayer(packet.TargetPlayerId, rakePos, focus);
 
                 BroadcastRakeSound(0, rakePos);
                 // The Rake melee is always 10 damage; a client could otherwise send 99999.
@@ -2540,6 +2603,10 @@ namespace RakeMultiplayer
                     int id = ids[i];
                     if (id != 1 && id != 2 && id != 4 && id != 5 && id != 6 && id != 8) continue;
 
+                    // One weapon of each kind: the server cannot see a client's real
+                    // inventory, but it can refuse the all-sniper-rifles loot spam.
+                    if (outIds.Contains(id)) continue;
+
                     outIds.Add(id);
                     int a = ammo != null && i < ammo.Length ? Mathf.Clamp(ammo[i], 0, 999) : 0;
                     outAmmo.Add(a);
@@ -2593,6 +2660,7 @@ namespace RakeMultiplayer
         }
 
         private readonly HashSet<int> _respawnScheduled = new HashSet<int>();
+        private readonly Dictionary<int, float> _respawnDue = new Dictionary<int, float>();
         private readonly HashSet<int> _consumedItemIds = new HashSet<int>();
         private readonly Dictionary<int, float> _playerHealth = new Dictionary<int, float>();
         private readonly Dictionary<int, string> _playerNames = new Dictionary<int, string>();
@@ -2604,41 +2672,67 @@ namespace RakeMultiplayer
         public void SchedulePlayerRespawn(int playerId)
         {
             if (!RakeMultiplayerPlugin.isServer || playerId <= 0) return;
-            if (!_respawnScheduled.Add(playerId)) return;
-            StartCoroutine(RespawnPlayerRoutine(playerId));
+            if (_respawnDue.ContainsKey(playerId)) return;
+
+            // Unscaled time: the timer used to be a coroutine on WaitForSeconds, so pausing
+            // the game (or a scene change that killed the routine) stranded the player in
+            // the ragdoll for good.
+            _respawnDue[playerId] = Time.unscaledTime + Mathf.Max(1f, PlayerDeathSystem.RespawnDelay);
+            _respawnScheduled.Add(playerId);
         }
 
         /// <summary>New scene: drop pending respawn timers from the old level.</summary>
         public void ResetDeathState()
         {
             _respawnScheduled.Clear();
+            _respawnDue.Clear();
+
+            // The level changed: everyone is alive again. Keeping the old zeros made the
+            // next trap or bullet on a client force a 9999-damage death.
+            _playerHealth.Clear();
         }
 
-        private IEnumerator RespawnPlayerRoutine(int playerId)
+        /// <summary>Server: revive dead hunters whose timer is up.</summary>
+        private void TickRespawns()
         {
-            yield return new WaitForSeconds(PlayerDeathSystem.RespawnDelay);
-            if (!RakeMultiplayerPlugin.isServer) yield break;
+            if (!RakeMultiplayerPlugin.isServer || _respawnDue.Count == 0) return;
 
-            _respawnScheduled.Remove(playerId);
+            float now = Time.unscaledTime;
+            List<int> ready = null;
 
-            // The level may have changed while the timer was running: do not revive
-            // a player who was already respawned by the new scene.
-            if (!PlayerDeathSystem.IsDead(playerId)) yield break;
-
-            var packet = new PlayerRespawnPacket
+            foreach (var pair in _respawnDue)
             {
-                PlayerId = playerId,
-                Position = PlayerDeathSystem.GetRespawnPosition(playerId),
-                Rotation = Quaternion.identity
-            };
+                if (now < pair.Value) continue;
+                if (ready == null) ready = new List<int>();
+                ready.Add(pair.Key);
+            }
 
-            // Apply on the server view first (host player or the remote clone), then
-            // tell every client to restore the same player.
-            _playerHealth[playerId] = 100f;
-            PlayerDeathSystem.ApplyRespawn(packet);
-            ServerBroadcast(packet.Serialize());
-            RakeMultiplayerPlugin.Log?.LogInfo("[Death] server respawned player " + playerId +
-                                               " at " + packet.Position.ToString("F1"));
+            if (ready == null) return;
+
+            for (int i = 0; i < ready.Count; i++)
+            {
+                int playerId = ready[i];
+                _respawnDue.Remove(playerId);
+                _respawnScheduled.Remove(playerId);
+
+                // A level change already revived everyone: nothing to do.
+                if (!PlayerDeathSystem.IsDead(playerId)) continue;
+
+                var packet = new PlayerRespawnPacket
+                {
+                    PlayerId = playerId,
+                    Position = PlayerDeathSystem.GetRespawnPosition(playerId),
+                    Rotation = Quaternion.identity
+                };
+
+                // Apply on the server view first (host player or the remote clone), then
+                // tell every client to restore the same player.
+                _playerHealth[playerId] = 100f;
+                PlayerDeathSystem.ApplyRespawn(packet);
+                ServerBroadcast(packet.Serialize());
+                RakeMultiplayerPlugin.Log?.LogInfo("[Death] server respawned player " + playerId +
+                                                   " at " + packet.Position.ToString("F1"));
+            }
         }
 
         /// <summary>Server: send one packet to one player (the host is local, not a connection).</summary>

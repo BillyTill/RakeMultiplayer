@@ -952,12 +952,15 @@ namespace RakeMultiplayer
         private static bool _camera;
         private static bool _ragdoll;
         private static bool _menu;
+        private static bool _matchOver;
+        private static bool _pause;
         private static bool _applied;
 
         private static CameraMouseLook _look;
         private static PlayerMovement _movement;
         private static bool _savedControl;
         private static bool _savedCanMove;
+        private static bool _savedLookEnabled;
 
         public static void SetConsole(bool active)
         {
@@ -981,6 +984,42 @@ namespace RakeMultiplayer
         {
             _camera = active;
             Apply();
+        }
+
+        /// <summary>Results screen: the player must not keep playing behind the overlay.</summary>
+        public static void SetMatchOver(bool active)
+        {
+            _matchOver = active;
+            Apply();
+        }
+
+        /// <summary>
+        /// ESC pause. Time.timeScale is 0 there, but CameraMouseLook still accumulates the
+        /// mouse axis and the camera drifts with the cursor, so the component is disabled.
+        /// </summary>
+        public static void SetPause(bool active)
+        {
+            _pause = active;
+            Apply();
+        }
+
+        /// <summary>
+        /// A new level replaces the player object, so every lock belonged to the old one.
+        /// Without this a ragdoll that was destroyed by a scene load left the lock armed
+        /// and the F1 menu / console stopped freezing the player in the next match.
+        /// </summary>
+        public static void ResetForScene()
+        {
+            _console = false;
+            _camera = false;
+            _ragdoll = false;
+            _menu = false;
+            _matchOver = false;
+            _pause = false;
+
+            _look = null;
+            _movement = null;
+            _applied = false;
         }
 
         /// <summary>
@@ -1013,7 +1052,7 @@ namespace RakeMultiplayer
 
         private static void Apply()
         {
-            bool locked = _console || _camera || _ragdoll || _menu;
+            bool locked = _console || _camera || _ragdoll || _menu || _matchOver || _pause;
             if (locked == _applied) return;
 
             if (locked)
@@ -1027,15 +1066,27 @@ namespace RakeMultiplayer
 
                 _savedControl = _look != null ? _look.bControl : true;
                 _savedCanMove = _movement != null ? _movement.bCanMove : true;
+                _savedLookEnabled = _look != null ? _look.enabled : true;
 
-                if (_look != null) _look.bControl = false;
+                // Disable the component, not just bControl: with Time.timeScale = 0 the
+                // smoothing is frozen but the target rotation keeps accumulating, so the
+                // view snapped around when the game resumed.
+                if (_look != null)
+                {
+                    _look.bControl = false;
+                    _look.enabled = false;
+                }
                 if (_movement != null) _movement.FreezePlayer();
 
                 _applied = true;
             }
             else
             {
-                if (_look != null) _look.bControl = _savedControl;
+                if (_look != null)
+                {
+                    _look.enabled = _savedLookEnabled;
+                    _look.bControl = _savedControl;
+                }
                 if (_movement != null)
                 {
                     if (_savedCanMove) _movement.UnFreezePlayer();

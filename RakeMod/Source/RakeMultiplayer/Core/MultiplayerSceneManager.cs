@@ -78,8 +78,10 @@ namespace RakeMultiplayer
                 RakeNetworkManager.Instance?.EnsureRemotePlayersSpawned();
             }
 
-            // Rake uses level0..level5 scene names; treat any level scene as gameplay
-            if (sceneName == gameScene || sceneName.StartsWith("level"))
+            // Rake ships Level_1(Day) .. Level_5(Night); the old case-sensitive
+            // StartsWith("level") never matched, so the whole post-load init was dead.
+            if (sceneName == gameScene || Application.loadedLevel >= 1 ||
+                sceneName.IndexOf("level", System.StringComparison.OrdinalIgnoreCase) >= 0)
             {
                 OnGameSceneLoaded();
             }

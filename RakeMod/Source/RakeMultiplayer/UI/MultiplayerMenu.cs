@@ -166,6 +166,7 @@ namespace RakeMultiplayer.UI
                            "RETURN TO LOBBY", _resultButtonStyle))
             {
                 _matchOver = false;
+                PlayerInputLock.SetMatchOver(false);
 
                 if (RakeMultiplayerPlugin.isServer)
                 {
@@ -173,9 +174,15 @@ namespace RakeMultiplayer.UI
                     RakeNetworkManager.Instance?.ServerReturnToLobby();
                     ShowLobby();
                 }
+                else if (RakeMultiplayerPlugin.isConnected)
+                {
+                    // The host owns the transition: hide the overlay and let its
+                    // LevelChange(0) bring us to the lobby. Disconnecting here kicked the
+                    // player out of the session instead of letting them rematch.
+                    _matchOver = false;
+                }
                 else
                 {
-                    // Clients follow the host's LevelChange; this is the manual fallback.
                     OnLeaveLobby();
                 }
             }
@@ -210,8 +217,7 @@ namespace RakeMultiplayer.UI
             {
                 _lastSceneName = sceneName;
 
-                if (_menuVisible && !string.IsNullOrEmpty(sceneName) && sceneName.StartsWith("level") &&
-                    sceneName != "level0")
+                if (_menuVisible && UnityEngine.Application.loadedLevel >= 1)
                 {
                     ToggleMenu();
                 }
@@ -249,10 +255,11 @@ namespace RakeMultiplayer.UI
 
             bool hotkeysFree = !DebugConsole.ConsoleOpen;
 
-            // Runtime diagnostics: dump weapon/inventory state to the BepInEx log
-            if (hotkeysFree && Input.GetKeyDown(KeyCode.F8))
+            // Runtime diagnostics: dump weapon/inventory state to the BepInEx log.
+            // F8 belongs to the performance overlay; this used to run on the same key.
+            if (hotkeysFree && Input.GetKeyDown(KeyCode.F9))
             {
-                WeaponDiagnostics.Dump("F8 pressed");
+                WeaponDiagnostics.Dump("F9 pressed");
             }
 
             // Dump the local player prefab hierarchy (third-person model availability)
@@ -319,8 +326,13 @@ namespace RakeMultiplayer.UI
             // (the lock would otherwise never be applied).
             PlayerInputLock.SetMenu(_menuVisible);
 
+            // Same for the results screen: a level load resets every lock, so re-apply it
+            // here instead of once when the overlay appears.
+            PlayerInputLock.SetMatchOver(_matchOver);
+
             var session = SessionManager.Instance;
-            if (session != null && session.CurrentState == SessionState.GameOver && !_matchOver)
+            if (session != null && session.CurrentState == SessionState.GameOver && !_matchOver &&
+                UnityEngine.Application.loadedLevel >= 1)
             {
                 _matchOver = true;
                 _matchResultText = session.VictoryType == VictoryType.HuntersWin
@@ -334,6 +346,12 @@ namespace RakeMultiplayer.UI
 
                 Cursor.lockState = CursorLockMode.None;
                 Cursor.visible = true;
+
+                // The black overlay used to sit on top of a live world: the player kept
+                // walking, the Rake HUD kept drawing and the match kept simulating.
+                PlayerInputLock.SetMatchOver(true);
+                if (_uiBuilder != null) _uiBuilder.HideRakeHealth();
+
                 RakeMultiplayerPlugin.Log?.LogInfo("[Menu] Match over: " + _matchResultText);
             }
 
@@ -365,6 +383,14 @@ namespace RakeMultiplayer.UI
         private void UpdateRakeHealthBar()
         {
             if (_uiBuilder == null) return;
+
+            // The results screen owns the viewport: this method re-shows the bar every
+            // frame, so hiding it once when the overlay appeared was not enough.
+            if (_matchOver)
+            {
+                _uiBuilder.HideRakeHealth();
+                return;
+            }
 
             _rakeHealthScan -= Time.deltaTime;
             if (_rakeHealthScan <= 0f || _rakeHealthTarget == null)
@@ -815,10 +841,8 @@ namespace RakeMultiplayer.UI
             }
 
             // Обновляем заголовок динамически (важно для хоста/клиента)
-            if (_uiBuilder.LobbyTitleText != null)
-            {
-                _uiBuilder.LobbyTitleText.text = "LOBBY";
-            }
+            // The title is set by ShowLobby() ("Host Lobby" / "Client Lobby"); rewriting
+            // it here every frame made those strings unreachable.
             if (_uiBuilder.LobbySubtitleText != null)
             {
                 _uiBuilder.LobbySubtitleText.text = RakeMultiplayerPlugin.isServer ? "HOST" : "CLIENT";

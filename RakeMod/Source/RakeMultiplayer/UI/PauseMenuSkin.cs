@@ -60,7 +60,13 @@ namespace RakeMultiplayer.UI
                 _vanillaGroup.interactable = false;
             }
 
+            // The vanilla panel is activated inside GamePauseMenu.Update and used to be
+            // visible until this component hid it a frame later: that was the flash of
+            // the old menu. It must never render while the mod owns the pause screen.
+            if (_game.menu != null && _game.menu.activeSelf) _game.menu.SetActive(false);
+
             if (_canvas != null) _canvas.SetActive(true);
+            PlayerInputLock.SetPause(true);
 
             Cursor.visible = true;
             Cursor.lockState = CursorLockMode.None;
@@ -68,6 +74,8 @@ namespace RakeMultiplayer.UI
 
         private void Hide()
         {
+            PlayerInputLock.SetPause(false);
+
             if (_canvas != null) _canvas.SetActive(false);
 
             if (_vanillaGroup != null)

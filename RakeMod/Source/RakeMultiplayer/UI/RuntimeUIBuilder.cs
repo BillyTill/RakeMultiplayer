@@ -413,7 +413,7 @@ namespace RakeMultiplayer.UI
             AddMenuBoard(_displayPanel.transform, new Vector2(900, 1000), new Vector2(0, 0));
 
             CreateTitle(_displayPanel.transform, "DISPLAY & GRAPHICS", 32, new Vector2(0, 388));
-            CreateText(_displayPanel.transform, "DisplaySub", "Changes are applied immediately and saved.", 18,
+            CreateText(_displayPanel.transform, "DisplaySub", "Pick a value, then press Apply & save.", 18,
                 new Vector2(0, 338), ColMuted, TextAnchor.MiddleCenter, 760f);
             CreateSeparator(_displayPanel.transform, 305f, 700f);
 

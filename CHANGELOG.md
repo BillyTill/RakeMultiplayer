@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.5-alpha.1-Main - 2026-11-15
+
+Full-cycle audit fixes: day/night levels are recognised again (safehouse respawn,
+inventory restore, minimap), the results screen can be dismissed and the match
+restarted, pause no longer flashes the vanilla menu or drifts the camera.
+
 ## 1.1.4-alpha.1-Main - 2026-11-15
 
 Rake attacks are grabs again (the hunter is held, the camera turns, one hit per

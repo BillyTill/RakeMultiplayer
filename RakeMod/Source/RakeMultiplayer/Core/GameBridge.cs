@@ -385,6 +385,22 @@ namespace RakeMultiplayer.Core
                     }));
                     return;
                 }
+                if (target == "/kill")
+                {
+                    SendJson(client, RunOnMain(delegate
+                    {
+                        var spawner = PlayerSpawner.Instance;
+                        var local = spawner != null ? spawner.LocalPlayer : null;
+                        if (local == null) return "{\"ok\":false,\"error\":\"no local player\"}";
+
+                        var fps = local.GetComponent<FPSController>();
+                        if (fps == null) return "{\"ok\":false,\"error\":\"no fps\"}";
+
+                        fps.KillPlayer();
+                        return "{\"ok\":true,\"dead\":" + (PlayerDeathSystem.IsDead(local.PlayerId) ? "true" : "false") + "}";
+                    }));
+                    return;
+                }
                 if (target == "/hit")
                 {
                     string kind = Get(args, "type");
@@ -479,6 +495,44 @@ namespace RakeMultiplayer.Core
                         }
 
                         return "{\"ok\":false,\"error\":\"no button under the pointer\"}";
+                    }));
+                    return;
+                }
+                if (target == "/look")
+                {
+                    SendJson(client, RunOnMain(delegate
+                    {
+                        var spawner = PlayerSpawner.Instance;
+                        var local = spawner != null ? spawner.LocalPlayer : null;
+                        if (local == null) return "{\"ok\":false,\"error\":\"no local player\"}";
+
+                        var fps = local.GetComponent<FPSController>();
+                        var looks = local.GetComponentsInChildren<CameraMouseLook>(true);
+
+                        var sb = new StringBuilder(512);
+                        sb.Append("{\"ok\":true,\"count\":").Append(looks.Length);
+                        sb.Append(",\"fpsLook\":\"").Append(
+                            fps != null && fps.camMouseLook != null ? PathOf(fps.camMouseLook.transform) : "-")
+                          .Append("\",\"items\":[");
+                        for (int i = 0; i < looks.Length; i++)
+                        {
+                            if (i > 0) sb.Append(',');
+                            sb.Append("{\"path\":\"").Append(Esc(PathOf(looks[i].transform)))
+                              .Append("\",\"bControl\":").Append(looks[i].bControl ? "true" : "false")
+                              .Append(",\"enabled\":").Append(looks[i].enabled ? "true" : "false")
+                              .Append('}');
+                        }
+                        sb.Append("]}");
+                        return sb.ToString();
+                    }));
+                    return;
+                }
+                if (target == "/lobby")
+                {
+                    SendJson(client, RunOnMain(delegate
+                    {
+                        RakeNetworkManager.Instance?.ServerReturnToLobby();
+                        return "{\"ok\":true}";
                     }));
                     return;
                 }
@@ -590,7 +644,25 @@ namespace RakeMultiplayer.Core
 
                         bool want = on == "1" || string.Equals(on, "true", StringComparison.OrdinalIgnoreCase);
                         menu.isPaused = want;
-                        if (menu.menu != null) menu.menu.SetActive(want);
+
+                        var fps = PlayerSpawner.Instance != null ? PlayerSpawner.Instance.LocalPlayer : null;
+                        var controller = fps != null ? fps.GetComponent<FPSController>() : null;
+
+                        if (want)
+                        {
+                            if (menu.menu != null) menu.menu.SetActive(true);
+                            if (controller != null) controller.SetPlayerDisableState("PAUSEMENU");
+                            Time.timeScale = 0f;
+                            Cursor.lockState = CursorLockMode.None;
+                            Cursor.visible = true;
+                        }
+                        else
+                        {
+                            if (menu.menu != null) menu.menu.SetActive(false);
+                            if (controller != null) controller.SetPlayerDisableState("BEFOREPAUSE");
+                            Time.timeScale = 1f;
+                        }
+
                         return "{\"ok\":true,\"paused\":" + (menu.isPaused ? "true" : "false") + "}";
                     }));
                     return;
@@ -664,6 +736,26 @@ namespace RakeMultiplayer.Core
                 sb.Append("\"vsync\":").Append(QualitySettings.vSyncCount).Append(",");
                 sb.Append("\"aa\":").Append(QualitySettings.antiAliasing).Append(",");
                 sb.Append("\"fullscreen\":").Append(Screen.fullScreen ? "true" : "false");
+
+                var spawner = PlayerSpawner.Instance;
+                var local = spawner != null ? spawner.LocalPlayer : null;
+                var fps = local != null ? local.GetComponent<FPSController>() : null;
+                var look = local != null ? local.GetComponentInChildren<CameraMouseLook>() : null;
+                var move = local != null ? local.GetComponent<PlayerMovement>() : null;
+
+                var pauseMenu = UnityEngine.Object.FindObjectOfType<GamePauseMenu>();
+                sb.Append(",\"pausePanel\":").Append(
+                    pauseMenu != null && pauseMenu.menu != null && pauseMenu.menu.activeSelf ? "true" : "false");
+                sb.Append(",\"paused\":").Append(pauseMenu != null && pauseMenu.isPaused ? "true" : "false");
+                sb.Append(",\"ragdoll\":").Append(PlayerRagdoll.IsActive ? "true" : "false");
+                sb.Append(",\"dead\":").Append(local != null && PlayerDeathSystem.IsDead(local.PlayerId) ? "true" : "false");
+                sb.Append(",\"hp\":").Append(fps != null ? fps.Health.ToString() : "-");
+                sb.Append(",\"bControl\":").Append(look != null && look.bControl ? "true" : "false");
+                sb.Append(",\"canMove\":").Append(move != null && move.bCanMove ? "true" : "false");
+                sb.Append(",\"lookEnabled\":").Append(look != null && look.enabled ? "true" : "false");
+                sb.Append(",\"camEuler\":\"").Append(look != null && look.camera != null ? look.camera.eulerAngles.ToString("F0") : "-").Append("\"");
+                sb.Append(",\"targetEuler\":\"").Append(look != null ? look.m_CameraTargetRot.eulerAngles.ToString("F0") : "-").Append("\"");
+                sb.Append(",\"charEuler\":\"").Append(local != null ? local.transform.eulerAngles.ToString("F0") : "-").Append("\"");
                 sb.Append("}");
                 return sb.ToString();
             });
@@ -952,6 +1044,19 @@ namespace RakeMultiplayer.Core
                 stream.Flush();
             }
             catch { }
+        }
+
+        private static string PathOf(Transform t)
+        {
+            if (t == null) return "-";
+            var sb = new StringBuilder(64);
+            while (t != null)
+            {
+                if (sb.Length > 0) sb.Insert(0, '/');
+                sb.Insert(0, t.name);
+                t = t.parent;
+            }
+            return sb.ToString();
         }
 
         private static string Esc(string value)

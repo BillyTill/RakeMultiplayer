@@ -21,7 +21,16 @@ namespace RakeMultiplayer.Patches
             // Never let the vanilla Game over run in a connected session: it loads the
             // main menu after 5 s and kicks the client out of the match. BeginLocalDeath
             // is idempotent; if it cannot handle this hit, simply keep the body as is.
-            PlayerDeathSystem.BeginLocalDeath(__instance);
+            bool handled = PlayerDeathSystem.BeginLocalDeath(__instance);
+
+            if (!handled && __instance != null && __instance.Health < 0)
+            {
+                // The death flow needs PlayerSpawner.LocalPlayer, which does not exist yet
+                // during a level load. Do not leave a negative-health body with the vanilla
+                // "Game over" suppressed: clamp it so the next hit can kill it properly.
+                __instance.Health = 1;
+            }
+
             return false;
         }
     }

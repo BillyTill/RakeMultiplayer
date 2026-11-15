@@ -27,7 +27,10 @@ namespace RakeMultiplayer.Networking
 
         public override void Read(BinaryReader reader)
         {
-            SceneName = reader.ReadString();
+            // ReadString trusts the 7-bit length prefix: a peer could ask the 32-bit host
+            // to allocate ~2 GB before a single byte is read. Every other packet uses the
+            // capped reader.
+            SceneName = PacketSerializer.ReadSafeString(reader);
         }
     }
 }

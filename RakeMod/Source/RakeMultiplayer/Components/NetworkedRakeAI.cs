@@ -1594,6 +1594,21 @@ namespace RakeMultiplayer
             // Without it the hunter simply outran every swing and the Rake swung forever.
             if (!_grabSent)
             {
+                // Freezing the hunter is only worth it when the hit can actually land.
+                // Behind a wall/fence the old code held them for 1.8 s, dealt nothing and
+                // grabbed again five seconds later.
+                bool reachable = distance <= attackRange + 2f &&
+                                 HasLineOfSight(transform.position + Vector3.up * 1.2f,
+                                                currentTarget.position + Vector3.up * 1.2f,
+                                                currentTarget);
+
+                if (!reachable)
+                {
+                    _attackCooldown = 1f;
+                    TransitionToState(RakeState.Chase);
+                    return;
+                }
+
                 _grabSent = true;
                 BeginGrab(currentTarget);
             }
@@ -2437,6 +2452,10 @@ namespace RakeMultiplayer
             }
 
             SetStunnedPhysics(true);
+
+            // A human Rake is moved by RakePlayerController, which never ticks this state
+            // machine: hand it the stun so the trap actually holds the body.
+            if (_playerControlled) RakePlayerController.ApplyStun(stunDuration);
 
             RakeMultiplayerPlugin.Log?.LogInfo($"[3.11] Rake stunned for {stunDuration:F1}s");
         }

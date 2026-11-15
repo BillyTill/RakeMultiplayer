@@ -107,7 +107,8 @@ namespace RakeMultiplayer.UI
                 _fpsWindow = 0f;
             }
 
-            if (Input.GetKeyDown(KeyCode.F8) && !DebugConsole.ConsoleOpen)
+            if (Input.GetKeyDown(KeyCode.F8) && !DebugConsole.ConsoleOpen &&
+                !MultiplayerMenu.IsOpen && Application.loadedLevel >= 1)
             {
                 SetVisible(!_visible);
             }

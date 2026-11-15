@@ -418,7 +418,8 @@ namespace RakeMultiplayer.UI
                 : (session != null ? Mathf.Max(1, session.CurrentNight) : 1);
             Color accent = night ? Ember : Moss;
 
-            _phaseKicker.text = (night ? "NIGHT " : "DAY ") + nightNumber + " / 3";
+            int totalNights = session != null ? Mathf.Max(1, session.TotalNightsConfig) : 3;
+            _phaseKicker.text = (night ? "NIGHT " : "DAY ") + nightNumber + " / " + totalNights;
             _phaseKicker.color = accent;
             _phaseSubtitle.text = night ? "THE HUNT IS ON" : "THE RAKE SLEEPS";
             _phaseSubtitle.color = new Color(BoneDim.r, BoneDim.g, BoneDim.b, 0.8f);

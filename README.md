@@ -1,6 +1,6 @@
 # Rake Multiplayer
 
-**1.1.4-alpha.1-Main** · Windows x86 · Rake (2015)
+**1.1.5-alpha.1-Main** · Windows x86 · Rake (2015)
 
 A cooperative multiplayer mod for **Rake (2015)**: one player takes the Rake,
 up to three hunters try to survive the woods. Host-authoritative AI and world

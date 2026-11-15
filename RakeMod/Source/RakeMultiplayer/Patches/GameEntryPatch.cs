@@ -83,6 +83,17 @@ namespace RakeMultiplayer.Patches
         /// </summary>
         private static void OnSceneChangeStart(string sceneName)
         {
+            // A load can start while someone is paused (Time.timeScale = 0). The new
+            // level then came up alive but frozen, and only a second ESC press fixed it.
+            Time.timeScale = 1f;
+
+            // Every input lock belonged to the object that is about to be destroyed.
+            PlayerInputLock.ResetForScene();
+
+            // The free camera is HideAndDontSave: it would survive and render the new
+            // level on top of the player camera with doubled WASD/mouse.
+            if (DebugFreeCamera.IsActive) DebugFreeCamera.SetEnabled(false);
+
             // Snapshot world state before the scene unloads (cameras/traps/Rake HP)
             if (RakeMultiplayerPlugin.isServer && RakeMultiplayerPlugin.isConnected)
             {
