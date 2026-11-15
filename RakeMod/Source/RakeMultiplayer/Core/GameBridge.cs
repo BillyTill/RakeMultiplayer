@@ -209,6 +209,21 @@ namespace RakeMultiplayer.Core
                     SendJson(client, RunOnMain(delegate { return RakePlayerController.BridgeProbe(pyaw, pheight); }));
                     return;
                 }
+                if (target == "/stats")
+                {
+                    string on = Get(args, "on");
+                    SendJson(client, RunOnMain(delegate
+                    {
+                        var stats = UI.PerfStats.Instance;
+                        if (stats == null) return "{\"ok\":false}";
+                        if (!string.IsNullOrEmpty(on))
+                        {
+                            stats.SetVisible(on == "1" || string.Equals(on, "true", StringComparison.OrdinalIgnoreCase));
+                        }
+                        return stats.BridgeStats();
+                    }));
+                    return;
+                }
                 if (target == "/climb")
                 {
                     SendJson(client, RunOnMain(delegate { return RakePlayerController.BridgeClimb(); }));

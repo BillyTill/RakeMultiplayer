@@ -30,3 +30,5 @@ First public alpha of Rake Multiplayer.
   stops flickering on round trunks, releasing the keys keeps it hanging, ledges are pulled
   over, Space always lets go and the wall cannot be re-grabbed for two seconds.
 - First person while climbing hides the body, so the raised arms no longer fill the lens.
+- Frame statistics overlay on `F8`: frame, CPU, GPU and render time in milliseconds,
+  visible triangles, draw calls and objects.

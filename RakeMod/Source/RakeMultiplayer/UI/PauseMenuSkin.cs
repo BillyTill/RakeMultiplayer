@@ -204,7 +204,7 @@ namespace RakeMultiplayer.UI
 
         // ---------------------------------------------------------------- textures
 
-        private static class Skin
+        internal static class Skin
         {
             private static readonly Dictionary<string, Sprite> Cache = new Dictionary<string, Sprite>();
 
@@ -224,7 +224,7 @@ namespace RakeMultiplayer.UI
                 return Sprite.Create(tex, new Rect(0f, 0f, tex.width, tex.height), new Vector2(0.5f, 0.5f), 100f);
             }
 
-            public static Sprite Solid()
+            internal static Sprite Solid()
             {
                 return Get("solid", delegate
                 {
@@ -237,7 +237,7 @@ namespace RakeMultiplayer.UI
                 });
             }
 
-            public static Sprite Plate(int w, int h, int seed)
+            internal static Sprite Plate(int w, int h, int seed)
             {
                 return Get("plate" + w + "x" + h + "_" + seed, delegate
                 {

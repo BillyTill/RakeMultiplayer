@@ -43,6 +43,25 @@ The installer adds BepInEx 5.4.23.2 (x86), the mod and Telepathy, and creates
   grabbed again for two seconds.
 - **First person** hides the body while climbing, so the Rake does not see its own arms or face.
 
+## Performance overlay
+
+Press `F8` in a match for a small panel in the top-left corner:
+
+| Row | Meaning |
+| --- | --- |
+| `FRAME` | wall clock between two frames, ms |
+| `CPU` | start of the frame to the end of camera rendering, ms |
+| `GPU~` | `FRAME - CPU`: the part of the frame spent waiting for the device |
+| `REND` | CPU time spent submitting the cameras, ms |
+| `TRIS` | triangles of every visible mesh |
+| `DRAW~` | draw calls: one per visible submesh plus one per uGUI element |
+| `UI` | uGUI draw calls only |
+| `OBJS` | visible renderers |
+
+Unity 5 has no runtime GPU timer, so `GPU~` is an upper bound: with V-Sync on the
+frame is capped and the row reads lower than the real device time. Terrain is not
+included in `TRIS` (the engine exposes no terrain triangle count).
+
 ## Screenshots
 
 ![Main menu](https://raw.githubusercontent.com/BillyTill/RakeMultiplayer/master/docs/screenshots/main-menu.jpg)
@@ -64,7 +83,7 @@ The installer adds BepInEx 5.4.23.2 (x86), the mod and Telepathy, and creates
 
 ## Controls
 
-`F1` menu (in a match), `Tab` cameras, `F3` minimap, `Ctrl` sneak, `` ` `` developer console.
+`F1` menu (in a match), `Tab` cameras, `F3` minimap, `F8` frame statistics, `Ctrl` sneak, `` ` `` developer console.
 
 ## Verification
 

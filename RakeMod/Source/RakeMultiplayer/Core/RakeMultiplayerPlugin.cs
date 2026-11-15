@@ -212,6 +212,11 @@ namespace RakeMultiplayer
             var rakeStatusObj = new UnityEngine.GameObject("RakeStatusPanel");
             UnityEngine.Object.DontDestroyOnLoad(rakeStatusObj);
             rakeStatusObj.AddComponent<UI.RakeStatusPanel>();
+
+            // Frame statistics overlay (F8).
+            var perfStatsObj = new UnityEngine.GameObject("RakePerfStats");
+            UnityEngine.Object.DontDestroyOnLoad(perfStatsObj);
+            perfStatsObj.AddComponent<UI.PerfStats>();
             Log.LogInfo("[RakeMultiplayer] Rake status panel created (F7)");
 
             // Steam (Spacewar app 480) - optional; LAN keeps working without it.
