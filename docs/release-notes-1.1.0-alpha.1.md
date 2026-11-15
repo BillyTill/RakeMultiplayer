@@ -31,6 +31,18 @@ The installer adds BepInEx 5.4.23.2 (x86), the mod and Telepathy, and creates
 - The Rake no longer spawns on the level's staging platform under the map during the
   day: taking the Rake now puts it on forest ground next to the hunters.
 
+## Climbing
+
+- **No more flicker.** The wall probe is volumetric and skips the Rake's own capsule, which
+  used to be picked as a "wall" and made the climb blink off and on.
+- **Round trunks hold.** The contact normal is smoothed instead of snapped, so the body no
+  longer swings left and right on a tree while climbing it.
+- **Hanging works:** release the keys and the Rake stays on the wall.
+- **Ledges** are pulled over instead of dropping back down.
+- **Space always lets go**, even while the jump is cooling down, and the wall cannot be
+  grabbed again for two seconds.
+- **First person** hides the body while climbing, so the Rake does not see its own arms or face.
+
 ## Screenshots
 
 ![Main menu](https://raw.githubusercontent.com/BillyTill/RakeMultiplayer/master/docs/screenshots/main-menu.jpg)

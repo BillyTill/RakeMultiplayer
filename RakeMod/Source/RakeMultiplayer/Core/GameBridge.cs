@@ -187,6 +187,56 @@ namespace RakeMultiplayer.Core
                     SendJson(client, RunOnMain(delegate { return RakePlayerController.BridgeCamera(view, pitch, look); }));
                     return;
                 }
+                if (target == "/tp")
+                {
+                    float tx, ty, tz;
+                    float.TryParse(Get(args, "x"), System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out tx);
+                    float.TryParse(Get(args, "z"), System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out tz);
+                    if (!float.TryParse(Get(args, "y"), System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out ty)) ty = 0.5f;
+                    SendJson(client, RunOnMain(delegate { return RakePlayerController.BridgeTeleport(tx, ty, tz); }));
+                    return;
+                }
+                if (target == "/probe")
+                {
+                    float pyaw, pheight;
+                    float.TryParse(Get(args, "yaw"), System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out pyaw);
+                    if (!float.TryParse(Get(args, "height"), System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out pheight)) pheight = 1.25f;
+                    SendJson(client, RunOnMain(delegate { return RakePlayerController.BridgeProbe(pyaw, pheight); }));
+                    return;
+                }
+                if (target == "/climb")
+                {
+                    SendJson(client, RunOnMain(delegate { return RakePlayerController.BridgeClimb(); }));
+                    return;
+                }
+                if (target == "/space")
+                {
+                    SendJson(client, RunOnMain(delegate
+                    {
+                        RakePlayerController.BridgeSpace();
+                        return "{\"ok\":true}";
+                    }));
+                    return;
+                }
+                if (target == "/move")
+                {
+                    string w = Get(args, "w");
+                    bool forward = w == "1" || string.Equals(w, "true", StringComparison.OrdinalIgnoreCase);
+                    SendJson(client, RunOnMain(delegate
+                    {
+                        float yaw;
+                        float.TryParse(Get(args, "yaw"), System.Globalization.NumberStyles.Float,
+                            System.Globalization.CultureInfo.InvariantCulture, out yaw);
+                        RakePlayerController.BridgeMove(forward, yaw);
+                        return "{\"ok\":true,\"forward\":" + (forward ? "true" : "false") + "}";
+                    }));
+                    return;
+                }
                 if (target == "/pause")
                 {
                     string on = Get(args, "on");

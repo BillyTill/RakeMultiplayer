@@ -40,9 +40,41 @@ namespace RakeMultiplayer
         private const float JumpCooldown = 50f;
 
         private const float ClimbSpeed = 3.6f;
+
+        /// <summary>After a deliberate drop the Rake cannot re-grab the same wall for this long.</summary>
+        private const float ClimbReleaseTime = 2f;
+
+        /// <summary>Radius of the volumetric wall probe.</summary>
+        private const float ClimbProbeRadius = 0.25f;
         private const float ClimbProbeDistance = 1.15f;
         private const float ClimbChestHeight = 1.25f;
         private const float ClimbKneeHeight = 0.55f;
+
+        /// <summary>The knee probe reaches further: the edge of a ledge is often just out of range.</summary>
+        private const float ClimbKneeProbeDistance = 1.45f;
+
+        /// <summary>
+        /// How fast the stored wall normal follows the measured one (1/s). A round trunk
+        /// reports a normal that swings by ±15° from frame to frame; following it raw
+        /// snapped the body left and right instead of climbing.
+        /// </summary>
+        private const float ClimbNormalSmoothing = 7f;
+
+        /// <summary>A normal that jumps further than this belongs to another surface, not to the wall.</summary>
+        private const float ClimbNormalMaxJump = 60f;
+
+        /// <summary>How fast the body turns to face the wall while climbing (1/s).</summary>
+        private const float ClimbTurnSpeed = 9f;
+
+        /// <summary>
+        /// Probe failures shorter than this do not drop the wall. Thin trunks and branch
+        /// colliders blink in and out of the sphere, and every blink used to become a
+        /// visible grab/drop/grab cycle.
+        /// </summary>
+        private const float ClimbLostGrace = 0.4f;
+
+        /// <summary>Time spent pulling the body over a ledge.</summary>
+        private const float ClimbMantleTime = 0.5f;
 
         private const float SenseRange = 100f;
 
@@ -133,8 +165,13 @@ namespace RakeMultiplayer
         private float _damageLockout;
         private bool _preyInReach;
         private Vector3 _climbNormal = Vector3.forward;
+        private Vector3 _climbDir = Vector3.forward;
         private Vector3 _climbMove;
         private float _mantleTimer;
+        private float _climbLostTimer;
+        private float _climbReleaseTimer;
+        private bool _bridgeForward;
+        private bool _bridgeSpace;
         private float _climbVertical;
 
         private float _stagingCheck;
@@ -587,6 +624,7 @@ namespace RakeMultiplayer
             _cameraCooldown = Mathf.Max(0f, _cameraCooldown - dt);
             _jumpCooldown = Mathf.Max(0f, _jumpCooldown - dt);
             _damageLockout = Mathf.Max(0f, _damageLockout - dt);
+            _climbReleaseTimer = Mathf.Max(0f, _climbReleaseTimer - dt);
             _attackAnimation = Mathf.Max(0f, _attackAnimation - dt);
 
             if (!DebugConsole.ConsoleOpen && !_actionLocked)
@@ -646,10 +684,17 @@ namespace RakeMultiplayer
 
             float speed = stealth ? StealthSpeed : (run ? RunSpeed : WalkSpeed);
 
-            if (Input.GetKeyDown(KeyCode.Space)) TryJump();
+            bool spacePressed = Input.GetKeyDown(KeyCode.Space) || _bridgeSpace;
+            _bridgeSpace = false;
+            if (spacePressed)
+            {
+                // Space always lets go of a wall, even while the jump is cooling down.
+                if (_climbing) DetachFromWall();
+                else TryJump();
+            }
 
             Vector3 input = Vector3.zero;
-            if (Input.GetKey(KeyCode.W)) input += Vector3.forward;
+            if (Input.GetKey(KeyCode.W) || _bridgeForward) input += Vector3.forward;
             if (Input.GetKey(KeyCode.S)) input += Vector3.back;
             if (Input.GetKey(KeyCode.A)) input += Vector3.left;
             if (Input.GetKey(KeyCode.D)) input += Vector3.right;
@@ -787,15 +832,23 @@ namespace RakeMultiplayer
 
             if (_firstPerson)
             {
-                // The body stays visible: looking down shows the creature's own chest and arms.
-                SetRakeVisible(true);
+                // Looking down shows the creature's own chest and arms while walking, but on
+                // a wall both arms are raised in front of the lens: hide the body for the
+                // climb so the Rake never sees itself (or its face) while climbing.
+                SetRakeVisible(!_climbing);
+
+                // While climbing the body faces the wall; keep the view along the wall and
+                // pull the eye closer so it never ends up behind the Rake's own face.
+                float viewYaw = _climbing ? _rake.eulerAngles.y : _yaw;
+                float forwardOffset = _climbing ? 0.16f : FirstPersonForward;
+                Vector3 viewForward = Quaternion.Euler(0f, viewYaw, 0f) * Vector3.forward;
 
                 Vector3 eye = _head != null
-                    ? _head.position + Vector3.up * 0.12f + _rake.forward * FirstPersonForward
+                    ? _head.position + Vector3.up * 0.12f + viewForward * forwardOffset
                     : _rake.position + Vector3.up * 1.72f;
 
                 _camera.transform.position = eye;
-                _camera.transform.rotation = Quaternion.Euler(_pitch, _yaw, 0f);
+                _camera.transform.rotation = Quaternion.Euler(_pitch, viewYaw, 0f);
                 return;
             }
 
@@ -840,6 +893,99 @@ namespace RakeMultiplayer
             }
 
             return fallback;
+        }
+
+        /// <summary>Dev bridge: place the body somewhere for a test.</summary>
+        public static string BridgeTeleport(float x, float y, float z)
+        {
+            if (_instance == null || _instance._rake == null) return "{\"ok\":false}";
+
+            var c = _instance;
+            bool wasEnabled = c._rakeController != null && c._rakeController.enabled;
+            if (c._rakeController != null) c._rakeController.enabled = false;
+
+            c._rake.position = new Vector3(x, y, z);
+            c._verticalVelocity = 0f;
+            c._climbReleaseTimer = 0f;
+
+            if (c._rakeController != null) c._rakeController.enabled = wasEnabled;
+
+            return "{\"ok\":true,\"pos\":\"" + c._rake.position.ToString("F2") + "\"}";
+        }
+
+        /// <summary>Dev bridge: dump every raw hit of the climbing sphere along a yaw.</summary>
+        public static string BridgeProbe(float yaw, float height)
+        {
+            if (_instance == null || _instance._rake == null) return "{\"ok\":false}";
+
+            Vector3 dir = Quaternion.Euler(0f, yaw, 0f) * Vector3.forward;
+            dir.y = 0f;
+            dir.Normalize();
+
+            Vector3 origin = _instance._rake.position + Vector3.up * height - dir * 0.10f;
+            RaycastHit[] hits = Physics.SphereCastAll(origin, ClimbProbeRadius, dir,
+                                                      ClimbProbeDistance + 0.10f);
+
+            var sb = new System.Text.StringBuilder();
+            sb.Append("{\"ok\":true,\"origin\":\"").Append(origin.ToString("F2")).Append("\",\"hits\":[");
+            for (int i = 0; i < hits.Length; i++)
+            {
+                RaycastHit h = hits[i];
+                if (i > 0) sb.Append(',');
+                sb.Append("{\"col\":\"").Append(h.collider == null ? "-" : h.collider.name);
+                sb.Append("\",\"type\":\"").Append(h.collider == null ? "-" : h.collider.GetType().Name);
+                sb.Append("\",\"dist\":").Append(h.distance.ToString("F2"));
+                sb.Append(",\"n\":\"").Append(h.normal.ToString("F2"));
+                sb.Append("\",\"p\":\"").Append(h.point.ToString("F2")).Append("\"}");
+            }
+            sb.Append("]}");
+            return sb.ToString();
+        }
+
+        /// <summary>Dev bridge: live climbing state for diagnosis.</summary>
+        public static string BridgeClimb()
+        {
+            if (_instance == null) return "{\"ok\":false}";
+
+            var c = _instance;
+            string state = "{\"ok\":true," +
+                "\"climbing\":" + (c._climbing ? "true" : "false") + "," +
+                "\"yaw\":" + c._rake.eulerAngles.y.ToString("F1") + "," +
+                "\"normal\":\"" + c._climbNormal.ToString("F2") + "\"," +
+                "\"dir\":\"" + c._climbDir.ToString("F2") + "\"," +
+                "\"lost\":" + c._climbLostTimer.ToString("F2") + "," +
+                "\"mantle\":" + c._mantleTimer.ToString("F2") + "," +
+                "\"pos\":\"" + c._rake.position.ToString("F2") + "\"";
+
+            RaycastHit hit;
+            bool chest = c.FindWall(c._climbDir, ClimbChestHeight, out hit);
+            state += ",\"chest\":" + (chest ? "true" : "false");
+            state += ",\"chestCollider\":\"" + (chest ? hit.collider.name : "-") + "\"";
+            if (chest) state += ",\"chestNormal\":\"" + hit.normal.ToString("F2") + "\"";
+
+            bool knee = c.FindWall(c._climbDir, ClimbKneeHeight, out hit, ClimbKneeProbeDistance);
+            state += ",\"knee\":" + (knee ? "true" : "false");
+            state += ",\"kneeCollider\":\"" + (knee ? hit.collider.name : "-") + "\"";
+            state += "}";
+            return state;
+        }
+
+        /// <summary>Dev bridge: press Space for one frame.</summary>
+        public static void BridgeSpace()
+        {
+            if (_instance != null) _instance._bridgeSpace = true;
+        }
+
+        /// <summary>Dev bridge: walk forward without a keyboard.</summary>
+        public static void BridgeMove(bool forward, float yaw)
+        {
+            if (_instance == null) return;
+            _instance._bridgeForward = forward;
+            if (!float.IsNaN(yaw))
+            {
+                _instance._yaw = yaw;
+                if (_instance._rake != null) _instance._rake.rotation = Quaternion.Euler(0f, yaw, 0f);
+            }
         }
 
         /// <summary>Dev bridge: switch first/third person and report the camera state.</summary>
@@ -1200,33 +1346,84 @@ namespace RakeMultiplayer
         {
             if (_climbing)
             {
-                // Space lets go. Releasing the movement keys does NOT: the Rake hangs.
-                if (Input.GetKeyDown(KeyCode.Space))
-                {
-                    StopClimbing(false);
-                    return;
-                }
-
+                // Space is handled in ReadMovement (DetachFromWall); releasing the movement
+                // keys does NOT let go: the Rake hangs.
                 bool down = Input.GetKey(KeyCode.S);
-                bool up = Input.GetKey(KeyCode.W);
+                bool up = Input.GetKey(KeyCode.W) || _bridgeForward;
 
-                RaycastHit wall;
-                if (FindWall(-_climbNormal, ClimbChestHeight, out wall))
+                // Probe along the stored approach direction, NOT along the raw normal.
+                // Feeding the normal back into the probe made it oscillate on round
+                // trunks: the body turned, the probe missed, the grip blinked off.
+                RaycastHit chestHit = new RaycastHit();
+                RaycastHit kneeHit = new RaycastHit();
+                bool chest = FindWall(_climbDir, ClimbChestHeight, out chestHit);
+                bool knee = !chest && FindWall(_climbDir, ClimbKneeHeight, out kneeHit, ClimbKneeProbeDistance);
+
+                if (chest || knee)
                 {
-                    _climbNormal = wall.normal;
-                    _mantleTimer = 0f;
+                    _climbLostTimer = 0f;
+                    RaycastHit wall = chest ? chestHit : kneeHit;
+
+                    Vector3 n = wall.normal;
+                    n.y = 0f;
+                    if (n.sqrMagnitude > 0.001f)
+                    {
+                        n.Normalize();
+
+                        // A branch or a second collider behind the trunk can report a
+                        // wildly different normal for one frame. Ignore those outliers.
+                        if (Vector3.Angle(_climbNormal, n) <= ClimbNormalMaxJump)
+                        {
+                            _climbNormal = Vector3.Slerp(_climbNormal, n,
+                                1f - Mathf.Exp(-ClimbNormalSmoothing * dt));
+                            _climbNormal.y = 0f;
+                            if (_climbNormal.sqrMagnitude > 0.001f) _climbNormal.Normalize();
+                        }
+                    }
+
+                    // Track the curvature of the trunk slowly along with the smoothed
+                    // normal, so corners are still followed without snapping.
+                    Vector3 steer = -_climbNormal;
+                    steer.y = 0f;
+                    if (chest && steer.sqrMagnitude > 0.001f)
+                    {
+                        steer.Normalize();
+                        _climbDir = Vector3.Slerp(_climbDir, steer, 1f - Mathf.Exp(-3.5f * dt));
+                        _climbDir.y = 0f;
+                        if (_climbDir.sqrMagnitude > 0.001f) _climbDir.Normalize();
+                    }
+
+                    Vector3 face = -_climbNormal;
+                    if (face.sqrMagnitude > 0.001f)
+                    {
+                        Quaternion look = Quaternion.LookRotation(face, Vector3.up);
+                        _rake.rotation = Quaternion.Slerp(_rake.rotation, look,
+                            1f - Mathf.Exp(-ClimbTurnSpeed * dt));
+                    }
+
+                    if (chest) _mantleTimer = 0f;
+                    else if (up)
+                    {
+                        // Committed pull over the edge; the wall is behind us now.
+                        _mantleTimer = ClimbMantleTime;
+                        _climbLostTimer = 0f;
+                    }
                 }
-                else if (FindWall(-_climbNormal, ClimbKneeHeight, out wall))
+                else if (_mantleTimer <= 0f)
                 {
-                    // Only the lower part still touches the wall. Going up: this is the
-                    // top edge, pull the body over it. Otherwise just hang here.
-                    _climbNormal = wall.normal;
-                    if (up) _mantleTimer = 0.45f;
-                }
-                else
-                {
-                    StopClimbing(false);
-                    return;
+                    // One lost frame is not a lost wall.
+                    _climbLostTimer += dt;
+                    if (_climbLostTimer >= ClimbLostGrace)
+                    {
+                        RakeMultiplayerPlugin.Log?.LogInfo("[RakePlay] wall lost after " +
+                            _climbLostTimer.ToString("F2") + " s at y=" +
+                            _rake.position.y.ToString("F1") + " dir=" + _climbDir.ToString("F2"));
+                        StopClimbing(false);
+                        // Never re-grab in the same instant: the new grab would read a
+                        // different normal and snap the body sideways again.
+                        _climbReleaseTimer = Mathf.Max(_climbReleaseTimer, 0.25f);
+                        return;
+                    }
                 }
 
                 if (down && _rakeController != null && _rakeController.isGrounded)
@@ -1235,42 +1432,55 @@ namespace RakeMultiplayer
                     return;
                 }
 
-                Vector3 face = -_climbNormal;
-                face.y = 0f;
-                if (face.sqrMagnitude > 0.001f) _rake.rotation = Quaternion.LookRotation(face);
-
                 if (_mantleTimer > 0f)
                 {
                     _mantleTimer -= dt;
-                    _climbMove = _rake.forward * 3.4f + Vector3.up * 1.1f;
+                    _climbMove = _climbDir * 3.2f + Vector3.up * 1.5f;
+                    if (_mantleTimer <= 0f)
+                    {
+                        // Carry the body over the edge instead of letting it slide back.
+                        StopClimbing(true);
+                        _jumpActive = false;
+                    }
                     return;
                 }
 
-                float climb = (Input.GetKey(KeyCode.W) ? 1f : 0f) - (Input.GetKey(KeyCode.S) ? 1f : 0f);
+                float climb = (up ? 1f : 0f) - (down ? 1f : 0f);
                 _climbVertical = climb;
-                _climbMove = Vector3.up * (climb * ClimbSpeed) - _climbNormal * 1.4f;
+                _climbMove = Vector3.up * (climb * ClimbSpeed) - _climbNormal * 1.2f;
 
                 float side = (Input.GetKey(KeyCode.D) ? 1f : 0f) - (Input.GetKey(KeyCode.A) ? 1f : 0f);
                 if (side != 0f) _climbMove += _rake.right * (side * 2.8f);
                 return;
             }
 
+            if (_climbReleaseTimer > 0f) return;
             if (!moving) return;
             if (_rakeController == null) return;
 
             RaycastHit hit;
             if (!FindWall(direction, ClimbChestHeight, out hit)) return;
 
-            Vector3 toWall = hit.point - _rake.position;
-            toWall.y = 0f;
-            if (toWall.sqrMagnitude < 0.001f) return;
+            // hit.point from a sphere cast is the contact on the sphere, not on the wall;
+            // using it pointed the body metres away from the surface. The surface normal
+            // is the reliable way to know which way the wall is.
+            Vector3 into = -hit.normal;
+            into.y = 0f;
+            if (into.sqrMagnitude < 0.001f) return;
+            into.Normalize();
 
-            Vector3 into = toWall.normalized;
-            if (Vector3.Dot(direction, into) < 0.4f && Vector3.Dot(_rake.forward, into) < 0.4f) return;
+            // Only grab a wall the Rake is actually walking into, not a tree beside him.
+            if (Vector3.Dot(direction, into) < 0.5f) return;
 
             _climbing = true;
             _mantleTimer = 0f;
-            _climbNormal = hit.normal;
+            _climbLostTimer = 0f;
+            // Face the wall by the approach direction, not by the first contact normal:
+            // that one is already rotated on a curved trunk.
+            // The stored normal points AWAY from the wall (it is used to face it as
+            // -normal and to press the body into it); the approach direction points into it.
+            _climbNormal = -into;
+            _climbDir = into;
             _climbMove = Vector3.zero;
             _verticalVelocity = 0f;
             _climbVertical = 0f;
@@ -1279,12 +1489,36 @@ namespace RakeMultiplayer
             RakeMultiplayerPlugin.Log?.LogInfo("[RakePlay] grabbed the wall: " + hit.collider.name);
         }
 
+        /// <summary>Deliberate drop: push away from the wall and forbid re-grabbing for a moment.</summary>
+        private void DetachFromWall()
+        {
+            if (!_climbing) return;
+
+            Vector3 away = _climbNormal;
+            away.y = 0f;
+            if (away.sqrMagnitude < 0.001f) away = Vector3.zero;
+            else away.Normalize();
+
+            StopClimbing(false);
+            _climbReleaseTimer = ClimbReleaseTime;
+            _verticalVelocity = 0f;
+
+            if (_rakeController != null && _rakeController.enabled && away != Vector3.zero)
+            {
+                _rakeController.Move(away * 0.55f);
+            }
+
+            RakeMultiplayerPlugin.Log?.LogInfo("[RakePlay] dropped from the wall (re-grab blocked for " +
+                                               ClimbReleaseTime + " s)");
+        }
+
         private void StopClimbing(bool reachedTop)
         {
             if (!_climbing) return;
 
             _climbing = false;
             _mantleTimer = 0f;
+            _climbLostTimer = 0f;
             _climbMove = Vector3.zero;
             _climbVertical = 0f;
             _verticalVelocity = reachedTop ? 2f : 0f;
@@ -1298,6 +1532,11 @@ namespace RakeMultiplayer
         /// <summary>Nearest non-character vertical surface in front of the body.</summary>
         private bool FindWall(Vector3 direction, float height, out RaycastHit wall)
         {
+            return FindWall(direction, height, out wall, ClimbProbeDistance);
+        }
+
+        private bool FindWall(Vector3 direction, float height, out RaycastHit wall, float distance)
+        {
             wall = new RaycastHit();
             if (_rake == null) return false;
 
@@ -1305,24 +1544,39 @@ namespace RakeMultiplayer
             if (direction.sqrMagnitude < 0.001f) return false;
             direction.Normalize();
 
-            Vector3 origin = _rake.position + Vector3.up * height;
-            RaycastHit[] hits = Physics.RaycastAll(origin, direction, ClimbProbeDistance);
+            // Volumetric probe: a ray slipped between faces and off ledges, so the Rake
+            // let go of corners and thin fences. Start slightly behind the body so the
+            // sphere never begins inside the wall (SphereCast ignores initial overlaps).
+            const float backoff = 0.10f;
+            Vector3 origin = _rake.position + Vector3.up * height - direction * backoff;
 
             float bestDistance = float.MaxValue;
             bool found = false;
 
+            RaycastHit[] hits = Physics.SphereCastAll(origin, ClimbProbeRadius, direction,
+                                                      distance + backoff);
             for (int i = 0; i < hits.Length; i++)
             {
                 RaycastHit hit = hits[i];
-                Collider col = hit.collider;
-                if (col == null || col.isTrigger) continue;
-                if (col.transform.IsChildOf(_rake)) continue;
-                if (col.GetComponentInParent<NetworkedPlayer>() != null) continue;
-                if (col.GetComponentInParent<Animal_AI>() != null) continue;
+                if (!IsClimbSurface(hit)) continue;
+                if (hit.distance >= bestDistance) continue;
+                bestDistance = hit.distance;
+                wall = hit;
+                found = true;
+            }
 
-                // Floors, roofs and gentle slopes are not climbable.
-                if (Mathf.Abs(hit.normal.y) > 0.45f) continue;
+            if (found) return true;
 
+            // When the sphere starts inside a root bulge or a knot it reports nothing
+            // usable; a thin ray from the body centre still finds the surface and keeps
+            // the grip alive instead of blinking the climb off.
+            Vector3 rayOrigin = _rake.position + Vector3.up * height;
+            RaycastHit[] rays = Physics.RaycastAll(rayOrigin, direction, distance + 0.4f);
+            bestDistance = float.MaxValue;
+            for (int i = 0; i < rays.Length; i++)
+            {
+                RaycastHit hit = rays[i];
+                if (!IsClimbSurface(hit)) continue;
                 if (hit.distance >= bestDistance) continue;
                 bestDistance = hit.distance;
                 wall = hit;
@@ -1331,6 +1585,32 @@ namespace RakeMultiplayer
 
             return found;
         }
+
+        /// <summary>Filters shared by every climbing probe.</summary>
+        private bool IsClimbSurface(RaycastHit hit)
+        {
+            Collider col = hit.collider;
+            if (col == null || col.isTrigger) return false;
+            if (col is TerrainCollider) return false; // slopes are not climbing surfaces
+
+            // The Rake's own capsule was slipping through here: IsChildOf is false for the
+            // object itself, and it reported distance 0 with a junk hit.point, which then
+            // became the approach direction.
+            if (col.transform == _rake || col.transform.IsChildOf(_rake)) return false;
+            if (_rakeController != null && col == _rakeController) return false;
+            if (col.GetComponentInParent<NetworkedPlayer>() != null) return false;
+            if (col.GetComponentInParent<Animal_AI>() != null) return false;
+
+            // Floors, roofs and gentle slopes are not climbable.
+            if (Mathf.Abs(hit.normal.y) > 0.45f) return false;
+
+            // A zero distance with a zero normal means the probe started inside the
+            // collider (Unity's initial-overlap report), not a wall in front of us.
+            if (hit.distance <= 0.001f) return false;
+
+            return true;
+        }
+
         private void TryJump()
         {
             if (_jumpActive || _jumpCooldown > 0f) return;

@@ -26,3 +26,7 @@ First public alpha of Rake Multiplayer.
 - Target markers: bigger, with a dark backing, red for players and traps, and always oriented away from the screen centre.
 - Session phase now follows the loaded level: a Day scene starts on Day 1 with a sun icon instead of claiming night.
 - Pause menu restyled: torn plate, bone type, ember continue button; vanilla panel hidden, its actions kept.
+- Climbing reworked: an object-shaped probe no longer grabs the Rake's own body, the grip
+  stops flickering on round trunks, releasing the keys keeps it hanging, ledges are pulled
+  over, Space always lets go and the wall cannot be re-grabbed for two seconds.
+- First person while climbing hides the body, so the raised arms no longer fill the lens.
