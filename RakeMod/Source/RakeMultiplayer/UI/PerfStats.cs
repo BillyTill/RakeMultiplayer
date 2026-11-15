@@ -197,8 +197,15 @@ namespace RakeMultiplayer.UI
 
             _lastCameraFrameMs = _renderMs;
             _lastCameraCount = _cameraCount;
+            // Unity reuses instance ids after a scene load, so a stale camera key can
+            // compare equal to a fresh one. Add() throws on that and the exception came
+            // back every single frame; the indexer just replaces the value.
             _lastCameraTimes.Clear();
-            foreach (var pair in _cameraMs) _lastCameraTimes.Add(pair.Key, pair.Value);
+            foreach (var pair in _cameraMs)
+            {
+                if (pair.Key == null) continue;
+                _lastCameraTimes[pair.Key] = pair.Value;
+            }
             _cameraMs.Clear();
             _cameraCount = 0;
 

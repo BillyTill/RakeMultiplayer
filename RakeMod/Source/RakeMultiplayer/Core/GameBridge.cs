@@ -338,6 +338,32 @@ namespace RakeMultiplayer.Core
                     }));
                     return;
                 }
+                if (target == "/ai")
+                {
+                    string go = Get(args, "go");
+
+                    SendJson(client, RunOnMain(delegate
+                    {
+                        var rake = RakeHighlight.FindRake();
+                        var ai = rake != null ? rake.GetComponent<NetworkedRakeAI>() : null;
+                        if (ai == null) return "{\"ok\":false,\"error\":\"no rake\"}";
+
+                        string forced = "";
+                        if (!string.IsNullOrEmpty(go)) forced = ai.ForceTask() ? "started" : "inactive";
+
+                        var culture = System.Globalization.CultureInfo.InvariantCulture;
+                        Vector3 pos = ai.transform.position;
+
+                        return "{\"ok\":true" +
+                               ",\"pos\":\"" + pos.x.ToString("F1", culture) + ", " +
+                                                    pos.y.ToString("F1", culture) + ", " +
+                                                    pos.z.ToString("F1", culture) + "\"" +
+                               ",\"dist\":" + ai.DistanceToNearestHunter().ToString("F1", culture) +
+                               ",\"forced\":\"" + forced + "\"" +
+                               ",\"ai\":\"" + Esc(ai.GetAiStatusReport().Trim()) + "\"}";
+                    }));
+                    return;
+                }
                 if (target == "/phase")
                 {
                     string skip = Get(args, "skip");

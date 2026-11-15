@@ -567,6 +567,9 @@ namespace RakeMultiplayer
         /// During the day the level keeps the Rake on a staging platform under the map.
         /// Move it to the forest instead, once per day phase.
         /// </summary>
+        [Tooltip("During the day the AI Rake keeps at least this far from every hunter.")]
+        public float dayKeepAwayDistance = 90f;
+
         private void UpdateDaySpawn()
         {
             DayNightManager dayNight = DayNightManager.Instance;
@@ -582,7 +585,12 @@ namespace RakeMultiplayer
             {
                 _daySpawnChecked = true;
                 _lastDayWarp = Time.time;
-                MoveToForestSpawn();
+
+                // The day spawn used to teleport the Rake to the forest marker, which is
+                // the hunter's own camp. The day gate stops it from hunting, so it stood
+                // there motionless at arm's length and read as a broken AI.
+                if (NearestPlayerDistance(transform.position) > 1200f) MoveToForestSpawn();
+                RepositionAwayFromHunters(dayKeepAwayDistance);
                 return;
             }
 
@@ -591,7 +599,62 @@ namespace RakeMultiplayer
             if (Time.time - _lastDayWarp < 10f) return;
             _lastDayWarp = Time.time;
 
-            if (NearestPlayerDistance(transform.position) > 1200f) MoveToForestSpawn();
+            if (NearestPlayerDistance(transform.position) > 1200f)
+            {
+                MoveToForestSpawn();
+                return;
+            }
+
+            // A hunter who walks up to the sleeping Rake must not find a statue.
+            RepositionAwayFromHunters(dayKeepAwayDistance);
+        }
+
+        /// <summary>
+        /// Silent daytime retreat: if a hunter is closer than <paramref name="minDistance"/>,
+        /// warp the body to a reachable spot deeper in the trees.
+        /// </summary>
+        private bool RepositionAwayFromHunters(float minDistance)
+        {
+            Vector3 nearest;
+            float distance = NearestPlayerDistance(transform.position, out nearest);
+            if (distance < 0f || distance >= minDistance) return false;
+
+            // CalculatePath below needs a valid start; a fall can leave the body off-mesh.
+            TryRecoverAgent();
+
+            Vector3 away = transform.position - nearest;
+            away.y = 0f;
+            if (away.sqrMagnitude < 1f) away = UnityEngine.Random.insideUnitSphere;
+            away.y = 0f;
+            away = away.sqrMagnitude > 0.001f ? away.normalized : Vector3.forward;
+
+            float retreat = Mathf.Max(Mathf.Max(minDistance, 60f) + 40f, 130f);
+            float[] angles = { 0f, 30f, -30f, 60f, -60f, 90f, -90f, 120f, -120f, 180f };
+
+            for (int i = 0; i < angles.Length; i++)
+            {
+                Vector3 dir = Quaternion.Euler(0f, angles[i], 0f) * away;
+                Vector3 candidate = nearest + dir * retreat;
+
+                if (!TrySampleNavMesh(candidate, 30f, out candidate)) continue;
+                if (NearestPlayerDistance(candidate) < minDistance) continue;
+
+                NavMeshPath path = new NavMeshPath();
+                if (!NavMesh.CalculatePath(transform.position, candidate, NavMesh.AllAreas, path)) continue;
+                if (path.status != NavMeshPathStatus.PathComplete) continue;
+
+                WarpAiBody(candidate);
+                RakeMultiplayerPlugin.Log?.LogInfo("[AI] Day keep-away: hunter at " +
+                                                   distance.ToString("F0") + " m, Rake moved to " +
+                                                   candidate.ToString("F1") + " (" +
+                                                   NearestPlayerDistance(candidate).ToString("F0") +
+                                                   " m away)");
+                return true;
+            }
+
+            RakeMultiplayerPlugin.Log?.LogWarning("[AI] Day keep-away: no safe spot found for a hunter at " +
+                                                  distance.ToString("F0") + " m");
+            return false;
         }
 
         private float NearestPlayerDistance(Vector3 position)
@@ -739,6 +802,16 @@ namespace RakeMultiplayer
                 return;
             }
 
+            WarpAiBody(target);
+
+            RakeMultiplayerPlugin.Log?.LogInfo("[AI] Day spawn: Rake moved to the forest at " +
+                                               target.ToString("F1") + " (source: " + source +
+                                               ", now " + transform.position.ToString("F1") + ")");
+        }
+
+        /// <summary>Teleports the AI body without letting the NavMeshAgent drag it back.</summary>
+        private void WarpAiBody(Vector3 target)
+        {
             transform.position = target;
             targetPosition = target;
             hasTargetPosition = true;
@@ -746,31 +819,22 @@ namespace RakeMultiplayer
             // Detach the agent, move the transform, then re-attach: Warp alone can fail
             // and the agent would snap the body back to its old position next frame.
             var agent = GetEnemyAgent();
-            if (agent != null)
+            if (agent == null) return;
+
+            bool wasEnabled = agent.enabled;
+            if (wasEnabled) agent.enabled = false;
+
+            transform.position = target;
+
+            if (!wasEnabled) return;
+
+            agent.enabled = true;
+            if (!agent.Warp(target))
             {
-                bool wasEnabled = agent.enabled;
-                if (wasEnabled) agent.enabled = false;
-
-                transform.position = target;
-
-                if (wasEnabled)
-                {
-                    agent.enabled = true;
-                    if (!agent.Warp(target))
-                    {
-                        RakeMultiplayerPlugin.Log?.LogWarning("[AI] Day spawn: agent.Warp failed at " +
-                                                           target.ToString("F1") + " (isOnNavMesh=" + agent.isOnNavMesh + ")");
-                    }
-                }
+                RakeMultiplayerPlugin.Log?.LogWarning("[AI] agent.Warp failed at " +
+                                                     target.ToString("F1") + " (isOnNavMesh=" +
+                                                     agent.isOnNavMesh + ")");
             }
-            else
-            {
-                transform.position = target;
-            }
-
-            RakeMultiplayerPlugin.Log?.LogInfo("[AI] Day spawn: Rake moved to the forest at " +
-                                               target.ToString("F1") + " (source: " + source + 
-                                               ", now " + transform.position.ToString("F1") + ")");
         }
 
         private bool TryFindForestSpawn(out Vector3 position, out string source)
@@ -2474,6 +2538,19 @@ namespace RakeMultiplayer
             sb.AppendLine("ATTACK     cooldown=" + _attackCooldown.ToString("F2") + " s   swing=" + _attackSwing + "   struck=" + _attackStruck + "   range=" + attackRange.ToString("F1") + " m");
             sb.AppendLine("NOISE      cooldown=" + _noiseCooldown.ToString("F1") + " s   hearRange=" + noiseHearRange.ToString("F0") + " m");
             return sb.ToString();
+        }
+
+        /// <summary>
+        /// Dev bridge: start the next stalk task without waiting for the 60-90 s pause.
+        /// Used to verify that a level change left the AI able to move.
+        /// </summary>
+        public bool ForceTask()
+        {
+            if (!IsAiActive) return false;
+            if (currentState != RakeState.Idle) FinishEncounter("forced task");
+            _lurkCooldownTimer = 0f;
+            BeginLurk();
+            return true;
         }
 
         /// <summary>One-line state dump for the "rake ai" console command.</summary>

@@ -1,4 +1,4 @@
-# Rake Multiplayer 1.1.2-alpha.1-Main
+# Rake Multiplayer 1.1.3-alpha.1-Main
 
 > **Main build.** This release is built from the `master` (Main) branch: graphics
 > presets, the day/night level change, the HUD phase fix and the climbing guards.
@@ -33,7 +33,7 @@ The installer adds BepInEx 5.4.23.2 (x86), the mod and Telepathy, and creates
 ## Fixes
 
 - The Rake no longer spawns on the level's staging platform under the map during the
-  day: taking the Rake now puts it on forest ground next to the hunters.
+  day: taking the Rake now puts it on forest ground near the hunters.
 
 ## Climbing
 
@@ -119,6 +119,18 @@ survives switching quality in the menu. The result is written to the log:
   loaded level name before the first packet.
 - Climbing no longer locks up: a zero/NaN approach direction or a stale release timer is
   detected and reset instead of silently refusing every wall.
+
+## Fixes in 1.1.3
+
+- **The Rake AI looked frozen.** During the day the AI Rake was teleported to the forest
+  marker, which sits in the hunters' own camp, and the day gate stopped it from hunting:
+  it stood motionless at arm's length. It now keeps at least 90 m from every hunter and
+  silently steps deeper into the trees if someone walks up to it. Night hunting is
+  unchanged (lurk -> stealth -> charge -> flee).
+- **The F8 overlay threw every frame after a level change** (`An element with the same key
+  already exists in the dictionary`). Unity reuses instance ids after a scene load, so a
+  stale camera key compared equal to a fresh one; the camera timing copy can no longer
+  throw, and the frame timings keep updating across day/night transitions.
 
 ## Known limitations
 

@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.1.3-alpha.1-Main - 2026-11-15
+
+Fixes the Rake AI standing still next to the hunters during the day, and stops a
+per-frame exception in the F8 overlay after a level change.
+
 ## 1.1.2-alpha.1-Main - 2026-11-15
 
 Rebuild of the 1.1 line from the **Main** branch. This is the build that ships the
