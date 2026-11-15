@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.2-alpha.1-Main - 2026-11-15
+
+Rebuild of the 1.1 line from the **Main** branch. This is the build that ships the
+graphics presets and the phase/climbing fixes; it does not contain the optics or
+target-refresh work from the other branch.
+
 ## 1.1.1-alpha.1 - 2026-11-15
 
 First public alpha of Rake Multiplayer.

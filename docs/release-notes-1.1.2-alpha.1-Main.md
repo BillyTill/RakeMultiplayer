@@ -1,4 +1,8 @@
-# Rake Multiplayer 1.1.1-alpha.1
+# Rake Multiplayer 1.1.2-alpha.1-Main
+
+> **Main build.** This release is built from the `master` (Main) branch: graphics
+> presets, the day/night level change, the HUD phase fix and the climbing guards.
+> It does not include the optics or target-refresh work from the other branch.
 
 **First public alpha** of the cooperative multiplayer mod for **Rake (2015)**.
 
