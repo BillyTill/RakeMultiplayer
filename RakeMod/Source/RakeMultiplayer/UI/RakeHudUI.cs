@@ -413,7 +413,9 @@ namespace RakeMultiplayer.UI
             DayNightManager dayNight = DayNightManager.Instance;
             SessionManager session = SessionManager.Instance;
 
-            int nightNumber = session != null ? Mathf.Max(1, session.CurrentNight) : 1;
+            int nightNumber = dayNight != null && dayNight.IsRunning
+                ? Mathf.Max(1, dayNight.NightNumber)
+                : (session != null ? Mathf.Max(1, session.CurrentNight) : 1);
             Color accent = night ? Ember : Moss;
 
             _phaseKicker.text = (night ? "NIGHT " : "DAY ") + nightNumber + " / 3";

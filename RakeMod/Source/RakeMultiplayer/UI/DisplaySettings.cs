@@ -217,6 +217,17 @@ namespace RakeMultiplayer.UI
             RefreshRate = RefreshRates[index];
         }
 
+        public static string ProfileLabel
+        {
+            get { return GraphicsProfiles.Current.Label; }
+        }
+
+        /// <summary>Cycles the measured performance presets (see docs/perf/graphics-steps.md).</summary>
+        public static void CycleProfile(int direction)
+        {
+            GraphicsProfiles.Cycle(direction);
+        }
+
         public static void CycleQuality(int direction)
         {
             int count = Mathf.Max(1, QualitySettings.names.Length);

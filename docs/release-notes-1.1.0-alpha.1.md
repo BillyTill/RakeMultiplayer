@@ -74,6 +74,21 @@ included in `TRIS` (the engine exposes no terrain triangle count).
 
 ![In-game HUD](https://raw.githubusercontent.com/BillyTill/RakeMultiplayer/master/docs/screenshots/hud.jpg)
 
+## Graphics presets
+
+`[Graphics] Preset` in the config, or **PERFORMANCE PROFILE** in Display & Graphics:
+
+| Preset | LOD bias | Far clip | Shadows | FPS on a forest level |
+| --- | --- | --- | --- | --- |
+| OFF (VANILLA) | 1.5 | 300 | on | ~40 |
+| LIGHT | 1.0 | 300 | on | ~47 |
+| BALANCED | 0.7 | 220 | off | ~63 |
+| AGGRESSIVE | 0.7 | 120 | off | ~82 |
+
+Measured, not guessed: `docs/perf/graphics-steps.md` has the full staircase. Anti-aliasing,
+texture size and pixel lights changed nothing on this CPU-bound frame, so the presets do not
+touch them.
+
 ## Graphics config
 
 `BepInEx/config/com.rake.multiplayer.cfg`:
@@ -88,6 +103,18 @@ survives switching quality in the menu. The result is written to the log:
 ```
 [Graphics] terrain shadows OFF on 1 terrain(s) (was ON for 0, changed 0, 29748 tree instances) [scene Level_1(Day), quality High]
 ```
+
+
+## Fixes in this build
+
+- The day/night timer now **loads the matching level** (`Level_X(Day)` <-> `Level_X(Night)`)
+  instead of only changing the lighting; the loading overlay also closes afterwards.
+- Clients mark the cycle as running when the first phase packet arrives, so the HUD shows the
+  real phase and the countdown instead of claiming night forever.
+- The HUD takes the phase and the night number from the session cycle, falling back to the
+  loaded level name before the first packet.
+- Climbing no longer locks up: a zero/NaN approach direction or a stale release timer is
+  detected and reset instead of silently refusing every wall.
 
 ## Known limitations
 

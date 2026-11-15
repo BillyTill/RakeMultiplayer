@@ -222,6 +222,74 @@ namespace RakeMultiplayer
 
             // Fire event for local listeners (SessionManager, etc.)
             OnPhaseChanged?.Invoke(_currentPhase, GetRemainingTime(), _nightNumber);
+
+            // Day and night are separate levels in this game, so the phase has to load
+            // its scene. Without this the timer expired, the sky stayed as it was and the
+            // HUD claimed a phase the level did not show.
+            LoadLevelForPhase(_currentPhase);
+        }
+
+        /// <summary>Dev bridge: force the next phase without waiting for the timer.</summary>
+        public void SkipPhase()
+        {
+            if (!RakeMultiplayerPlugin.isServer) return;
+            TransitionPhase();
+        }
+
+        /// <summary>Server: loads the level that matches the new phase.</summary>
+        private void LoadLevelForPhase(Phase phase)
+        {
+            if (!RakeMultiplayerPlugin.isServer) return;
+
+            string current = Application.loadedLevelName;
+            string target = PhaseSceneFor(current, phase);
+            if (string.IsNullOrEmpty(target) || target == current) return;
+
+            RakeMultiplayerPlugin.Log?.LogInfo("[DayNight] phase " + phase + " -> loading '" +
+                                               target + "' (was '" + current + "')");
+
+            UI.LoadingScreen.Show("THE HUNT CONTINUES",
+                                  phase == Phase.Night ? "NIGHT FALLS" : "DAWN BREAKS",
+                                  "The forest is changing", false);
+
+            Application.LoadLevel(target);
+
+            // The load is synchronous, so nothing else closes the overlay: without this
+            // the screen stayed at 90% over the new level and swallowed the input.
+            UI.LoadingScreen.Hide();
+        }
+
+        /// <summary>
+        /// Level_1(Day) &lt;-&gt; Level_1(Night). Returns null for scenes without a phase
+        /// suffix, so modes that do not ship a night variant stay untouched.
+        /// </summary>
+        public static string PhaseSceneFor(string scene, Phase phase)
+        {
+            if (string.IsNullOrEmpty(scene)) return null;
+
+            if (Contains(scene, "(Day)"))
+            {
+                return phase == Phase.Night ? ReplaceNoCase(scene, "(Day)", "(Night)") : scene;
+            }
+
+            if (Contains(scene, "(Night)"))
+            {
+                return phase == Phase.Day ? ReplaceNoCase(scene, "(Night)", "(Day)") : scene;
+            }
+
+            return null;
+        }
+
+        private static bool Contains(string text, string token)
+        {
+            return text.IndexOf(token, StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private static string ReplaceNoCase(string text, string token, string replacement)
+        {
+            int index = text.IndexOf(token, StringComparison.OrdinalIgnoreCase);
+            if (index < 0) return text;
+            return text.Substring(0, index) + replacement + text.Substring(index + token.Length);
         }
 
         /// <summary>
@@ -307,6 +375,11 @@ namespace RakeMultiplayer
             _currentPhase = packet.Phase;
             _phaseTimer = (_currentPhase == Phase.Day ? DayDuration : NightDuration) - packet.RemainingTime;
             _nightNumber = packet.NightNumber;
+
+            // The server owns the timer, but the client still has to treat the cycle as
+            // running: the HUD reads IsRunning for the countdown and the phase label.
+            _initialized = true;
+            _isRunning = true;
 
             // Start lighting transition if phase actually changed
             if (wasNight != isNight)

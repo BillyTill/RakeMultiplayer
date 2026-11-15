@@ -34,3 +34,9 @@ First public alpha of Rake Multiplayer.
   visible triangles, draw calls and objects.
 - New `[Graphics] TerrainShadows` config option (default `false`): disables the terrain
   shadow pass on every level and re-applies it after a graphics preset change.
+- Graphics presets (off / light / balanced / aggressive) in `[Graphics] Preset` and in
+  Display & Graphics; balanced gives about 1.6x FPS on forest levels.
+- Day/night timer now loads the matching level instead of only changing the sky.
+- Clients follow the session cycle, so the HUD shows the real phase and countdown.
+- Climbing recovers from a degenerate wall direction or a stale release timer instead
+  of silently refusing every wall.

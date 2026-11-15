@@ -36,6 +36,7 @@ namespace RakeMultiplayer.UI
         private Text _displayModeText;
         private Text _displayRefreshText;
         private Text _displayQualityText;
+        private Text _displayProfileText;
         private Text _displayVSyncText;
         private Text _displayAAText;
         private Text _displayStatusText;
@@ -409,7 +410,7 @@ namespace RakeMultiplayer.UI
             _displayPanel.GetComponent<Image>().color = new Color(0f, 0f, 0f, 0f);
             _displayPanel.SetActive(false);
             AddPanelAnimation(_displayPanel, 16f);
-            AddMenuBoard(_displayPanel.transform, new Vector2(900, 920), new Vector2(0, 0));
+            AddMenuBoard(_displayPanel.transform, new Vector2(900, 1000), new Vector2(0, 0));
 
             CreateTitle(_displayPanel.transform, "DISPLAY & GRAPHICS", 32, new Vector2(0, 388));
             CreateText(_displayPanel.transform, "DisplaySub", "Changes are applied immediately and saved.", 18,
@@ -440,14 +441,18 @@ namespace RakeMultiplayer.UI
                 delegate { DisplaySettings.CycleAntiAliasing(-1); RefreshDisplayUi(); },
                 delegate { DisplaySettings.CycleAntiAliasing(1); RefreshDisplayUi(); });
 
+            _displayProfileText = CreateDisplayRow(_displayPanel.transform, "Profile", "PERFORMANCE PROFILE", -285,
+                delegate { DisplaySettings.CycleProfile(-1); RefreshDisplayUi(); },
+                delegate { DisplaySettings.CycleProfile(1); RefreshDisplayUi(); });
+
             _displayStatusText = CreateText(_displayPanel.transform, "DisplayStatus", "", 16,
-                new Vector2(0, -255), ColOk, TextAnchor.MiddleCenter, 700f);
+                new Vector2(0, -345), ColOk, TextAnchor.MiddleCenter, 700f);
 
             CreateButton(_displayPanel.transform, "DisplayApplyBtn", "Apply & save", new Vector2(460, 72),
-                new Vector2(0, -325), OnDisplayApplyClicked);
+                new Vector2(0, -405), OnDisplayApplyClicked);
 
             CreateButton(_displayPanel.transform, "DisplayBackBtn", "Back to settings", new Vector2(460, 54),
-                new Vector2(0, -410), OnSettingsClicked, ColPanelLight);
+                new Vector2(0, -470), OnSettingsClicked, ColPanelLight);
 
             RefreshDisplayUi();
         }
@@ -468,6 +473,7 @@ namespace RakeMultiplayer.UI
             if (_displayQualityText != null) _displayQualityText.text = DisplaySettings.QualityLabel;
             if (_displayVSyncText != null) _displayVSyncText.text = DisplaySettings.VSyncLabel;
             if (_displayAAText != null) _displayAAText.text = DisplaySettings.AntiAliasingLabel;
+            if (_displayProfileText != null) _displayProfileText.text = DisplaySettings.ProfileLabel;
         }
 
         private void OnDisplayApplyClicked()

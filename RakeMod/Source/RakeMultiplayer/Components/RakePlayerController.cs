@@ -318,6 +318,13 @@ namespace RakeMultiplayer
                 _camera.depth = source.depth + 1f;
             }
             _camera.nearClipPlane = 0.05f;
+
+            // The graphics preset owns the draw distance; the Rake camera is created after
+            // the level loaded, so it would otherwise keep the vanilla clip plane.
+            _camera.farClipPlane = GraphicsProfiles.Current.FarClip > 0f
+                ? GraphicsProfiles.Current.FarClip
+                : _camera.farClipPlane;
+
             _camera.enabled = true;
 
             _camera.fieldOfView = ThirdPersonFov;
@@ -624,7 +631,11 @@ namespace RakeMultiplayer
             _cameraCooldown = Mathf.Max(0f, _cameraCooldown - dt);
             _jumpCooldown = Mathf.Max(0f, _jumpCooldown - dt);
             _damageLockout = Mathf.Max(0f, _damageLockout - dt);
-            _climbReleaseTimer = Mathf.Max(0f, _climbReleaseTimer - dt);
+            // A stuck or NaN release timer used to lock the Rake out of every wall for the
+            // rest of the match; clamp it instead of trusting the value.
+            _climbReleaseTimer -= dt;
+            if (!(_climbReleaseTimer > 0f)) _climbReleaseTimer = 0f;
+            else if (_climbReleaseTimer > ClimbReleaseTime) _climbReleaseTimer = ClimbReleaseTime;
             _attackAnimation = Mathf.Max(0f, _attackAnimation - dt);
 
             if (!DebugConsole.ConsoleOpen && !_actionLocked)
@@ -1458,6 +1469,20 @@ namespace RakeMultiplayer
             if (!moving) return;
             if (_rakeController == null) return;
 
+            // Self-heal a degenerate approach direction: a zero or NaN vector silently
+            // makes every probe fail, which looks exactly like "climbing stopped working".
+            if (!IsFinite(_climbDir) || _climbDir.sqrMagnitude < 0.01f)
+            {
+                _climbDir = new Vector3(direction.x, 0f, direction.z);
+                if (_climbDir.sqrMagnitude < 0.001f && _rake != null) _climbDir = _rake.forward;
+                _climbDir.y = 0f;
+                if (_climbDir.sqrMagnitude > 0.001f)
+                {
+                    _climbDir.Normalize();
+                    RakeMultiplayerPlugin.Log?.LogInfo("[RakePlay] climb direction recovered");
+                }
+            }
+
             RaycastHit hit;
             if (!FindWall(direction, ClimbChestHeight, out hit)) return;
 
@@ -1523,10 +1548,21 @@ namespace RakeMultiplayer
             _climbVertical = 0f;
             _verticalVelocity = reachedTop ? 2f : 0f;
 
+            // Keep the stored direction usable for the next grab even if this climb ended
+            // in a corner where the smoothed values collapsed.
+            if (!IsFinite(_climbDir) || _climbDir.sqrMagnitude < 0.01f) _climbDir = Vector3.forward;
+            if (!IsFinite(_climbNormal) || _climbNormal.sqrMagnitude < 0.01f) _climbNormal = Vector3.back;
+
             if (_animator != null) _animator.SetFloat("Speed", 0f);
 
             RakeMultiplayerPlugin.Log?.LogInfo("[RakePlay] climb finished" +
                                                (reachedTop ? " (over the top)" : ""));
+        }
+
+        private static bool IsFinite(Vector3 v)
+        {
+            return !float.IsNaN(v.x) && !float.IsNaN(v.y) && !float.IsNaN(v.z) &&
+                   !float.IsInfinity(v.x) && !float.IsInfinity(v.y) && !float.IsInfinity(v.z);
         }
 
         /// <summary>Nearest non-character vertical surface in front of the body.</summary>
@@ -1746,7 +1782,21 @@ namespace RakeMultiplayer
         internal Transform RakeTransform { get { return _rake; } }
         internal float Health { get { return _enemyAI != null ? _enemyAI.Health : 0f; } }
         internal float MaxHealth { get { return _rakeAI != null ? _rakeAI.MaxHealth : 2500f; } }
-        internal bool AttacksAllowedForHud { get { return AttacksAllowed(); } }
+        internal bool AttacksAllowedForHud
+        {
+            get
+            {
+                // The HUD must follow the session, not the attack permission: that one
+                // defaults to "night" whenever no cycle is running, which is exactly the
+                // state a client is in until the first phase packet arrives.
+                DayNightManager dayNight = DayNightManager.Instance;
+                if (dayNight != null && dayNight.IsRunning) return dayNight.CurrentPhase == Phase.Night;
+
+                string scene = UnityEngine.Application.loadedLevelName;
+                return scene != null &&
+                       scene.IndexOf("night", System.StringComparison.OrdinalIgnoreCase) >= 0;
+            }
+        }
 
         internal float GrabCooldownLeft { get { return _playerCooldown; } }
         internal float AnimalCooldownLeft { get { return _animalCooldown; } }

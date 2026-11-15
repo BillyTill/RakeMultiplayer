@@ -220,6 +220,7 @@ namespace RakeMultiplayer.Core
                     string texLimit = Get(args, "texlimit");
                     string pixelLights = Get(args, "pixellights");
                     string trees = Get(args, "trees");
+                    string preset = Get(args, "preset");
                     string fog = Get(args, "fog");
                     string softVeg = Get(args, "softveg");
 
@@ -312,6 +313,12 @@ namespace RakeMultiplayer.Core
                             }
                         }
 
+                        if (!string.IsNullOrEmpty(preset))
+                        {
+                            int index = GraphicsProfiles.IndexOf(preset);
+                            GraphicsProfiles.Select(index);
+                        }
+
                         Camera main = Camera.main;
                         var sb = new System.Text.StringBuilder("{\"ok\":true");
                         sb.Append(",\"far\":").Append(main != null ? main.farClipPlane.ToString("0.#",
@@ -325,8 +332,27 @@ namespace RakeMultiplayer.Core
                         sb.Append(",\"shadowDistance\":").Append(QualitySettings.shadowDistance.ToString("0.#",
                             System.Globalization.CultureInfo.InvariantCulture));
                         sb.Append(",\"fog\":").Append(RenderSettings.fog ? "true" : "false");
+                        sb.Append(",\"preset\":\"").Append(GraphicsProfiles.Current.Key).Append('"');
                         sb.Append('}');
                         return sb.ToString();
+                    }));
+                    return;
+                }
+                if (target == "/phase")
+                {
+                    string skip = Get(args, "skip");
+
+                    SendJson(client, RunOnMain(delegate
+                    {
+                        var dayNight = DayNightManager.Instance;
+                        if (dayNight == null) return "{\"ok\":false,\"error\":\"no cycle\"}";
+
+                        if (!string.IsNullOrEmpty(skip)) dayNight.SkipPhase();
+
+                        return "{\"ok\":true,\"phase\":\"" + dayNight.CurrentPhase +
+                               "\",\"night\":" + dayNight.NightNumber +
+                               ",\"running\":" + (dayNight.IsRunning ? "true" : "false") +
+                               ",\"scene\":\"" + UnityEngine.Application.loadedLevelName + "\"}";
                     }));
                     return;
                 }

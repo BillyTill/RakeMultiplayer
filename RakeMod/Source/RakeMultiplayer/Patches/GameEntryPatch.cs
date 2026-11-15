@@ -29,12 +29,17 @@ namespace RakeMultiplayer.Patches
 
             static void Postfix(string name)
             {
-                // If this was a local (non-network) load, tell the other players
+                // If this was a local (non-network) load, tell the other players.
+                // Loading by name (level transitions do that) used to be swallowed here
+                // because only numeric names were broadcast, so peers stayed on the old level.
                 int index;
                 if (int.TryParse(name, out index))
                 {
                     RakeNetworkManager.Instance?.NotifyLocalLevelLoad(index);
+                    return;
                 }
+
+                RakeNetworkManager.Instance?.NotifyLocalLevelLoad(UnityEngine.Application.loadedLevel);
             }
         }
 

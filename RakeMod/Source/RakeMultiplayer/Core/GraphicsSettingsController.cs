@@ -4,19 +4,16 @@ using UnityEngine;
 namespace RakeMultiplayer
 {
     /// <summary>
-    /// Turns off shadow casting for the level's terrain.
+    /// Applies the graphics preset and the terrain shadow switch to every loaded level.
     ///
-    /// A level can carry tens of thousands of trees, and the terrain draws them through its
-    /// own renderer: the terrain is a single huge shadow caster, so the shadow pass walks
-    /// every tree again. Dropping <c>Terrain.castShadows</c> removes that whole pass while
-    /// leaving the visible terrain untouched.
+    /// Both are re-applied on each level load and after a graphics preset change, because a
+    /// new scene brings a new directional light and new cameras, and a quality switch
+    /// rebuilds the terrain renderer.
     ///
-    /// The switch lives in the BepInEx config as <c>[Graphics] TerrainShadows</c>:
-    /// <c>false</c> (default) turns terrain shadows off, <c>true</c> keeps the level as is.
-    /// The value is re-applied on every level load and after a graphics preset change,
-    /// because a quality switch rebuilds the terrain renderer.
+    /// Config: <c>[Graphics] Preset</c> (off / light / balanced / aggressive) and
+    /// <c>[Graphics] TerrainShadows</c> (false = no terrain shadow pass).
     /// </summary>
-    public class TerrainShadowControl : MonoBehaviour
+    public class GraphicsSettingsController : MonoBehaviour
     {
         private int _lastQuality;
 
@@ -27,6 +24,7 @@ namespace RakeMultiplayer
 
         private void Start()
         {
+            GraphicsProfiles.Capture(Application.loadedLevelName);
             _lastQuality = QualitySettings.GetQualityLevel();
             StartCoroutine(ApplyWhenReady("plugin start"));
         }
@@ -42,7 +40,12 @@ namespace RakeMultiplayer
             if (quality == _lastQuality) return;
 
             _lastQuality = quality;
-            Apply("quality level changed");
+            RakeMultiplayerPlugin.Log?.LogInfo("[Graphics] graphics quality changed to " +
+                                               (QualitySettings.names.Length > 0
+                                                   ? QualitySettings.names[quality]
+                                                   : quality.ToString()));
+            GraphicsProfiles.ApplyAll();
+            ApplyTerrainShadows("quality level changed");
         }
 
         /// <summary>
@@ -51,9 +54,12 @@ namespace RakeMultiplayer
         /// </summary>
         private IEnumerator ApplyWhenReady(string reason)
         {
+            GraphicsProfiles.Capture(Application.loadedLevelName);
+            GraphicsProfiles.ApplyAll();
+
             for (int attempt = 0; attempt < 120; attempt++)
             {
-                if (Apply(reason) > 0 || HasTerrain()) yield break;
+                if (ApplyTerrainShadows(reason) > 0 || HasTerrain()) yield break;
                 yield return null;
             }
         }
@@ -66,7 +72,7 @@ namespace RakeMultiplayer
         }
 
         /// <summary>Applies the configured value to every terrain in the level.</summary>
-        public static int Apply(string reason)
+        public static int ApplyTerrainShadows(string reason)
         {
             Terrain[] terrains = Terrain.activeTerrains;
             if (terrains == null || terrains.Length == 0)
@@ -106,7 +112,8 @@ namespace RakeMultiplayer
             RakeMultiplayerPlugin.Log?.LogInfo("[Graphics] terrain shadows " +
                                                (castShadows ? "ON" : "OFF") +
                                                " on " + terrains.Length + " terrain(s)" +
-                                               " (was ON for " + wasCasting + ", changed " + changed + ", " + trees + " tree instances)" +
+                                               " (was ON for " + wasCasting + ", changed " + changed + ", " +
+                                               trees + " tree instances)" +
                                                " [" + reason + ", quality " + quality + "]");
             return changed;
         }

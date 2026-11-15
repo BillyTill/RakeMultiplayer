@@ -28,6 +28,7 @@ namespace RakeMultiplayer
         internal static ConfigEntry<int> GameBridgePort;
         internal static ConfigEntry<bool> ControlLighting;
         internal static ConfigEntry<bool> TerrainShadows;
+        internal static ConfigEntry<string> GraphicsPreset;
         internal static ConfigEntry<bool> HitReaction;
 
         // Network state (managed by RakeNetworkManager)
@@ -85,6 +86,11 @@ namespace RakeMultiplayer
             TerrainShadows = Config.Bind("Graphics", "TerrainShadows", false,
                 "Let the terrain cast shadows (false = disable the terrain shadow pass, recommended on forest levels)");
 
+            // Measured presets: the frame is CPU-bound on the terrain trees, so LOD bias and
+            // draw distance are what actually help (see docs/perf/graphics-steps.md).
+            GraphicsPreset = Config.Bind("Graphics", "Preset", "off",
+                "Graphics preset: off (vanilla), light, balanced, aggressive. Balanced gives roughly 1.6x FPS on forest levels.");
+
             // Two instances on one machine are unusable otherwise: the unfocused
             // window freezes, so the host stops simulating for the client.
             Application.runInBackground = RunInBackground.Value;
@@ -93,13 +99,13 @@ namespace RakeMultiplayer
             // Terrain shadow control: applied on every level load and on quality changes.
             try
             {
-                var terrainShadowsGo = new GameObject("TerrainShadowControl");
-                UnityEngine.Object.DontDestroyOnLoad(terrainShadowsGo);
-                terrainShadowsGo.AddComponent<TerrainShadowControl>();
+                var graphicsGo = new GameObject("GraphicsSettingsController");
+                UnityEngine.Object.DontDestroyOnLoad(graphicsGo);
+                graphicsGo.AddComponent<GraphicsSettingsController>();
             }
             catch (Exception ex)
             {
-                Log.LogWarning("[Graphics] terrain shadow control failed: " + ex.Message);
+                Log.LogWarning("[Graphics] graphics settings controller failed: " + ex.Message);
             }
 
             // In-game debug console (toggle with the backquote key)
