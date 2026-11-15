@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.1.0-alpha.1 — 2026-11-14
+## 1.1.1-alpha.1 - 2026-11-15
 
 First public alpha of Rake Multiplayer.
 

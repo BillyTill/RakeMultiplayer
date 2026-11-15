@@ -1,4 +1,4 @@
-# Rake Multiplayer 1.1.0-alpha.1
+# Rake Multiplayer 1.1.1-alpha.1
 
 **First public alpha** of the cooperative multiplayer mod for **Rake (2015)**.
 
