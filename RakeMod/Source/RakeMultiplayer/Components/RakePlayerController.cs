@@ -73,15 +73,6 @@ namespace RakeMultiplayer
         private float _distance = 4.6f;
         private bool _firstPerson;
 
-        // First-person optics and the head bone the camera rides on.
-        private RakeCameraEffects _effects;
-        private RakeThermalTargets _thermalTargets;
-        private Transform _head;
-        private bool _cameraOnHead;
-        private Vector3 _headEyeLocal;
-        private Quaternion _headEyeRot = Quaternion.identity;
-        private float _sightTension;
-
         private readonly List<Renderer> _rakeRenderers = new List<Renderer>();
         private bool _rakeVisible = true;
 
@@ -270,12 +261,6 @@ namespace RakeMultiplayer
             }
             _camera.nearClipPlane = 0.05f;
             _camera.enabled = true;
-
-            _camera.fieldOfView = RakeCameraEffects.ThirdPersonFov;
-            _head = FindHeadBone(rake);
-            _effects = RakeCameraEffects.Attach(_camera);
-            _thermalTargets = RakeThermalTargets.Attach(_camera);
-            if (_thermalTargets != null) _thermalTargets.SetSelf(rake);
 
             _yaw = rake.eulerAngles.y;
             _pitch = 12f;
@@ -581,7 +566,6 @@ namespace RakeMultiplayer
             if (!DebugConsole.ConsoleOpen && !_actionLocked)
             {
                 if (Input.GetKeyDown(KeyCode.V)) _firstPerson = !_firstPerson;
-                if (Input.GetKeyDown(KeyCode.F) && _effects != null) _effects.CycleMode();
 
                 ReadLook();
                 ReadMovement(dt);
@@ -617,8 +601,6 @@ namespace RakeMultiplayer
                 _scanTimer = 0.35f;
                 RefreshTargets();
             }
-
-            UpdateSightTension(dt);
 
             if (AttacksAllowed() && !DebugConsole.ConsoleOpen && !_jumpActive && !_climbing) TryAutoAttack();
         }
@@ -771,46 +753,18 @@ namespace RakeMultiplayer
         {
             if (_camera == null) return;
 
-            // The Rake's eyes are much wider than a hunter's; blend so the switch between
-            // first and third person is not a jump cut.
-            float targetFov = _firstPerson ? RakeCameraEffects.FirstPersonFov : RakeCameraEffects.ThirdPersonFov;
-            _camera.fieldOfView = dt > 0f
-                ? Mathf.MoveTowards(_camera.fieldOfView, targetFov, dt * 240f)
-                : targetFov;
+            Quaternion rotation = Quaternion.Euler(_pitch, _yaw, 0f);
 
             if (_firstPerson)
             {
                 SetRakeVisible(false);
-
-                if (_head != null)
-                {
-                    // The camera rides the head bone: the walk / run / attack animation is the
-                    // head bob, so no synthetic sway is added on top of it.
-                    if (!_cameraOnHead) AttachCameraToHead();
-
-                    _camera.transform.localPosition = _headEyeLocal;
-
-                    Quaternion look = _headEyeRot * Quaternion.Euler(_pitch, 0f, 0f);
-                    if (_effects != null)
-                    {
-                        Vector3 shake = _effects.ShakeEuler();
-                        if (shake.sqrMagnitude > 0f) look *= Quaternion.Euler(shake);
-                    }
-
-                    _camera.transform.localRotation = look;
-                    return;
-                }
-
                 _camera.transform.position = _rake.position + Vector3.up * 1.72f;
-                _camera.transform.rotation = Quaternion.Euler(_pitch, _yaw, 0f);
+                _camera.transform.rotation = rotation;
                 return;
             }
 
-            if (_cameraOnHead) DetachCameraFromHead();
-
             SetRakeVisible(true);
 
-            Quaternion rotation = Quaternion.Euler(_pitch, _yaw, 0f);
             Vector3 pivot = _rake.position + Vector3.up * 1.65f;
             Vector3 position = pivot - rotation * Vector3.forward * _distance;
 
@@ -819,165 +773,6 @@ namespace RakeMultiplayer
 
             _camera.transform.position = position;
             _camera.transform.rotation = rotation;
-        }
-
-        /// <summary>Dev bridge: switch first/third person and report the camera state.</summary>
-        public static string BridgeCamera(string view)
-        {
-            return BridgeCamera(view, string.Empty);
-        }
-
-        public static string BridgeCamera(string view, string look)
-        {
-            if (_instance == null) return "{\"ok\":false,\"error\":\"rake camera is not active\"}";
-
-            if (string.Equals(view, "fp", System.StringComparison.OrdinalIgnoreCase)) _instance._firstPerson = true;
-            else if (string.Equals(view, "tp", System.StringComparison.OrdinalIgnoreCase)) _instance._firstPerson = false;
-
-            if (string.Equals(look, "hunter", System.StringComparison.OrdinalIgnoreCase) && _instance._camera != null)
-            {
-                var spawner = PlayerSpawner.Instance;
-                Transform target = spawner != null && spawner.LocalPlayer != null ? spawner.LocalPlayer.transform : null;
-
-                if (target != null)
-                {
-                    Vector3 eye = _instance._camera.transform.position;
-                    Vector3 to = target.position + Vector3.up * 1.4f - eye;
-                    _instance._yaw = Mathf.Atan2(to.x, to.z) * Mathf.Rad2Deg;
-                    _instance._pitch = -Mathf.Atan2(to.y, new Vector2(to.x, to.z).magnitude) * Mathf.Rad2Deg;
-                    if (_instance._rake != null) _instance._rake.rotation = Quaternion.Euler(0f, _instance._yaw, 0f);
-                    _instance._cameraOnHead = false;
-                }
-            }
-
-            if (string.Equals(look, "animal", System.StringComparison.OrdinalIgnoreCase) && _instance._camera != null)
-            {
-                Animal_AI best = null;
-                float bestDistance = float.MaxValue;
-                Vector3 eye = _instance._camera.transform.position;
-
-                var animals = Object.FindObjectsOfType<Animal_AI>();
-                for (int i = 0; i < animals.Length; i++)
-                {
-                    if (animals[i] == null) continue;
-                    float d = Vector3.Distance(eye, animals[i].transform.position);
-                    if (d < bestDistance) { bestDistance = d; best = animals[i]; }
-                }
-
-                if (best != null)
-                {
-                    Vector3 to = best.transform.position + Vector3.up * 0.7f - eye;
-                    _instance._yaw = Mathf.Atan2(to.x, to.z) * Mathf.Rad2Deg;
-                    _instance._pitch = -Mathf.Atan2(to.y, new Vector2(to.x, to.z).magnitude) * Mathf.Rad2Deg;
-                    if (_instance._rake != null) _instance._rake.rotation = Quaternion.Euler(0f, _instance._yaw, 0f);
-                    _instance._cameraOnHead = false;
-                }
-            }
-
-            string head = _instance._head != null ? _instance._head.name : string.Empty;
-            string fov = _instance._camera != null
-                ? Mathf.RoundToInt(_instance._camera.fieldOfView).ToString()
-                : "0";
-
-            return "{\"ok\":true,\"view\":\"" + (_instance._firstPerson ? "fp" : "tp") + "\"," +
-                   "\"fov\":" + fov + "," +
-                   "\"onHead\":" + (_instance._cameraOnHead ? "true" : "false") + "," +
-                   "\"head\":\"" + head + "\"}";
-        }
-
-        private void AttachCameraToHead()
-        {
-            if (_head == null || _camera == null) return;
-
-            Quaternion view = Quaternion.Euler(0f, _yaw, 0f);
-            Vector3 eye = _head.position + Vector3.up * 0.13f + _rake.forward * 0.09f;
-
-            _camera.transform.SetParent(_head, true);
-            _camera.transform.position = eye;
-            _camera.transform.rotation = view;
-
-            // Kept in head-local space: the skeleton may use any axis convention.
-            _headEyeLocal = _head.InverseTransformPoint(eye);
-            _headEyeRot = Quaternion.Inverse(_head.rotation) * view;
-            _cameraOnHead = true;
-        }
-
-        private void DetachCameraFromHead()
-        {
-            if (_camera == null) return;
-            _camera.transform.SetParent(null, true);
-            _cameraOnHead = false;
-        }
-
-        private static Transform FindHeadBone(Transform rake)
-        {
-            if (rake == null) return null;
-
-            var animator = rake.GetComponent<Animator>();
-            if (animator != null && animator.isHuman)
-            {
-                Transform humanoid = animator.GetBoneTransform(HumanBodyBones.Head);
-                if (humanoid != null) return humanoid;
-            }
-
-            Transform[] all = rake.GetComponentsInChildren<Transform>(true);
-            Transform fallback = null;
-            for (int i = 0; i < all.Length; i++)
-            {
-                Transform candidate = all[i];
-                if (candidate == null) continue;
-
-                string name = candidate.name.ToLowerInvariant();
-                if (name.IndexOf("head", System.StringComparison.OrdinalIgnoreCase) < 0) continue;
-                if (name.IndexOf("nub", System.StringComparison.OrdinalIgnoreCase) >= 0) continue;
-
-                // "Bip001 Head" is the skeleton's head; anything else is a fallback.
-                if (name.EndsWith(" head")) return candidate;
-                if (fallback == null) fallback = candidate;
-            }
-
-            return fallback;
-        }
-
-        private void UpdateSightTension(float dt)
-        {
-            float target = 0f;
-
-            if (_camera != null)
-            {
-                Vector3 eye = _camera.transform.position;
-                Vector3 forward = _camera.transform.forward;
-
-                for (int i = 0; i < _players.Count; i++)
-                {
-                    NetworkedPlayer player = _players[i];
-                    if (player == null) continue;
-
-                    Vector3 head = player.transform.position + Vector3.up * 1.5f;
-                    Vector3 toHead = head - eye;
-                    float distance = toHead.magnitude;
-                    if (distance < 0.2f || distance > 90f) continue;
-
-                    // A hunter in front of the Rake.
-                    float inView = Vector3.Dot(forward, toHead / distance);
-                    if (inView > 0.82f)
-                    {
-                        float near = 1f - distance / 90f;
-                        target = Mathf.Max(target, Mathf.Lerp(0.35f, 1f, (inView - 0.82f) / 0.18f) * near);
-                    }
-
-                    // And the other way round: someone is watching the Rake.
-                    Vector3 fromHunter = eye - head;
-                    if (fromHunter.sqrMagnitude > 0.01f)
-                    {
-                        float watched = Vector3.Dot(player.transform.forward, fromHunter.normalized);
-                        if (watched > 0.72f) target = Mathf.Max(target, 0.30f * (1f - distance / 90f));
-                    }
-                }
-            }
-
-            _sightTension = Mathf.Lerp(_sightTension, target, 1f - Mathf.Exp(-3f * dt));
-            if (_effects != null) _effects.SetSightTension(_sightTension);
         }
 
         // -------------------------------------------------------------------- combat
@@ -1457,18 +1252,9 @@ namespace RakeMultiplayer
         /// </summary>
         public static void NotifyDamageTaken(Transform rake)
         {
-            NotifyDamageTaken(rake, 0);
-        }
-
-        public static void NotifyDamageTaken(Transform rake, int amount)
-        {
             if (_instance == null) return;
             if (rake != null && _instance._rake != rake) return;
-
             _instance.ApplyDamageLockout();
-
-            // Grain, chromatic fringing and a lens jolt: the hit lands on the optics.
-            if (_instance._effects != null) _instance._effects.PulseDamage(amount);
         }
 
         private void ApplyDamageLockout()

@@ -31,17 +31,6 @@ The installer adds BepInEx 5.4.23.2 (x86), the mod and Telepathy, and creates
 - The Rake no longer spawns on the level's staging platform under the map during the
   day: taking the Rake now puts it on forest ground next to the hunters.
 
-## Rake vision
-
-- 105° first-person camera bound to the head bone, so the walk / run animation is the
-  head bob instead of a synthetic sway.
-- F cycles colour, black-and-white thermal and night vision.
-- In thermal, players and animals are drawn as white heat signatures that ignore scene
-  lighting, on a flat grey background.
-- Taking a hit adds film grain, a red edge flash and a short camera jolt.
-
-![Thermal vision](https://raw.githubusercontent.com/BillyTill/RakeMultiplayer/master/docs/screenshots/thermal.jpg)
-
 ## Screenshots
 
 ![Main menu](https://raw.githubusercontent.com/BillyTill/RakeMultiplayer/master/docs/screenshots/main-menu.jpg)

@@ -19,7 +19,6 @@ physical desk-room style.
 | ![Lobby](docs/screenshots/lobby.jpg) | ![Connection](docs/screenshots/join.jpg) |
 | ![Loading](docs/screenshots/loading.jpg) | ![Display settings](docs/screenshots/display.jpg) |
 | ![In game HUD](docs/screenshots/hud.jpg) | ![Steam lobby](docs/screenshots/steam.jpg) |
-| ![Rake thermal vision](docs/screenshots/thermal.jpg) | ![Rake colour vision](docs/screenshots/rake-color.jpg) |
 
 More: [host a lobby](docs/screenshots/host.jpg), [Steam browser](docs/screenshots/lobbies.jpg),
 [settings](docs/screenshots/settings.jpg).
@@ -40,9 +39,6 @@ More: [host a lobby](docs/screenshots/host.jpg), [Steam browser](docs/screenshot
   V-Sync and anti-aliasing, saved and re-applied on launch.
 - **HUD.** Night phase and timer in the top-right corner; the Rake health bar at the
   top center.
-- **Rake vision.** Wide 105° first-person eye bound to the head bone; colour,
-  black-and-white thermal and night vision; players and animals show up as white
-  heat signatures that ignore scene lighting, damage adds grain and a red edge flash.
 
 ## Install
 
