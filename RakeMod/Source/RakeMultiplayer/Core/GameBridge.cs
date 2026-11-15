@@ -209,6 +209,225 @@ namespace RakeMultiplayer.Core
                     SendJson(client, RunOnMain(delegate { return RakePlayerController.BridgeProbe(pyaw, pheight); }));
                     return;
                 }
+                if (target == "/env")
+                {
+                    SendJson(client, RunOnMain(delegate
+                    {
+                        var sb = new System.Text.StringBuilder("{\"ok\":true,\"cameras\":[");
+                        Camera[] cameras = UnityEngine.Object.FindObjectsOfType<Camera>();
+                        bool first = true;
+                        for (int i = 0; i < cameras.Length; i++)
+                        {
+                            Camera cam = cameras[i];
+                            if (cam == null || !cam.enabled) continue;
+                            if (!first) sb.Append(',');
+                            first = false;
+                            sb.Append("{\"name\":\"").Append(cam.name);
+                            sb.Append("\",\"far\":").Append(cam.farClipPlane.ToString("0.#",
+                                System.Globalization.CultureInfo.InvariantCulture));
+                            sb.Append(",\"near\":").Append(cam.nearClipPlane.ToString("0.##",
+                                System.Globalization.CultureInfo.InvariantCulture));
+                            sb.Append(",\"fov\":").Append(cam.fieldOfView.ToString("0.#",
+                                System.Globalization.CultureInfo.InvariantCulture));
+                            sb.Append(",\"mask\":").Append(cam.cullingMask);
+                            sb.Append(",\"depth\":").Append(cam.depth.ToString("0.#",
+                                System.Globalization.CultureInfo.InvariantCulture));
+                            sb.Append('}');
+                        }
+                        sb.Append("],");
+
+                        sb.Append("\"fog\":").Append(RenderSettings.fog ? "true" : "false");
+                        sb.Append(",\"fogStart\":").Append(RenderSettings.fogStartDistance.ToString("0.#",
+                            System.Globalization.CultureInfo.InvariantCulture));
+                        sb.Append(",\"fogEnd\":").Append(RenderSettings.fogEndDistance.ToString("0.#",
+                            System.Globalization.CultureInfo.InvariantCulture));
+                        sb.Append(",\"fogMode\":\"").Append(RenderSettings.fogMode.ToString()).Append('"');
+
+                        sb.Append(",\"quality\":{");
+                        sb.Append("\"lodBias\":").Append(QualitySettings.lodBias.ToString("0.##",
+                            System.Globalization.CultureInfo.InvariantCulture));
+                        sb.Append(",\"maxLodLevel\":").Append(QualitySettings.maximumLODLevel);
+                        sb.Append(",\"shadowDistance\":").Append(QualitySettings.shadowDistance.ToString("0.#",
+                            System.Globalization.CultureInfo.InvariantCulture));
+                        sb.Append(",\"shadowCascades\":").Append(QualitySettings.shadowCascades);
+                        sb.Append(",\"pixelLights\":").Append(QualitySettings.pixelLightCount);
+                        sb.Append(",\"vSync\":").Append(QualitySettings.vSyncCount);
+                        sb.Append(",\"aa\":").Append(QualitySettings.antiAliasing);
+                        sb.Append(",\"texLimit\":").Append(QualitySettings.masterTextureLimit);
+                        sb.Append(",\"maxQueuedFrames\":").Append(QualitySettings.maxQueuedFrames);
+                        sb.Append(",\"softVegetation\":").Append(QualitySettings.softVegetation ? "true" : "false");
+                        sb.Append("}");
+
+                        sb.Append(",\"screen\":\"").Append(Screen.width).Append('x').Append(Screen.height).Append('"');
+                        sb.Append(",\"fpsTarget\":").Append(Application.targetFrameRate);
+
+                        sb.Append(",\"device\":\"").Append(SystemInfo.graphicsDeviceVersion).Append('"');
+                        sb.Append(",\"deviceName\":\"").Append(SystemInfo.graphicsDeviceName).Append('"');
+                        sb.Append(",\"gpuMemory\":").Append(SystemInfo.graphicsMemorySize);
+                        sb.Append(",\"cpus\":").Append(SystemInfo.processorCount);
+                        sb.Append(",\"cpu\":\"").Append(SystemInfo.processorType).Append('"');
+                        sb.Append(",\"ram\":").Append(SystemInfo.systemMemorySize);
+                        sb.Append(",\"maxTex\":").Append(SystemInfo.maxTextureSize);
+                        sb.Append('}');
+                        return sb.ToString();
+                    }));
+                    return;
+                }
+                if (target == "/perf")
+                {
+                    string shadows = Get(args, "shadows");
+                    string shadowDist = Get(args, "shadowdist");
+                    string far = Get(args, "far");
+                    string lod = Get(args, "lod");
+                    string vsync = Get(args, "vsync");
+                    string fog = Get(args, "fog");
+                    string lights = Get(args, "lights");
+                    string aa = Get(args, "aa");
+                    string width = Get(args, "w");
+                    string height = Get(args, "h");
+                    string hud = Get(args, "hud");
+                    string render = Get(args, "render");
+                    string queued = Get(args, "queued");
+
+                    SendJson(client, RunOnMain(delegate
+                    {
+                        var sb = new System.Text.StringBuilder("{\"ok\":true");
+                        float value;
+
+                        if (!string.IsNullOrEmpty(shadows))
+                        {
+                            int mode;
+                            int.TryParse(shadows, out mode);
+                            LightShadows quality = mode <= 0
+                                ? LightShadows.None
+                                : (mode == 1 ? LightShadows.Hard : LightShadows.Soft);
+
+                            // This engine build exposes no QualitySettings.shadows, so the
+                            // directional light owns the shadow pass instead.
+                            Light[] all = UnityEngine.Object.FindObjectsOfType<Light>();
+                            int changed = 0;
+                            for (int i = 0; i < all.Length; i++)
+                            {
+                                if (all[i] == null) continue;
+                                if (all[i].type != LightType.Directional) continue;
+                                if (all[i].shadows == quality) continue;
+                                all[i].shadows = quality;
+                                changed++;
+                            }
+                            sb.Append(",\"shadows\":").Append(mode);
+                            sb.Append(",\"changed\":").Append(changed);
+                        }
+
+                        if (!string.IsNullOrEmpty(lights))
+                        {
+                            int mode;
+                            int.TryParse(lights, out mode);
+                            QualitySettings.pixelLightCount = mode;
+                            sb.Append(",\"pixelLights\":").Append(mode);
+                        }
+
+                        if (!string.IsNullOrEmpty(shadowDist) &&
+                            float.TryParse(shadowDist, System.Globalization.NumberStyles.Float,
+                                System.Globalization.CultureInfo.InvariantCulture, out value))
+                        {
+                            QualitySettings.shadowDistance = value;
+                            sb.Append(",\"shadowDistance\":").Append(
+                                value.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture));
+                        }
+
+                        if (!string.IsNullOrEmpty(far) &&
+                            float.TryParse(far, System.Globalization.NumberStyles.Float,
+                                System.Globalization.CultureInfo.InvariantCulture, out value))
+                        {
+                            Camera[] cameras = UnityEngine.Object.FindObjectsOfType<Camera>();
+                            for (int i = 0; i < cameras.Length; i++)
+                            {
+                                if (cameras[i] != null && cameras[i].enabled) cameras[i].farClipPlane = value;
+                            }
+                            sb.Append(",\"far\":").Append(
+                                value.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture));
+                        }
+
+                        if (!string.IsNullOrEmpty(lod) &&
+                            float.TryParse(lod, System.Globalization.NumberStyles.Float,
+                                System.Globalization.CultureInfo.InvariantCulture, out value))
+                        {
+                            QualitySettings.lodBias = value;
+                            sb.Append(",\"lodBias\":").Append(
+                                value.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture));
+                        }
+
+                        if (!string.IsNullOrEmpty(width) && !string.IsNullOrEmpty(height))
+                        {
+                            int w, h;
+                            int.TryParse(width, out w);
+                            int.TryParse(height, out h);
+                            if (w > 0 && h > 0)
+                            {
+                                Screen.SetResolution(w, h, Screen.fullScreen);
+                                sb.Append(",\"resolution\":\"").Append(w).Append('x').Append(h).Append('"');
+                            }
+                        }
+
+                        if (!string.IsNullOrEmpty(render))
+                        {
+                            // Rendering off isolates scripts and physics from the renderer:
+                            // the frame time that is left is the main-thread game logic.
+                            bool on = render != "0" && !string.Equals(render, "false", StringComparison.OrdinalIgnoreCase);
+                            Camera[] all = UnityEngine.Object.FindObjectsOfType<Camera>();
+                            for (int i = 0; i < all.Length; i++)
+                            {
+                                if (all[i] != null) all[i].enabled = on;
+                            }
+                            sb.Append(",\"render\":").Append(on ? "true" : "false");
+                        }
+
+                        if (!string.IsNullOrEmpty(hud))
+                        {
+                            bool on = hud == "1" || string.Equals(hud, "true", StringComparison.OrdinalIgnoreCase);
+                            GameObject canvas = GameObject.Find("RakeHudCanvas");
+                            if (canvas != null) canvas.SetActive(on);
+                            sb.Append(",\"hud\":").Append(on ? "true" : "false");
+                        }
+
+                        if (!string.IsNullOrEmpty(aa))
+                        {
+                            int mode;
+                            int.TryParse(aa, out mode);
+                            QualitySettings.antiAliasing = mode;
+                            sb.Append(",\"antiAliasing\":").Append(QualitySettings.antiAliasing);
+                        }
+
+                        if (!string.IsNullOrEmpty(queued))
+                        {
+                            int mode;
+                            int.TryParse(queued, out mode);
+                            QualitySettings.maxQueuedFrames = mode;
+                            sb.Append(",\"queued\":").Append(mode);
+                        }
+
+                        if (!string.IsNullOrEmpty(vsync))
+                        {
+                            int mode;
+                            int.TryParse(vsync, out mode);
+                            QualitySettings.vSyncCount = mode;
+                            sb.Append(",\"vSync\":").Append(mode);
+                        }
+
+                        if (!string.IsNullOrEmpty(fog))
+                        {
+                            int mode;
+                            int.TryParse(fog, out mode);
+                            RenderSettings.fog = mode != 0;
+                            sb.Append(",\"fog\":").Append(mode);
+                        }
+
+                        sb.Append('}');
+                        return sb.ToString();
+                    }));
+                    return;
+                }
+
                 if (target == "/stats")
                 {
                     string on = Get(args, "on");

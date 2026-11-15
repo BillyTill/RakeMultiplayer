@@ -43,6 +43,11 @@ namespace RakeMultiplayer.UI
         private double _lastRenderEndMs = -1.0;
         private double _renderMs;
 
+        private Camera _renderingCamera;
+        private int _cameraCount;
+        private readonly System.Collections.Generic.Dictionary<Camera, float> _cameraMs =
+            new System.Collections.Generic.Dictionary<Camera, float>();
+
         private float _frameMs;
         private float _cpuMs;
         private float _gpuMs;
@@ -51,6 +56,11 @@ namespace RakeMultiplayer.UI
 
         private float _sampleTimer;
         private float _rescanTimer;
+
+        private double _lastCameraFrameMs;
+        private int _lastCameraCount;
+        private readonly System.Collections.Generic.Dictionary<Camera, float> _lastCameraTimes =
+            new System.Collections.Generic.Dictionary<Camera, float>();
 
         private Renderer[] _renderers = new Renderer[0];
         private MeshFilter[] _filters = new MeshFilter[0];
@@ -124,7 +134,9 @@ namespace RakeMultiplayer.UI
         private void OnCameraPreRender(Camera camera)
         {
             if (camera == null) return;
+
             _renderStartMs = Clock.Elapsed.TotalMilliseconds;
+            _renderingCamera = camera;
         }
 
         private void OnCameraPostRender(Camera camera)
@@ -132,9 +144,20 @@ namespace RakeMultiplayer.UI
             if (camera == null) return;
 
             double now = Clock.Elapsed.TotalMilliseconds;
-            if (_renderStartMs >= 0.0) _renderMs += now - _renderStartMs;
+            if (_renderStartMs >= 0.0)
+            {
+                double took = now - _renderStartMs;
+                _renderMs += took;
+
+                Camera rendered = _renderingCamera != null ? _renderingCamera : camera;
+                float known;
+                _cameraMs.TryGetValue(rendered, out known);
+                _cameraMs[rendered] = known + (float)took;
+                _cameraCount++;
+            }
 
             _renderStartMs = -1.0;
+            _renderingCamera = null;
             _lastRenderEndMs = now;
         }
 
@@ -172,10 +195,18 @@ namespace RakeMultiplayer.UI
                 }
             }
 
+            _lastCameraFrameMs = _renderMs;
+            _lastCameraCount = _cameraCount;
+            _lastCameraTimes.Clear();
+            foreach (var pair in _cameraMs) _lastCameraTimes.Add(pair.Key, pair.Value);
+            _cameraMs.Clear();
+            _cameraCount = 0;
+
             _frameStartMs = now;
             _renderMs = 0.0;
             _lastRenderEndMs = -1.0;
             _renderStartMs = -1.0;
+            _renderingCamera = null;
         }
 
         // ------------------------------------------------------------------ toggling
@@ -292,7 +323,8 @@ namespace RakeMultiplayer.UI
 
             _text.text = string.Format(
                 "{0,-6}{1,7}\n{2,-6}{3,7:0.0}\n{4,-6}{5,7:0.0}\n{6,-6}{7,7:0.0}\n" +
-                "{8,-6}{9,7:0.0}\n{10,-6}{11,7}\n{12,-6}{13,7}\n{14,-6}{15,7}\n{16,-6}{17,7}",
+                "{8,-6}{9,7:0.0}\n{10,-6}{11,7}\n{12,-6}{13,7}\n{14,-6}{15,7}\n{16,-6}{17,7}\n" +
+                "{18,-6}{19,7}",
                 "FPS", Mathf.RoundToInt(_fps),
                 "FRAME", _frameMs,
                 "CPU", _cpuMs,
@@ -301,7 +333,8 @@ namespace RakeMultiplayer.UI
                 "TRIS", Short(_triangles),
                 "DRAW~", Short(_meshDraws),
                 "UI", Short(_uiDraws),
-                "OBJS", Short(_objects));
+                "OBJS", Short(_objects),
+                "CAMS", _lastCameraCount);
         }
 
         private static string Short(int value)
@@ -338,10 +371,10 @@ namespace RakeMultiplayer.UI
             rt.anchorMax = new Vector2(0f, 1f);
             rt.pivot = new Vector2(0f, 1f);
             rt.anchoredPosition = new Vector2(26f, -26f);
-            rt.sizeDelta = new Vector2(198f, 186f);
+            rt.sizeDelta = new Vector2(198f, 206f);
 
             var img = plate.GetComponent<Image>();
-            img.sprite = PauseMenuSkin.Skin.Plate(198, 186, 63);
+            img.sprite = PauseMenuSkin.Skin.Plate(198, 206, 63);
             img.color = new Color(0.027f, 0.035f, 0.031f, 0.9f);
 
             var textObj = new GameObject("Text", typeof(RectTransform));
@@ -379,7 +412,30 @@ namespace RakeMultiplayer.UI
                    "\"draws\":" + _draws + "," +
                    "\"ui\":" + _uiDraws + "," +
                    "\"objects\":" + _objects + "," +
-                   "\"terrain\":" + Mathf.RoundToInt(_terrainTriangles) + "}";
+                   "\"terrain\":" + Mathf.RoundToInt(_terrainTriangles) + "," +
+                   "\"cameras\":" + _lastCameraCount + "," +
+                   "\"cams\":[" + CameraList() + "]}";
+        }
+
+        private string CameraList()
+        {
+            var sb = new System.Text.StringBuilder();
+            bool first = true;
+
+            foreach (var pair in _lastCameraTimes)
+            {
+                Camera cam = pair.Key;
+                if (cam == null) continue;
+                if (!first) sb.Append(',');
+                first = false;
+                sb.Append("{\"name\":\"").Append(cam.name);
+                sb.Append("\",\"depth\":").Append(cam.depth);
+                sb.Append(",\"ms\":").Append(pair.Value.ToString("0.00",
+                    System.Globalization.CultureInfo.InvariantCulture));
+                sb.Append(",\"enabled\":").Append(cam.enabled ? "true" : "false").Append('}');
+            }
+
+            return sb.ToString();
         }
     }
 }
