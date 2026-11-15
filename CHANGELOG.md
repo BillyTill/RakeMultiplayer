@@ -20,3 +20,4 @@ First public alpha of Rake Multiplayer.
 - Hits: blood creeps in from the screen edges and a film-grain layer pulses for a
   second, on top of the HUD.
 - Development watchdog no longer closes a normal session after 180 seconds.
+- First-person camera now follows the animated head bone (the skeleton keeps updating while the body is hidden).

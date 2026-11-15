@@ -69,6 +69,7 @@ namespace RakeMultiplayer
         private Enemy_AI _enemyAI;
         private NavMeshAgent _agent;
         private Animator _animator;
+        private AnimatorCullingMode _animatorCullingWas = AnimatorCullingMode.AlwaysAnimate;
         private AudioSource _audio;
 
         private Camera _camera;
@@ -205,6 +206,15 @@ namespace RakeMultiplayer
             _enemyAI = rake.GetComponent<Enemy_AI>();
             _animator = rake.GetComponent<Animator>();
             if (_animator == null) _animator = rake.GetComponentInChildren<Animator>();
+
+            if (_animator != null)
+            {
+                // In first person the Rake's renderers are hidden; with "based on renderers"
+                // culling the skeleton stopped updating and the head-locked camera froze in
+                // place. Keep the pose alive so the head bob is real.
+                _animatorCullingWas = _animator.cullingMode;
+                _animator.cullingMode = AnimatorCullingMode.AlwaysAnimate;
+            }
             _audio = rake.GetComponent<AudioSource>();
             if (_audio == null && _enemyAI != null) _audio = _enemyAI.audioSource;
 
@@ -462,6 +472,8 @@ namespace RakeMultiplayer
             }
 
             SetRakeVisible(true);
+
+            if (_animator != null) _animator.cullingMode = _animatorCullingWas;
 
             if (_camera != null) UnityEngine.Object.Destroy(_camera.gameObject);
             _camera = null;
@@ -874,10 +886,23 @@ namespace RakeMultiplayer
                 ? Mathf.RoundToInt(_instance._camera.fieldOfView).ToString()
                 : "0";
 
+            string camPos = _instance._camera != null ? _instance._camera.transform.position.ToString("F2") : "-";
+            string headPos = _instance._head != null ? _instance._head.position.ToString("F2") : "-";
+            string rakePos = _instance._rake != null ? _instance._rake.position.ToString("F2") : "-";
+            string localPos = _instance._camera != null ? _instance._camera.transform.localPosition.ToString("F2") : "-";
+            string parent = _instance._camera != null && _instance._camera.transform.parent != null
+                ? _instance._camera.transform.parent.name
+                : "-";
+
             return "{\"ok\":true,\"view\":\"" + (_instance._firstPerson ? "fp" : "tp") + "\"," +
                    "\"fov\":" + fov + "," +
                    "\"onHead\":" + (_instance._cameraOnHead ? "true" : "false") + "," +
-                   "\"head\":\"" + head + "\"}";
+                   "\"parent\":\"" + parent + "\"," +
+                   "\"head\":\"" + head + "\"," +
+                   "\"cam\":\"" + camPos + "\"," +
+                   "\"headPos\":\"" + headPos + "\"," +
+                   "\"rakePos\":\"" + rakePos + "\"," +
+                   "\"local\":\"" + localPos + "\"}";
         }
 
         // -------------------------------------------------------------------- combat
