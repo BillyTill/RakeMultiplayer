@@ -209,6 +209,30 @@ namespace RakeMultiplayer.Core
                     SendJson(client, RunOnMain(delegate { return RakePlayerController.BridgeProbe(pyaw, pheight); }));
                     return;
                 }
+                if (target == "/batch")
+                {
+                    string squash = Get(args, "squash");
+                    string restore = Get(args, "restore");
+                    string merge = Get(args, "merge");
+                    string unmerge = Get(args, "unmerge");
+                    string cell = Get(args, "cell");
+
+                    SendJson(client, RunOnMain(delegate
+                    {
+                        if (!string.IsNullOrEmpty(restore)) return BatchDiagnostics.Restore();
+                        if (!string.IsNullOrEmpty(unmerge)) return BatchDiagnostics.Unmerge();
+                        if (!string.IsNullOrEmpty(squash)) return BatchDiagnostics.Squash();
+                        if (!string.IsNullOrEmpty(merge))
+                        {
+                            float size;
+                            if (!float.TryParse(cell, System.Globalization.NumberStyles.Float,
+                                System.Globalization.CultureInfo.InvariantCulture, out size)) size = 80f;
+                            return BatchDiagnostics.Merge(size);
+                        }
+                        return BatchDiagnostics.Report();
+                    }));
+                    return;
+                }
                 if (target == "/env")
                 {
                     SendJson(client, RunOnMain(delegate
