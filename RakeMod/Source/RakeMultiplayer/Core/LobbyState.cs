@@ -29,6 +29,16 @@ namespace RakeMultiplayer
             }
         }
 
+        /// <summary>
+        /// A player id that drives the Rake. That player has no hunter body, so every peer
+        /// must not spawn a remote-player proxy for them - a proxy standing next to the Rake
+        /// is the "extra player model" bug.
+        /// </summary>
+        public static bool IsRakeOwner(int playerId)
+        {
+            return RakeOwnerId > 0 && playerId == RakeOwnerId;
+        }
+
         /// <summary>This machine should drive the Rake.</summary>
         public static bool LocalIsRakeOwner
         {

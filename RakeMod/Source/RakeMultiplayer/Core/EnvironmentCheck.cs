@@ -93,6 +93,21 @@ namespace RakeMultiplayer
             }
         }
 
+        internal static bool IsOurFile(string name)
+        {
+            if (string.IsNullOrEmpty(name)) return true;
+            if (OwnPlugins.Contains(name)) return true;
+            if (name.StartsWith("RakeMultiplayer.", StringComparison.OrdinalIgnoreCase)) return true;
+
+            if (name.EndsWith(".png", StringComparison.OrdinalIgnoreCase)) return true;
+            if (name.EndsWith(".bin", StringComparison.OrdinalIgnoreCase)) return true;
+            if (name.EndsWith(".txt", StringComparison.OrdinalIgnoreCase)) return true;
+            if (name.EndsWith(".pdb", StringComparison.OrdinalIgnoreCase)) return true;
+            if (name.EndsWith(".xml", StringComparison.OrdinalIgnoreCase)) return true;
+
+            return false;
+        }
+
         private static void CheckPlugins(string gameRoot)
         {
             string plugins = Path.Combine(Path.Combine(gameRoot, "BepInEx"), "plugins");
@@ -106,11 +121,9 @@ namespace RakeMultiplayer
                 {
                     string name = Path.GetFileName(path);
 
-                    // This mod also ships art and model payloads next to the dll.
-                    if (OwnPlugins.Contains(name)) continue;
-                    if (name.EndsWith(".png", StringComparison.OrdinalIgnoreCase)) continue;
-                    if (name.EndsWith(".bin", StringComparison.OrdinalIgnoreCase)) continue;
-                    if (name.EndsWith(".txt", StringComparison.OrdinalIgnoreCase)) continue;
+                    // Everything this mod ships: the dll, its pdb and manifest, Telepathy,
+                    // and the art/model payloads.
+                    if (IsOurFile(name)) continue;
 
                     foreign.Add(name);
                 }

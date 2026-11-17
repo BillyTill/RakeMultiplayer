@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.7-alpha.1-Main - 2026-11-17
+
+Install integrity: the installer writes a SHA-256 manifest and the mod verifies it,
+refusing multiplayer on a mixed or modified install. Fixed the extra hunter model when
+a player owns the Rake, and a phase change that could stop before the level load.
+
 ## 1.1.6-alpha.1-Main - 2026-11-17
 
 Reliability pass: per-match state, one scene reset path, protocol version and a

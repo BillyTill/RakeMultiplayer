@@ -1,4 +1,4 @@
-# Rake Multiplayer 1.1.6-alpha.1-Main
+# Rake Multiplayer 1.1.7-alpha.1-Main
 
 > **Main build.** This release is built from the `master` (Main) branch: graphics
 > presets, the day/night level change, the HUD phase fix and the climbing guards.
@@ -195,6 +195,35 @@ and a client no longer disconnects itself when it clicks the button.
 - Dropped loot is deduplicated per weapon type; trap placement is bounds- and distance-checked.
 - HUD night counter follows the configured night count; the weapon diagnostic dump moved to
   F9 (it shared F8 with the performance overlay); the lobby title is no longer overwritten.
+
+## What changed in 1.1.7
+
+**The installer now proves what it installed.** Every file it writes gets a SHA-256 in
+`BepInEx\plugins\RakeMultiplayer.manifest`. At startup the mod recomputes those hashes and:
+
+- all match -> `[Integrity] 31 files match the manifest`;
+- a file is missing, truncated or from another build -> multiplayer is refused, the reason is
+  in the log and on the multiplayer panel ("Mod files changed since install - reinstall");
+- there is no manifest (an install from an older setup) -> a warning only, so nothing that
+  worked before stops working.
+
+This is what makes "the menu is missing on the other PC" a diagnosable statement: a mixed
+BepInEx, a quarantined dll, a half-copied update and a plugin from a different version all
+look different in the log instead of all looking like a broken game.
+
+**A player who owns the Rake no longer gets a hunter body on other machines.** When the host
+plays the Rake, clients used to spawn a remote-player model for the host anyway - two bodies
+for one player. The Rake owner is now excluded from hunter proxies everywhere, and an existing
+proxy is removed the moment the role is assigned.
+
+**A phase change can no longer stop halfway.** The host fires its phase hooks and its
+listeners before loading the new level; if any of them threw (which the host-as-Rake case made
+possible) the host stayed in the old level while every client had already been told "night".
+Hooks and listeners are now isolated, and the level load always happens.
+
+**A client no longer goes dark before its level changes.** The lighting is only applied when
+the loaded level belongs to the announced phase; otherwise the client waits for the level
+change, which applies it.
 
 ## What changed in 1.1.6
 

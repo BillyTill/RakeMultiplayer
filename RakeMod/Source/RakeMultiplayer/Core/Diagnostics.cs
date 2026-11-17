@@ -15,6 +15,7 @@ namespace RakeMultiplayer
         public static bool DevMode;
         public static Action<string> Info;
         public static Action<string> Warning;
+        public static Action<string> Error;
 
         public static void LogInfo(string message)
         {
@@ -25,6 +26,12 @@ namespace RakeMultiplayer
         public static void LogWarning(string message)
         {
             var handler = Warning;
+            if (handler != null) handler(message);
+        }
+
+        public static void LogError(string message)
+        {
+            var handler = Error;
             if (handler != null) handler(message);
         }
     }

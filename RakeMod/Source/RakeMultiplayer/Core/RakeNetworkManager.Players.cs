@@ -383,6 +383,14 @@ namespace RakeMultiplayer
                 foreach (var connId in _connectedClients)
                 {
                     int playerId = connId + 1;
+
+                    if (LobbyState.IsRakeOwner(playerId))
+                    {
+                        // The role may have been assigned after the proxy was spawned.
+                        if (spawner.TryGetRemotePlayer(playerId, out _)) spawner.RemoveRemotePlayer(playerId);
+                        continue;
+                    }
+
                     if (spawner.TryGetRemotePlayer(playerId, out _)) continue;
 
                     Vector3 pos = _playerStates.TryGetValue(connId, out var state)
@@ -435,6 +443,13 @@ namespace RakeMultiplayer
                 foreach (var playerId in _knownPlayerIds)
                 {
                     if (playerId == localId) continue;
+
+                    if (LobbyState.IsRakeOwner(playerId))
+                    {
+                        if (spawner.TryGetRemotePlayer(playerId, out _)) spawner.RemoveRemotePlayer(playerId);
+                        continue;
+                    }
+
                     if (spawner.TryGetRemotePlayer(playerId, out _)) continue;
 
                     Vector3 missingPos = spawner.LocalPlayer != null
@@ -577,6 +592,10 @@ namespace RakeMultiplayer
 
         private void HandleClientPlayerState(PlayerStatePacket packet)
         {
+            // The Rake owner has no hunter: a proxy for them is a second player model
+            // standing next to the Rake.
+            if (LobbyState.IsRakeOwner(packet.PlayerId)) return;
+
             // Find remote player and apply state
             if (PlayerSpawner.Instance != null)
             {

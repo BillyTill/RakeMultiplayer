@@ -212,21 +212,34 @@ namespace RakeMultiplayer
             // Broadcast to all clients
             BroadcastPhaseChange();
 
-            // Server-side phase hooks (Tasks 4.5 / 4.6)
+            // Server-side phase hooks (Tasks 4.5 / 4.6). They must never be able to cancel
+            // the level change below: when the host drives the Rake there is no hunter body,
+            // and a hook that expected one used to throw here, leaving the host in the old
+            // level while every client had already been told the new phase (the client's
+            // day "ended" and nothing happened on the host).
             if (RakeMultiplayerPlugin.isServer)
             {
-                if (_currentPhase == Phase.Night)
+                try
                 {
-                    ApplyPersistentRakeHealth();
+                    if (_currentPhase == Phase.Night) ApplyPersistentRakeHealth();
+                    else if (_currentPhase == Phase.Day) RespawnAtSafehouse();
                 }
-                else if (_currentPhase == Phase.Day)
+                catch (Exception ex)
                 {
-                    RespawnAtSafehouse();
+                    RakeMultiplayerPlugin.Log?.LogError("[DayNight] phase hook failed: " + ex);
                 }
             }
 
-            // Fire event for local listeners (SessionManager, etc.)
-            OnPhaseChanged?.Invoke(_currentPhase, GetRemainingTime(), _nightNumber);
+            // Fire event for local listeners (SessionManager, etc.). Same rule: a listener
+            // that throws must not leave the host and the clients in different phases.
+            try
+            {
+                OnPhaseChanged?.Invoke(_currentPhase, GetRemainingTime(), _nightNumber);
+            }
+            catch (Exception ex)
+            {
+                RakeMultiplayerPlugin.Log?.LogError("[DayNight] phase listener failed: " + ex);
+            }
 
             // Day and night are separate levels in this game, so the phase has to load
             // its scene. Without this the timer expired, the sky stayed as it was and the
@@ -262,6 +275,18 @@ namespace RakeMultiplayer
             // The load is synchronous, so nothing else closes the overlay: without this
             // the screen stayed at 90% over the new level and swallowed the input.
             UI.LoadingScreen.Hide();
+        }
+
+        /// <summary>
+        /// True when a level belongs to the given phase. Levels without a "(Day)"/"(Night)"
+        /// suffix return true, so a mode that ships one level keeps the old behaviour.
+        /// </summary>
+        public static bool LevelMatchesPhase(Phase phase, string scene)
+        {
+            if (string.IsNullOrEmpty(scene)) return true;
+            if (Contains(scene, "(Day)")) return phase == Phase.Day;
+            if (Contains(scene, "(Night)")) return phase == Phase.Night;
+            return true;
         }
 
         /// <summary>
@@ -392,8 +417,20 @@ namespace RakeMultiplayer
                 _lightTransitionTimer = 0f;
             }
 
-            // Apply lighting immediately (will interpolate in LateUpdate)
-            ApplyLighting(_currentPhase, _lightTransitionTimer / LightTransitionDuration);
+            // Apply lighting immediately (will interpolate in LateUpdate) - but only when the
+            // level on this machine belongs to that phase. A client whose level is still the
+            // day level used to go dark the moment the "night" packet arrived, which reads as
+            // "the client skipped the day" while the host is still standing in daylight.
+            if (LevelMatchesPhase(_currentPhase, Application.loadedLevelName))
+            {
+                ApplyLighting(_currentPhase, _lightTransitionTimer / LightTransitionDuration);
+            }
+            else
+            {
+                RakeMultiplayerPlugin.Log?.LogWarning(
+                    "[DayNight] client: phase " + _currentPhase + " announced while level is '" +
+                    Application.loadedLevelName + "' - waiting for the level change");
+            }
 
             // Fire event for local listeners
             OnPhaseChanged?.Invoke(_currentPhase, packet.RemainingTime, _nightNumber);

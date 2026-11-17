@@ -865,6 +865,15 @@ namespace RakeMultiplayer.UI
         {
             if (_uiBuilder == null) return;
 
+            // A modified or mixed install must say so on the menu itself: on the machine
+            // that "has no menu" this line is often the only readable clue.
+            if (IntegrityCheck.BlocksMultiplayer && _uiBuilder.ConnectionStatusText != null)
+            {
+                _uiBuilder.ConnectionStatusText.text = "Mod files changed since install - reinstall";
+                _uiBuilder.ConnectionStatusText.color = Color.red;
+                return;
+            }
+
             // Лог только при смене состояния (избегаем спама)
             if (_lastIsServer != RakeMultiplayerPlugin.isServer || _lastIsConnected != RakeMultiplayerPlugin.isConnected)
             {

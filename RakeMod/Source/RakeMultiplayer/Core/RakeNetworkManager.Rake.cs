@@ -25,6 +25,10 @@ namespace RakeMultiplayer
             _lastRakeOwnerTime = -1f;
             RakeMultiplayerPlugin.Log?.LogInfo("[Lobby] Rake owner set to P" + clamped);
             ServerBroadcast(new RakeOwnerPacket { OwnerId = clamped }.Serialize());
+
+            // Whoever just took the Rake stops being a hunter on every peer, starting here.
+            if (clamped > 0) PlayerSpawner.Instance?.RemoveRemotePlayer(clamped);
+
             RakeControlSync.Apply("host changed the Rake owner");
         }
 
@@ -45,6 +49,10 @@ namespace RakeMultiplayer
                 RakeMultiplayerPlugin.Log?.LogInfo("[Lobby] Rake owner is now P" + packet.OwnerId +
                                                    " (local P" + LobbyState.LocalPlayerId + ")");
             }
+
+            // The new owner is the Rake, not a hunter: drop the proxy we may have made
+            // before the ownership arrived.
+            if (packet.OwnerId > 0) PlayerSpawner.Instance?.RemoveRemotePlayer(packet.OwnerId);
 
             RakeControlSync.Apply("owner packet");
         }

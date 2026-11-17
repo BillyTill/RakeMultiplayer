@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Reflection;
+using System.Security.Cryptography;
 using System.Text;
 using System.Windows.Forms;
 using Microsoft.Win32;
@@ -96,7 +97,9 @@ namespace RakeMultiplayerSetup
                 BackupForeignCoreFiles(gameDir, log);
                 ReportForeignPlugins(gameDir, log);
 
-                int files = Extract(pak, gameDir, log);
+                var installedFiles = new List<InstalledFile>();
+                int files = Extract(pak, gameDir, log, installedFiles);
+                WriteManifest(gameDir, installedFiles, log);
 
                 // Force BepInEx to rescan plugins after an upgrade. A stale type cache
                 // can otherwise keep reporting "0 plugins to load".
@@ -140,7 +143,14 @@ namespace RakeMultiplayerSetup
             }
         }
 
-        private static int Extract(string pakPath, string gameDir, Action<string> log)
+        private sealed class InstalledFile
+        {
+            public string Path;
+            public string Hash;
+        }
+
+        private static int Extract(string pakPath, string gameDir, Action<string> log,
+                                   List<InstalledFile> installed)
         {
             int count = 0;
 
@@ -163,6 +173,7 @@ namespace RakeMultiplayerSetup
                     if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
 
                     File.WriteAllBytes(target, data);
+                    installed.Add(new InstalledFile { Path = name, Hash = Sha256Hex(data) });
                     count++;
 
                     if (log != null) log("  " + name);
@@ -170,6 +181,58 @@ namespace RakeMultiplayerSetup
             }
 
             return count;
+        }
+
+        /// <summary>
+        /// Writes the integrity manifest the mod checks at startup. Every file this installer
+        /// wrote is listed with its SHA-256, so a later replacement, truncation or a mix of
+        /// two builds is detected instead of showing up as "the menu is missing".
+        /// </summary>
+        private static void WriteManifest(string gameDir, List<InstalledFile> files, Action<string> log)
+        {
+            if (files == null || files.Count == 0) return;
+
+            string plugins = Path.Combine(Path.Combine(gameDir, "BepInEx"), "plugins");
+            Directory.CreateDirectory(plugins);
+
+            var sb = new StringBuilder();
+            sb.Append("RakeMultiplayer manifest 1\n");
+            sb.Append("version=").Append(ReadPayloadVersion(gameDir)).Append('\n');
+
+            for (int i = 0; i < files.Count; i++)
+            {
+                sb.Append(files[i].Hash).Append(' ').Append(files[i].Path).Append('\n');
+            }
+
+            string path = Path.Combine(plugins, "RakeMultiplayer.manifest");
+            File.WriteAllText(path, sb.ToString(), new UTF8Encoding(false));
+
+            if (log != null) log("  манифест целостности: " + files.Count + " файлов");
+        }
+
+        private static string ReadPayloadVersion(string gameDir)
+        {
+            try
+            {
+                string dll = Path.Combine(Path.Combine(Path.Combine(gameDir, "BepInEx"), "plugins"),
+                                          "RakeMultiplayer.dll");
+                return AssemblyName.GetAssemblyName(dll).Version.ToString();
+            }
+            catch
+            {
+                return "unknown";
+            }
+        }
+
+        private static string Sha256Hex(byte[] data)
+        {
+            using (var sha = new SHA256Managed())
+            {
+                byte[] hash = sha.ComputeHash(data);
+                var sb = new StringBuilder(hash.Length * 2);
+                for (int i = 0; i < hash.Length; i++) sb.Append(hash[i].ToString("x2"));
+                return sb.ToString();
+            }
         }
 
         /// <summary>
@@ -248,8 +311,10 @@ namespace RakeMultiplayerSetup
                 {
                     string name = Path.GetFileName(path);
                     if (ours.Contains(name)) continue;
+                    if (name.StartsWith("RakeMultiplayer.", StringComparison.OrdinalIgnoreCase)) continue;
                     if (name.EndsWith(".png", StringComparison.OrdinalIgnoreCase)) continue;
                     if (name.EndsWith(".bin", StringComparison.OrdinalIgnoreCase)) continue;
+                    if (name.EndsWith(".pdb", StringComparison.OrdinalIgnoreCase)) continue;
                     if (foreign == null) foreign = new List<string>();
                     foreign.Add(name);
                 }
@@ -359,6 +424,9 @@ namespace RakeMultiplayerSetup
         private static List<string> ReadPayloadNames()
         {
             List<string> names = new List<string>();
+
+            // Written by the installer, not carried in the payload.
+            names.Add("BepInEx/plugins/RakeMultiplayer.manifest");
 
             using (Stream input = Assembly.GetExecutingAssembly().GetManifestResourceStream(PayloadResource))
             {

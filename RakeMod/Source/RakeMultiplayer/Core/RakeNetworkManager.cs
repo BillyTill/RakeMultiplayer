@@ -112,6 +112,13 @@ namespace RakeMultiplayer
 
         public void StartHost()
         {
+            if (IntegrityCheck.BlocksMultiplayer)
+            {
+                RakeMultiplayerPlugin.Log?.LogError("[Net] refusing to host: " + IntegrityCheck.Problem);
+                UI.MultiplayerMenu.ShowConnectionError("Mod files changed since install: " + IntegrityCheck.Problem);
+                return;
+            }
+
             RakeMultiplayerPlugin.Log?.LogInfo("[RakeNetworkManager] Starting host...");
 
             // Never leave a previous listener bound
@@ -147,6 +154,13 @@ namespace RakeMultiplayer
 
         public void StartClient()
         {
+            if (IntegrityCheck.BlocksMultiplayer)
+            {
+                RakeMultiplayerPlugin.Log?.LogError("[Net] refusing to connect: " + IntegrityCheck.Problem);
+                UI.MultiplayerMenu.ShowConnectionError("Mod files changed since install: " + IntegrityCheck.Problem);
+                return;
+            }
+
             RakeMultiplayerPlugin.Log?.LogInfo("[RakeNetworkManager] Starting client...");
             
             // ОБЯЗАТЕЛЬНО установить оба флага!
