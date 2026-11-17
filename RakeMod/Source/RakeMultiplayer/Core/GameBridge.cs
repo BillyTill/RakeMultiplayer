@@ -89,9 +89,16 @@ namespace RakeMultiplayer.Core
                     continue;
                 }
 
-                try { HandleClient(client); }
-                catch (Exception ex) { RakeMultiplayerPlugin.Log?.LogWarning("[Bridge] client: " + ex.Message); }
-                finally { try { client.Close(); } catch { } }
+                // One request at a time made the whole bridge look dead while the main
+                // thread was busy: every poll queued behind a request that was itself
+                // waiting for the main thread. Each connection gets its own worker.
+                TcpClient captured = client;
+                ThreadPool.QueueUserWorkItem(delegate
+                {
+                    try { HandleClient(captured); }
+                    catch (Exception ex) { RakeMultiplayerPlugin.Log?.LogWarning("[Bridge] client: " + ex.Message); }
+                    finally { try { captured.Close(); } catch { } }
+                });
             }
         }
 
@@ -150,6 +157,9 @@ namespace RakeMultiplayer.Core
 
             try
             {
+                // Cheap reads straight from the connection worker: they must answer even
+                // while Update is blocked by a level load, because that is exactly when a
+                // scripted check needs to know what happened.
                 if (target == "/" || target == "/state") { SendJson(client, StateJson()); return; }
                 if (target == "/ui") { SendJson(client, UiJson()); return; }
                 if (target == "/screenshot")
@@ -498,6 +508,39 @@ namespace RakeMultiplayer.Core
                     }));
                     return;
                 }
+                if (target == "/hp")
+                {
+                    SendJson(client, RunOnMain(delegate
+                    {
+                        int player = 2;
+                        float value = 50f;
+                        int.TryParse(Get(args, "player"), out player);
+                        float.TryParse(Get(args, "value"),
+                                       System.Globalization.NumberStyles.Float,
+                                       System.Globalization.CultureInfo.InvariantCulture, out value);
+
+                        var manager = RakeNetworkManager.Instance;
+                        if (manager == null || !MatchState.IsActive)
+                            return "{\"ok\":false,\"error\":\"no active match\"}";
+
+                        manager.DevSetHealth(player, value);
+                        return "{\"ok\":true,\"matchHp\":" + MatchState.Current.PlayerHealth.Count + "}";
+                    }));
+                    return;
+                }
+                if (target == "/invariant")
+                {
+                    // Deliberately exercises an invariant so the wiring can be verified from
+                    // a scripted run. It never changes game state.
+                    SendJson(client, RunOnMain(delegate
+                    {
+                        Invariants.CheckSessionHasLevel(RakeMultiplayer.Networking.SessionState.Active,
+                                                        "selftest");
+                        return "{\"ok\":true,\"violations\":" + Invariants.Violations +
+                               ",\"rules\":\"" + Esc(Invariants.Dump()) + "\"}";
+                    }));
+                    return;
+                }
                 if (target == "/look")
                 {
                     SendJson(client, RunOnMain(delegate
@@ -747,6 +790,13 @@ namespace RakeMultiplayer.Core
                 sb.Append(",\"pausePanel\":").Append(
                     pauseMenu != null && pauseMenu.menu != null && pauseMenu.menu.activeSelf ? "true" : "false");
                 sb.Append(",\"paused\":").Append(pauseMenu != null && pauseMenu.isPaused ? "true" : "false");
+                sb.Append(",\"invariants\":").Append(Invariants.Violations);
+                sb.Append(",\"protocol\":").Append(RakeMultiplayer.Networking.Protocol.Version);
+                sb.Append(",\"matchActive\":").Append(MatchState.IsActive ? "true" : "false");
+                sb.Append(",\"matchLevel\":").Append(MatchState.IsActive ? MatchState.Current.LevelIndex : -1);
+                sb.Append(",\"matchDead\":").Append(MatchState.IsActive ? MatchState.Current.DeadCount : 0);
+                sb.Append(",\"matchHp\":").Append(MatchState.IsActive ? MatchState.Current.PlayerHealth.Count : 0);
+                sb.Append(",\"invariantRules\":\"").Append(Esc(Invariants.Dump())).Append('"');
                 sb.Append(",\"ragdoll\":").Append(PlayerRagdoll.IsActive ? "true" : "false");
                 sb.Append(",\"dead\":").Append(local != null && PlayerDeathSystem.IsDead(local.PlayerId) ? "true" : "false");
                 sb.Append(",\"hp\":").Append(fps != null ? fps.Health.ToString() : "-");
@@ -926,6 +976,15 @@ namespace RakeMultiplayer.Core
 
         private string RunOnMain(Func<string> action)
         {
+            return RunOnMain(action, 30000);
+        }
+
+        /// <summary>
+        /// Runs on the main thread with the given budget. Cheap polls use a short budget so a
+        /// busy frame cannot turn a state query into a multi-second wait.
+        /// </summary>
+        private string RunOnMain(Func<string> action, int timeoutMs)
+        {
             string result = null;
             Exception error = null;
             var done = new ManualResetEvent(false);
@@ -940,11 +999,16 @@ namespace RakeMultiplayer.Core
                 });
             }
 
-            if (!done.WaitOne(8000))
+            // A level load blocks the main thread for 10-20 s on slower machines, and a dev
+            // tool that gives up in 8 s reports "no response" for a healthy game.
+            if (!done.WaitOne(timeoutMs))
                 return "{\"ok\":false,\"error\":\"main thread timeout\"}";
 
             if (error != null)
+            {
+                RakeMultiplayerPlugin.Log?.LogError("[Bridge] command failed: " + error);
                 return "{\"ok\":false,\"error\":\"" + Esc(error.Message) + "\"}";
+            }
 
             return result ?? "{\"ok\":true}";
         }

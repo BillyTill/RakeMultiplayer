@@ -68,6 +68,7 @@ namespace RakeMultiplayer
                 manager.PrepareForSceneLoad();
                 manager.ResetDeathState();
                 PlayerDeathSystem.ResetForScene();
+                SceneScope.CheckCleanState("after load");
                 RegisterSceneObjects(manager);
 
                 // Any player may own the Rake: host, client or the AI.

@@ -21,18 +21,28 @@ namespace RakeMultiplayer
         public static Vector3 LastHitDirection;
 
         private static readonly HashSet<int> _dead = new HashSet<int>();
+
+        /// <summary>
+        /// Deaths belong to the running match, so a new match cannot inherit them.
+        /// Outside a match (menu, dev tools) the local set keeps the old behaviour.
+        /// </summary>
+        private static HashSet<int> DeadSet
+        {
+            get { return MatchState.IsActive ? MatchState.Current.DeadPlayers : _dead; }
+        }
         private static readonly Dictionary<int, List<Collider>> _disabledColliders =
             new Dictionary<int, List<Collider>>();
 
         public static bool IsDead(int playerId)
         {
-            return playerId > 0 && _dead.Contains(playerId);
+            return playerId > 0 && DeadSet.Contains(playerId);
         }
 
         /// <summary>New scene: forget corpses and pending revives from the old level.</summary>
         public static void ResetForScene()
         {
             _dead.Clear();
+            if (MatchState.IsActive) MatchState.Current.DeadPlayers.Clear();
             _disabledColliders.Clear();
             LastHitDirection = Vector3.zero;
         }
@@ -63,7 +73,7 @@ namespace RakeMultiplayer
             if (direction.sqrMagnitude < 0.01f) direction = fps.transform.forward;
             LastHitDirection = Vector3.zero;
 
-            _dead.Add(playerId);
+            DeadSet.Add(playerId);
             local.SetDead(true);
 
             var weaponIds = new List<int>();
@@ -117,7 +127,7 @@ namespace RakeMultiplayer
             if (IsDead(packet.PlayerId)) return;
 
             int playerId = packet.PlayerId;
-            _dead.Add(playerId);
+            DeadSet.Add(playerId);
 
             var spawner = PlayerSpawner.Instance;
             var local = spawner != null ? spawner.LocalPlayer : null;
@@ -159,7 +169,7 @@ namespace RakeMultiplayer
             if (packet == null || packet.PlayerId <= 0) return;
 
             int playerId = packet.PlayerId;
-            _dead.Remove(playerId);
+            DeadSet.Remove(playerId);
 
             var spawner = PlayerSpawner.Instance;
             var local = spawner != null ? spawner.LocalPlayer : null;

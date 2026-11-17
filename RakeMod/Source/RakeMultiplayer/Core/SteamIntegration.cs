@@ -52,6 +52,13 @@ namespace RakeMultiplayer
         {
             try
             {
+                if (!EnvironmentCheck.SteamFilesOk)
+                {
+                    Status = "Steam files missing or damaged: " + EnvironmentCheck.SteamProblem;
+                    RakeMultiplayerPlugin.Log?.LogWarning("[Steam] " + Status);
+                    return;
+                }
+
                 if (!SteamNative.IsSteamRunning())
                 {
                     Status = "Steam is not running";

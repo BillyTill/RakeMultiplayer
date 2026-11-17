@@ -57,5 +57,7 @@ namespace RakeMultiplayer.Networking
         PlayerRespawn = 48,
         ClientReady = 49,
         ItemSpawn = 50,
+        /// <summary>Server -> client: your mod build is not compatible with this host.</summary>
+        ProtocolReject = 51,
     }
 }

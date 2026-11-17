@@ -89,6 +89,13 @@ namespace RakeMultiplayerSetup
                     }
                 }
 
+                // A mixed BepInEx is the most common reason the mod works on one PC and
+                // crashes on another: two loader versions, or two mods patching the same
+                // methods. Core files that we do not ship are moved aside; foreign plugins
+                // are only reported, because they may be the player's other mods.
+                BackupForeignCoreFiles(gameDir, log);
+                ReportForeignPlugins(gameDir, log);
+
                 int files = Extract(pak, gameDir, log);
 
                 // Force BepInEx to rescan plugins after an upgrade. A stale type cache
@@ -163,6 +170,100 @@ namespace RakeMultiplayerSetup
             }
 
             return count;
+        }
+
+        /// <summary>
+        /// Moves BepInEx\core files that this installer does not ship into
+        /// BepInEx\_backup_&lt;timestamp&gt;\core. Reversible, and it removes the possibility
+        /// of running our plugin against somebody else's loader.
+        /// </summary>
+        private static void BackupForeignCoreFiles(string gameDir, Action<string> log)
+        {
+            string core = Path.Combine(Path.Combine(gameDir, "BepInEx"), "core");
+            if (!Directory.Exists(core)) return;
+
+            var owned = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            List<string> payload = ReadPayloadNames();
+            for (int i = 0; i < payload.Count; i++)
+            {
+                owned.Add(payload[i].Replace('\\', '/').TrimStart('/').ToLowerInvariant());
+            }
+
+            string backup = Path.Combine(Path.Combine(gameDir, "BepInEx"),
+                                         "_backup_" + DateTime.Now.ToString("yyyyMMdd_HHmmss"));
+            int moved = 0;
+
+            string[] files;
+            try { files = Directory.GetFiles(core); }
+            catch (Exception ex)
+            {
+                if (log != null) log("  не удалось прочитать BepInEx\\core: " + ex.Message);
+                return;
+            }
+
+            for (int i = 0; i < files.Length; i++)
+            {
+                string relative = files[i].Substring(gameDir.Length).TrimStart('\\', '/')
+                                         .Replace('\\', '/').ToLowerInvariant();
+                if (owned.Contains(relative)) continue;
+
+                try
+                {
+                    Directory.CreateDirectory(backup);
+                    File.Move(files[i], Path.Combine(backup, Path.GetFileName(files[i])));
+                    moved++;
+                    if (log != null) log("  чужой core-файл отложен: " + Path.GetFileName(files[i]));
+                }
+                catch (Exception ex)
+                {
+                    if (log != null) log("  не удалось отложить " + Path.GetFileName(files[i]) + ": " + ex.Message);
+                }
+            }
+
+            if (moved > 0 && log != null)
+            {
+                log("Отложено чужих файлов: " + moved + ". Вернуть можно из " + backup + ".");
+            }
+        }
+
+        /// <summary>
+        /// Foreign plugins are reported but not touched: they may be the player's other mods.
+        /// </summary>
+        private static void ReportForeignPlugins(string gameDir, Action<string> log)
+        {
+            string plugins = Path.Combine(Path.Combine(gameDir, "BepInEx"), "plugins");
+            if (!Directory.Exists(plugins)) return;
+
+            var ours = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "RakeMultiplayer.dll", "Telepathy.dll",
+                "RakePlayerModel.bin", "RakePlayerRifle.bin",
+                "RakePlayerSkin.png", "rifle.png"
+            };
+
+            List<string> foreign = null;
+            try
+            {
+                foreach (string path in Directory.GetFiles(plugins))
+                {
+                    string name = Path.GetFileName(path);
+                    if (ours.Contains(name)) continue;
+                    if (name.EndsWith(".png", StringComparison.OrdinalIgnoreCase)) continue;
+                    if (name.EndsWith(".bin", StringComparison.OrdinalIgnoreCase)) continue;
+                    if (foreign == null) foreign = new List<string>();
+                    foreign.Add(name);
+                }
+            }
+            catch { return; }
+
+            if (foreign == null) return;
+
+            if (log != null)
+            {
+                log("Внимание: в BepInEx\\plugins есть сторонние плагины: " +
+                    string.Join(", ", foreign.ToArray()) + ".");
+                log("Если мод ведёт себя странно, уберите их: два мода могут патчить один и тот же метод.");
+            }
         }
 
         // ---------------------------------------------------------------- uninstall

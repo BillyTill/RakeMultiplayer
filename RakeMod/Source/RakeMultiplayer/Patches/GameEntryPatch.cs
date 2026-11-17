@@ -87,9 +87,6 @@ namespace RakeMultiplayer.Patches
             // level then came up alive but frozen, and only a second ESC press fixed it.
             Time.timeScale = 1f;
 
-            // Every input lock belonged to the object that is about to be destroyed.
-            PlayerInputLock.ResetForScene();
-
             // The free camera is HideAndDontSave: it would survive and render the new
             // level on top of the player camera with doubled WASD/mouse.
             if (DebugFreeCamera.IsActive) DebugFreeCamera.SetEnabled(false);
@@ -99,10 +96,11 @@ namespace RakeMultiplayer.Patches
             {
                 WorldPersistence.SaveWorld();
             }
-            // Clear all networked objects but keep the network connection
-            // NetIdentityManager removed - NetIdentity.Registry handles cleanup
-            NetIdentity.Registry.Clear();
-            NetIdentity.NextNetId = 1;
+            // Every process-wide subsystem that belongs to the old level. Input locks,
+            // network ids, cameras, traps and deaths used to be reset by hand in different
+            // patches; one missed line left state in the next level. The snapshot above must
+            // be taken first, because SceneScope clears the registries it reads.
+            SceneScope.ResetAll("load " + sceneName);
 
             RakeMultiplayerPlugin.Log?.LogInfo($"[GameEntryPatch] Networking state cleared for scene transition");
         }

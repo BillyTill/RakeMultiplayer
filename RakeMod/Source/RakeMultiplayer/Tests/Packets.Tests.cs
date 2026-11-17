@@ -1729,5 +1729,74 @@ namespace RakeMultiplayer.Tests
         }
 
         #endregion
+
+        #region Protocol version handshake
+
+        [Test]
+        public void ClientReadyPacket_CarriesTheProtocolVersion()
+        {
+            var original = new ClientReadyPacket { Name = "Hunter", ProtocolVersion = 7 };
+
+            var restored = PacketSerializer.Deserialize(original.Serialize()) as ClientReadyPacket;
+
+            Assert.IsNotNull(restored);
+            Assert.AreEqual("Hunter", restored.Name);
+            Assert.AreEqual(7, restored.ProtocolVersion);
+        }
+
+        [Test]
+        public void ClientReadyPacket_FromABuildWithoutVersion_ReportsZero()
+        {
+            // A build that predates versioning wrote only the name. Simulate it by cutting
+            // the version off a real packet instead of re-implementing the string format.
+            byte[] full = new ClientReadyPacket { Name = "OldPlayer", ProtocolVersion = 0 }.Serialize();
+            byte[] legacy = new byte[full.Length - 4];
+            Array.Copy(full, legacy, legacy.Length);
+
+            var restored = PacketSerializer.Deserialize(legacy) as ClientReadyPacket;
+
+            Assert.IsNotNull(restored, "a legacy handshake must still parse");
+            Assert.AreEqual("OldPlayer", restored.Name);
+            Assert.AreEqual(0, restored.ProtocolVersion, "a missing version means incompatible");
+            Assert.IsFalse(Protocol.IsCompatible(restored.ProtocolVersion));
+        }
+
+        [Test]
+        public void ProtocolRejectPacket_SerializeDeserialize_RoundTrip()
+        {
+            var original = new ProtocolRejectPacket
+            {
+                HostVersion = 3,
+                ClientVersion = 1,
+                Message = "Mod version mismatch"
+            };
+
+            var restored = PacketSerializer.Deserialize(original.Serialize()) as ProtocolRejectPacket;
+
+            Assert.IsNotNull(restored);
+            Assert.AreEqual(3, restored.HostVersion);
+            Assert.AreEqual(1, restored.ClientVersion);
+            Assert.AreEqual("Mod version mismatch", restored.Message);
+        }
+
+        [Test]
+        public void Protocol_AcceptsOnlyTheSameVersion()
+        {
+            Assert.IsTrue(Protocol.IsCompatible(Protocol.Version));
+            Assert.IsFalse(Protocol.IsCompatible(Protocol.Version - 1));
+            Assert.IsFalse(Protocol.IsCompatible(Protocol.Version + 1));
+            Assert.IsFalse(Protocol.IsCompatible(0), "a build without versioning is incompatible");
+        }
+
+        [Test]
+        public void Protocol_MismatchMessage_ExplainsBothSides()
+        {
+            var message = Protocol.MismatchMessage(0);
+
+            StringAssert.Contains("unknown", message);
+            StringAssert.Contains(Protocol.Version.ToString(), message);
+        }
+
+        #endregion
     }
 }

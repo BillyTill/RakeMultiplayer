@@ -104,6 +104,10 @@ namespace RakeMultiplayer
             _victoryType = VictoryType.None;
             _isRunning = true;
 
+            MatchState.Begin(UnityEngine.Application.loadedLevel, "StartSession");
+            Invariants.CheckSessionHasLevel(_currentState, "StartSession");
+            Invariants.CheckMatchAgreesWithSession(_currentState, "StartSession");
+
             // Find NetworkedRakeAI
             _networkedRake = FindObjectOfType<NetworkedRakeAI>();
 
@@ -136,6 +140,8 @@ namespace RakeMultiplayer
             _currentState = SessionState.GameOver;
             _victoryType = victoryType;
 
+            MatchState.End("game over: " + victoryType);
+
             // Stop day/night cycle
             if (_dayNightManager != null)
             {
@@ -158,6 +164,8 @@ namespace RakeMultiplayer
             _isRunning = false;
             _currentState = SessionState.Waiting;
             _currentNight = 0;
+
+            MatchState.End("aborted");
             _sessionTimer = 0f;
 
             if (_dayNightManager == null) _dayNightManager = DayNightManager.Instance;
@@ -348,6 +356,18 @@ namespace RakeMultiplayer
             _victoryType = packet.VictoryType;
             _isRunning = (packet.State == SessionState.Active);
 
+            Invariants.CheckSessionHasLevel(_currentState, "HandleSessionStatePacket");
+            if (packet.State == SessionState.Active)
+            {
+                if (!MatchState.IsActive)
+                    MatchState.Begin(UnityEngine.Application.loadedLevel, "session packet");
+            }
+            else if (MatchState.IsActive)
+            {
+                MatchState.End("session packet: " + packet.State);
+            }
+            Invariants.CheckMatchAgreesWithSession(_currentState, "HandleSessionStatePacket");
+
             OnSessionStateChanged?.Invoke(_currentState, _currentNight, _rakeHealth, _victoryType);
 
             if (packet.State == SessionState.GameOver)
@@ -377,6 +397,18 @@ namespace RakeMultiplayer
             _rakeHealth = rakeHealth;
             _victoryType = victoryType;
             _isRunning = (state == SessionState.Active);
+
+            Invariants.CheckSessionHasLevel(state, "ForceState");
+            if (state == SessionState.Active)
+            {
+                if (!MatchState.IsActive)
+                    MatchState.Begin(UnityEngine.Application.loadedLevel, "ForceState");
+            }
+            else if (MatchState.IsActive)
+            {
+                MatchState.End("ForceState: " + state);
+            }
+            Invariants.CheckMatchAgreesWithSession(state, "ForceState");
 
             if (RakeMultiplayerPlugin.isServer)
             {

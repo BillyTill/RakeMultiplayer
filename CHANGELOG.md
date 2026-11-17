@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.6-alpha.1-Main - 2026-11-17
+
+Reliability pass: per-match state, one scene reset path, protocol version and a
+reject for incompatible builds, late joiners get dropped loot and markers, and the
+scene test runner now actually runs every test.
+
 ## 1.1.5-alpha.1-Main - 2026-11-15
 
 Full-cycle audit fixes: day/night levels are recognised again (safehouse respawn,

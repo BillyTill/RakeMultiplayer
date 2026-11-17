@@ -222,14 +222,55 @@ namespace RakeMultiplayer.Networking
         public override PacketType Type => PacketType.ClientReady;
         public string Name;
 
+        /// <summary>Wire protocol of the sender; 0 means a build that predates versioning.</summary>
+        public int ProtocolVersion = Protocol.Version;
+
         public override void Write(BinaryWriter writer)
         {
             writer.Write(Name ?? string.Empty);
+            writer.Write(ProtocolVersion);
         }
 
         public override void Read(BinaryReader reader)
         {
             Name = PacketSerializer.ReadSafeString(reader);
+
+            // Older builds wrote only the name. Reading past the end must not throw here:
+            // a missing version means "incompatible", not "corrupt packet".
+            try
+            {
+                ProtocolVersion = reader.BaseStream.Position + 4 <= reader.BaseStream.Length
+                    ? reader.ReadInt32()
+                    : 0;
+            }
+            catch
+            {
+                ProtocolVersion = 0;
+            }
+        }
+    }
+
+    /// <summary>Server -> client: the host cannot talk to this build, and why.</summary>
+    public class ProtocolRejectPacket : NetworkPacket
+    {
+        public override PacketType Type => PacketType.ProtocolReject;
+
+        public int HostVersion;
+        public int ClientVersion;
+        public string Message;
+
+        public override void Write(BinaryWriter writer)
+        {
+            writer.Write(HostVersion);
+            writer.Write(ClientVersion);
+            writer.Write(Message ?? string.Empty);
+        }
+
+        public override void Read(BinaryReader reader)
+        {
+            HostVersion = reader.ReadInt32();
+            ClientVersion = reader.ReadInt32();
+            Message = PacketSerializer.ReadSafeString(reader);
         }
     }
 

@@ -351,6 +351,7 @@ namespace RakeMultiplayer.UI
                 // walking, the Rake HUD kept drawing and the match kept simulating.
                 PlayerInputLock.SetMatchOver(true);
                 if (_uiBuilder != null) _uiBuilder.HideRakeHealth();
+                Invariants.CheckMatchOverIsReal(true, "MatchOver");
 
                 RakeMultiplayerPlugin.Log?.LogInfo("[Menu] Match over: " + _matchResultText);
             }
@@ -466,6 +467,38 @@ namespace RakeMultiplayer.UI
         }
 
         /// <summary>Open the mod menu (used by the vanilla Multiplayer tile).</summary>
+        /// <summary>
+        /// Surface a fatal connection error (protocol mismatch, rejected join) in the
+        /// multiplayer panel instead of leaving the player on a loading screen that ends
+        /// silently.
+        /// </summary>
+        public static void ShowConnectionError(string message)
+        {
+            var menu = Instance;
+            if (menu == null) return;
+
+            menu._waitingForConnection = false;
+            LoadingScreen.Hide();
+            menu._menuVisible = true;
+            if (menu._mainContainer != null) menu._mainContainer.SetActive(true);
+            menu.ShowMultiplayerPanel();
+
+            if (menu._uiBuilder != null && menu._uiBuilder.ConnectionStatusText != null)
+            {
+                menu._uiBuilder.ConnectionStatusText.text = message;
+                menu._uiBuilder.ConnectionStatusText.color = Color.red;
+            }
+
+            if (menu._uiBuilder != null && menu._uiBuilder.ConnectButton != null)
+            {
+                menu._uiBuilder.ConnectButton.interactable = true;
+                var buttonText = menu._uiBuilder.ConnectButton.GetComponentInChildren<Text>();
+                if (buttonText != null) buttonText.text = "Connect (Incompatible)";
+            }
+
+            RakeMultiplayerPlugin.Log?.LogError("[Menu] connection refused: " + message);
+        }
+
         public void OpenMenu()
         {
             if (_mainContainer == null) return;

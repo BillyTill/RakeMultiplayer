@@ -35,6 +35,13 @@ namespace RakeMultiplayer
         internal static bool isServer = false;
         internal static bool isConnected = false;
 
+        /// <summary>
+        /// Development diagnostics: the GameBridge config flag or -rakemcp. The bridge
+        /// starts on it, and the invariant checks run only here — a shipping install
+        /// must not pay for either.
+        /// </summary>
+        internal static bool DevMode;
+
         // Item synchronization flag (prevents recursive patch execution)
         internal static bool IsApplyingNetworkDestroy = false;
 
@@ -196,7 +203,19 @@ namespace RakeMultiplayer
             menuObj.AddComponent<UI.MultiplayerMenu>();
             Log.LogInfo("[RakeMultiplayer] MultiplayerMenu created in plugin Awake");
 
-            if (EnableGameBridge.Value || Array.IndexOf(Environment.GetCommandLineArgs(), "-rakemcp") >= 0)
+            DevMode = EnableGameBridge.Value ||
+                      Array.IndexOf(Environment.GetCommandLineArgs(), "-rakemcp") >= 0;
+
+            // Pure state machines (MatchState, Invariants, SceneScope) log through this
+            // facade so they can be unit tested without BepInEx or Unity loaded.
+            Diagnostics.DevMode = DevMode;
+            Diagnostics.Info = Log.LogInfo;
+            Diagnostics.Warning = Log.LogWarning;
+
+            // Say what was actually installed before any native call is made.
+            EnvironmentCheck.Run();
+
+            if (DevMode)
             {
                 var bridgeObj = new GameObject("RakeGameBridge");
                 UnityEngine.Object.DontDestroyOnLoad(bridgeObj);
@@ -517,8 +536,8 @@ namespace RakeMultiplayer
         public const string GUID = "com.rake.multiplayer";
         public const string NAME = "Rake Multiplayer";
         // BepInPlugin.Version is a System.Version: it must stay numeric.
-        public const string VERSION = "1.1.5";
+        public const string VERSION = "1.1.6";
         // Shown in the UI and logs; the alpha suffix is valid here.
-        public const string DISPLAY_VERSION = "1.1.5-alpha.1-Main";
+        public const string DISPLAY_VERSION = "1.1.6-alpha.1-Main";
     }
 }

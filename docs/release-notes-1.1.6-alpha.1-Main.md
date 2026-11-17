@@ -1,4 +1,4 @@
-# Rake Multiplayer 1.1.5-alpha.1-Main
+# Rake Multiplayer 1.1.6-alpha.1-Main
 
 > **Main build.** This release is built from the `master` (Main) branch: graphics
 > presets, the day/night level change, the HUD phase fix and the climbing guards.
@@ -195,6 +195,39 @@ and a client no longer disconnects itself when it clicks the button.
 - Dropped loot is deduplicated per weapon type; trap placement is bounds- and distance-checked.
 - HUD night counter follows the configured night count; the weapon diagnostic dump moved to
   F9 (it shared F8 with the performance overlay); the lobby title is no longer overwritten.
+
+## What changed in 1.1.6
+
+This build is mostly about the things that made the previous one fail *sometimes*.
+
+**Incompatible builds are refused.** Every player now announces a wire protocol version.
+A host running a different build says so and disconnects instead of accepting you and then
+behaving unpredictably - the "works on my PC" case that is impossible to debug from a
+distance. A build old enough to predate the version is refused the same way.
+
+**Late joiners see the world.** Cameras, traps, animals, doors and the current phase were
+already replayed on join; dropped loot and map markers were not, so anything dropped before
+you connected was invisible to you. Both are sent now.
+
+**Pause and match state are scoped properly.** Health, respawn timers and deaths belong to the
+match now, so a new match cannot inherit them (this is the class of bug behind "the first trap
+after dawn dealt 9999 damage"). Every process-wide subsystem is reset through one list on a
+level load instead of a line in each patch.
+
+**Return to lobby cannot hang the game.** Asking twice - a second click, or a retry from a
+tool - used to start a second level load while the first was still finishing, which leaves
+Unity 5 stuck. The second request is now ignored.
+
+**Steam is never called with a broken install.** At startup the mod checks `steam_api.dll`,
+`CSteamworks.dll` and `steam_appid.txt` next to `Rake.exe`, says in the log what it found, and
+does not initialise Steam at all when one is missing or truncated. LAN is unaffected.
+The installer also moves foreign `BepInEx\core` files to `BepInEx\_backup_<date>\core`
+instead of leaving two loaders mixed together.
+
+**Under the hood** (no gameplay change): the 3 700-line network manager is split into
+per-domain files, the test runner stopped running 86 of ~385 tests (44 of them cannot run
+without Unity and are now counted separately), and a scripted cycle test checks a whole match
+over the dev bridge.
 
 ## Known limitations
 
