@@ -171,6 +171,8 @@ namespace RakeMultiplayer
         }
 
         private float _lastDiagTime = -30f;
+        private float _phaseCheckTimer;
+        private float _phaseMismatchSince = -1f;
 
         private void Update()
         {
@@ -192,6 +194,8 @@ namespace RakeMultiplayer
             {
                 BroadcastPhaseChange();
             }
+
+            CheckPhaseMatchesLevel();
 
             // A silent countdown made "the host phase never changed" impossible to tell
             // apart from "the host phase is fine, the client is wrong". One line every 30 s.
@@ -276,6 +280,57 @@ namespace RakeMultiplayer
             // its scene. Without this the timer expired, the sky stayed as it was and the
             // HUD claimed a phase the level did not show.
             LoadLevelForPhase(_currentPhase);
+        }
+
+        /// <summary>
+        /// The AI gates on the phase, but the player sees the level. When they disagree the
+        /// Rake stands idle in a night level (the day gate pins its cooldown) and warps away
+        /// when a hunter closes in. A few seconds of grace covers a normal transition; after
+        /// that the level wins and the phase is corrected, with an error in the log.
+        /// </summary>
+        private void CheckPhaseMatchesLevel()
+        {
+            if (!RakeMultiplayerPlugin.isServer) return;
+
+            _phaseCheckTimer += Time.unscaledDeltaTime;
+            if (_phaseCheckTimer < 2f) return;
+            _phaseCheckTimer = 0f;
+
+            string scene = Application.loadedLevelName;
+            if (LevelMatchesPhase(_currentPhase, scene))
+            {
+                if (_phaseMismatchSince >= 0f)
+                {
+                    RakeMultiplayerPlugin.Log?.LogInfo("[DayNight] phase/level agree again");
+                    _phaseMismatchSince = -1f;
+                }
+                return;
+            }
+
+            if (_phaseMismatchSince < 0f)
+            {
+                _phaseMismatchSince = Time.time;
+                RakeMultiplayerPlugin.Log?.LogWarning("[DayNight] phase " + _currentPhase +
+                                                      " does not match level '" + scene + "' - watching");
+                return;
+            }
+
+            if (Time.time - _phaseMismatchSince < 10f) return;
+
+            Phase levelPhase = scene != null &&
+                               scene.IndexOf("night", System.StringComparison.OrdinalIgnoreCase) >= 0
+                ? Phase.Night : Phase.Day;
+
+            RakeMultiplayerPlugin.Log?.LogError("[DayNight] phase was " + _currentPhase +
+                                                " while the level is '" + scene + "' for 10 s - " +
+                                                "re-syncing the phase to " + levelPhase);
+
+            _currentPhase = levelPhase;
+            _phaseTimer = 0f;
+            _phaseMismatchSince = -1f;
+
+            ApplyLighting(_currentPhase, 1f);
+            BroadcastPhaseChange();
         }
 
         /// <summary>Dev bridge: force the next phase without waiting for the timer.</summary>

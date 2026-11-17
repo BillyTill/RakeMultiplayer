@@ -794,6 +794,9 @@ namespace RakeMultiplayer.Core
                 sb.Append(",\"protocol\":").Append(RakeMultiplayer.Networking.Protocol.Version);
                 var dayNight = DayNightManager.Instance;
                 sb.Append(",\"dayNightPhase\":\"").Append(dayNight != null && dayNight.IsRunning ? dayNight.CurrentPhase.ToString() : "idle").Append('"');
+                sb.Append(",\"phaseMatchesLevel\":").Append(
+                    dayNight == null || DayNightManager.LevelMatchesPhase(dayNight.CurrentPhase, UnityEngine.Application.loadedLevelName)
+                        ? "true" : "false");
                 sb.Append(",\"rakeOwner\":").Append(LobbyState.RakeOwnerId);
                 sb.Append(",\"localId\":").Append(LobbyState.LocalPlayerId);
                 sb.Append(",\"rakePlaying\":").Append(RakePlayerController.IsActive ? "true" : "false");

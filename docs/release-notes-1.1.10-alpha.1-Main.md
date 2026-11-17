@@ -1,4 +1,4 @@
-# Rake Multiplayer 1.1.9-alpha.1-Main
+# Rake Multiplayer 1.1.10-alpha.1-Main
 
 > **Main build.** This release is built from the `master` (Main) branch: graphics
 > presets, the day/night level change, the HUD phase fix and the climbing guards.
@@ -195,6 +195,34 @@ and a client no longer disconnects itself when it clicks the button.
 - Dropped loot is deduplicated per weapon type; trap placement is bounds- and distance-checked.
 - HUD night counter follows the configured night count; the weapon diagnostic dump moved to
   F9 (it shared F8 with the performance overlay); the lobby title is no longer overwritten.
+
+## What changed in 1.1.10
+
+**The daytime Rake stopped teleporting.** It used to warp 130 m away the moment a hunter
+came within 90 m, which looks exactly like a bug ("I walk up to it and it jumps"). It now
+walks away at running pace. The warp survives only for the point-blank case (a hunter closer
+than 20 m), where walking out is not possible any more.
+
+**It also stopped standing still all day.** With no hunter nearby it drifts through the
+trees: a new point up to 55 m away every 15-30 s at walking pace, silent. The day gate still
+means it does not hunt until nightfall, but a sleeping stalker that visibly moves reads as a
+creature instead of a frozen model.
+
+Both behaviours are daytime only - the night hunt is unchanged.
+
+**Phase and level are reconciled.** If the session thinks it is day while the loaded level is
+the night level, the Rake stands idle (the day gate pins its cooldown) and warps away from
+hunters - which is exactly what "AFK, and it teleports when I get close, at night" looks like.
+The host now checks every 2 s and, after 10 s of disagreement, corrects the phase from the
+level and logs it:
+
+```
+[DayNight] phase was Day while the level is 'Level_1(Night)' for 10 s -
+           re-syncing the phase to Night
+```
+
+The 30 s countdown line from 1.1.9 stays, so the next log shows whether the clock runs at all.
+
 
 ## What changed in 1.1.9
 

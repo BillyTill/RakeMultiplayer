@@ -234,6 +234,10 @@ namespace RakeMultiplayer
         private bool _localOwner;
         private bool _remoteOwner;
         private bool _daySpawnChecked;
+        private bool _dayRetreatActive;
+        private float _dayRetreatRepath;
+        private bool _dayRoamActive;
+        private float _dayRoamNext;
         private float _lastDayWarp;
         private bool _loggedHealthWarning = false;
         private bool _loggedMaxHealthWarning = false;
@@ -580,8 +584,24 @@ namespace RakeMultiplayer
             if (dayNight.CurrentPhase == Phase.Night)
             {
                 _daySpawnChecked = false;
+                if (_dayRoamActive || _dayRetreatActive)
+                {
+                    _dayRoamActive = false;
+                    _dayRetreatActive = false;
+
+                    var nightAgent = GetEnemyAgent();
+                    if (nightAgent != null && nightAgent.isOnNavMesh)
+                    {
+                        nightAgent.Stop();
+                        nightAgent.ResetPath();
+                    }
+                }
                 return;
             }
+
+            // Every frame: a hunter walking towards the sleeping Rake makes it walk away.
+            // It used to warp instead, which reads as a bug ("it teleports when I get close").
+            UpdateDayRetreat();
 
             if (!_daySpawnChecked)
             {
@@ -607,19 +627,129 @@ namespace RakeMultiplayer
                 return;
             }
 
-            // A hunter who walks up to the sleeping Rake must not find a statue.
-            RepositionAwayFromHunters(dayKeepAwayDistance);
+            // The walker above handles the distance; the 10 s safety net only re-warpes when
+            // a hunter is standing on top of the Rake and walking away is not an option.
+            if (NearestPlayerDistance(transform.position) < 20f)
+            {
+                RepositionAwayFromHunters(dayKeepAwayDistance);
+            }
         }
 
         /// <summary>
         /// Silent daytime retreat: if a hunter is closer than <paramref name="minDistance"/>,
         /// warp the body to a reachable spot deeper in the trees.
         /// </summary>
-        private bool RepositionAwayFromHunters(float minDistance)
+        /// <summary>
+        /// Daytime keep-away, walking. The Rake stands still while the forest is empty and
+        /// walks deeper into the trees when a hunter closes in, instead of teleporting.
+        /// </summary>
+        private void UpdateDayRetreat()
         {
             Vector3 nearest;
             float distance = NearestPlayerDistance(transform.position, out nearest);
-            if (distance < 0f || distance >= minDistance) return false;
+
+            if (distance < 0f || distance >= dayKeepAwayDistance)
+            {
+                if (_dayRetreatActive)
+                {
+                    StopDayRetreat("hunter is " + distance.ToString("F0") + " m away");
+                }
+
+                // Nobody close: the Rake is not a statue for the whole day, it drifts
+                // through the trees. Standing still read as broken AI.
+                UpdateDayRoam();
+                return;
+            }
+
+            // A hunter on top of the Rake: there is no time to walk out of that, warp.
+            if (distance < 20f)
+            {
+                if (Time.time < _dayRetreatRepath) return;
+                _dayRetreatRepath = Time.time + 5f;
+                if (RepositionAwayFromHunters(dayKeepAwayDistance)) StopDayRetreat("warped out");
+                return;
+            }
+
+            if (_dayRetreatActive && Time.time < _dayRetreatRepath) return;
+            _dayRetreatRepath = Time.time + 1.5f;
+
+            Vector3 point;
+            if (!TryFindRetreatPoint(nearest, dayKeepAwayDistance, out point))
+            {
+                RakeMultiplayerPlugin.Log?.LogWarning("[AI] Day keep-away: no walkable spot for a hunter at " +
+                                                      distance.ToString("F0") + " m");
+                return;
+            }
+
+            _dayRetreatActive = true;
+            _dayRoamActive = false;
+            MoveToTarget(point, false, GetRunSpeed());
+            RakeMultiplayerPlugin.Log?.LogInfo("[AI] Day keep-away: walking away from a hunter at " +
+                                               distance.ToString("F0") + " m to " +
+                                               point.ToString("F1"));
+        }
+
+        /// <summary>
+        /// Slow daytime wandering: a new point in the trees every 15-30 s, walking pace,
+        /// silent. Only when no hunter is within the keep-away distance.
+        /// </summary>
+        private void UpdateDayRoam()
+        {
+            var agent = GetEnemyAgent();
+            if (agent == null || !agent.isOnNavMesh) return;
+
+            if (Time.time < _dayRoamNext) return;
+
+            if (_dayRoamActive && agent.hasPath && agent.remainingDistance > 1.5f) return;
+
+            if (_dayRoamActive)
+            {
+                // Arrived: stand for a moment before the next leg.
+                _dayRoamActive = false;
+                _dayRoamNext = Time.time + UnityEngine.Random.Range(6f, 14f);
+                return;
+            }
+
+            _dayRoamNext = Time.time + UnityEngine.Random.Range(15f, 30f);
+
+            for (int attempt = 0; attempt < 6; attempt++)
+            {
+                Vector2 offset = UnityEngine.Random.insideUnitCircle * 55f;
+                Vector3 candidate = transform.position + new Vector3(offset.x, 0f, offset.y);
+
+                NavMeshHit hit;
+                if (!NavMesh.SamplePosition(candidate, out hit, 12f, NavMesh.AllAreas)) continue;
+                if (NearestPlayerDistance(hit.position) < dayKeepAwayDistance) continue;
+
+                NavMeshPath path = new NavMeshPath();
+                if (!NavMesh.CalculatePath(transform.position, hit.position, NavMesh.AllAreas, path)) continue;
+                if (path.status != NavMeshPathStatus.PathComplete) continue;
+
+                _dayRoamActive = true;
+                MoveToTarget(hit.position, true, GetWalkSpeed());
+                return;
+            }
+        }
+
+        private void StopDayRetreat(string reason)
+        {
+            _dayRetreatActive = false;
+            _dayRetreatRepath = 0f;
+
+            var agent = GetEnemyAgent();
+            if (agent != null && agent.isOnNavMesh)
+            {
+                agent.Stop();
+                agent.ResetPath();
+            }
+
+            RakeMultiplayerPlugin.Log?.LogInfo("[AI] Day keep-away stopped (" + reason + ")");
+        }
+
+        /// <summary>Pick a reachable spot at least <paramref name="minDistance"/> from the hunter.</summary>
+        private bool TryFindRetreatPoint(Vector3 nearest, float minDistance, out Vector3 point)
+        {
+            point = transform.position;
 
             // CalculatePath below needs a valid start; a fall can leave the body off-mesh.
             TryRecoverAgent();
@@ -645,18 +775,33 @@ namespace RakeMultiplayer
                 if (!NavMesh.CalculatePath(transform.position, candidate, NavMesh.AllAreas, path)) continue;
                 if (path.status != NavMeshPathStatus.PathComplete) continue;
 
-                WarpAiBody(candidate);
-                RakeMultiplayerPlugin.Log?.LogInfo("[AI] Day keep-away: hunter at " +
-                                                   distance.ToString("F0") + " m, Rake moved to " +
-                                                   candidate.ToString("F1") + " (" +
-                                                   NearestPlayerDistance(candidate).ToString("F0") +
-                                                   " m away)");
+                point = candidate;
                 return true;
             }
 
-            RakeMultiplayerPlugin.Log?.LogWarning("[AI] Day keep-away: no safe spot found for a hunter at " +
-                                                  distance.ToString("F0") + " m");
             return false;
+        }
+
+        private bool RepositionAwayFromHunters(float minDistance)
+        {
+            Vector3 nearest;
+            float distance = NearestPlayerDistance(transform.position, out nearest);
+            if (distance < 0f || distance >= minDistance) return false;
+
+            Vector3 point;
+            if (!TryFindRetreatPoint(nearest, minDistance, out point))
+            {
+                RakeMultiplayerPlugin.Log?.LogWarning("[AI] Day keep-away: no safe spot found for a hunter at " +
+                                                      distance.ToString("F0") + " m");
+                return false;
+            }
+
+            WarpAiBody(point);
+            RakeMultiplayerPlugin.Log?.LogInfo("[AI] Day keep-away: hunter at " +
+                                               distance.ToString("F0") + " m, Rake warped to " +
+                                               point.ToString("F1") + " (" +
+                                               NearestPlayerDistance(point).ToString("F0") + " m away)");
+            return true;
         }
 
         private float NearestPlayerDistance(Vector3 position)

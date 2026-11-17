@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.1.10-alpha.1-Main - 2026-11-17
+
+Daytime Rake walks away from hunters instead of teleporting, and roams the forest
+instead of standing still.
+
 ## 1.1.9-alpha.1-Main - 2026-11-17
 
 A client can no longer load a level on its own (the host owns level changes); the
