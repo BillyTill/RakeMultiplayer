@@ -132,6 +132,14 @@ namespace RakeMultiplayer
         /// </summary>
         public void StartCycle(bool isNight = false, int startingNight = 0)
         {
+            if (!RakeMultiplayerPlugin.isServer)
+            {
+                // The client learns the phase from PhaseChangePacket; a local cycle
+                // would give it a second, independent clock.
+                RakeMultiplayerPlugin.Log?.LogWarning("[DayNight] client ignored StartCycle");
+                return;
+            }
+
             _currentPhase = isNight ? Phase.Night : Phase.Day;
             _nightNumber = startingNight;
             _phaseTimer = 0f;
@@ -195,6 +203,14 @@ namespace RakeMultiplayer
         /// </summary>
         private void TransitionPhase()
         {
+            // Only the host owns the clock. A client that reached this point changed
+            // its own phase, which is exactly "the day was skipped only for me".
+            if (!RakeMultiplayerPlugin.isServer)
+            {
+                RakeMultiplayerPlugin.Log?.LogWarning("[DayNight] client tried to transition the phase - ignored");
+                return;
+            }
+
             _currentPhase = (_currentPhase == Phase.Day) ? Phase.Night : Phase.Day;
 
             if (_currentPhase == Phase.Night)
@@ -204,7 +220,10 @@ namespace RakeMultiplayer
 
             _phaseTimer = 0f;
 
-            RakeMultiplayerPlugin.Log?.LogInfo($"[DayNightManager] Phase transition: {_currentPhase}, Night #{_nightNumber}");
+            RakeMultiplayerPlugin.Log?.LogInfo($"[DayNightManager] Phase transition: {_currentPhase}, Night #{_nightNumber}" +
+                                               " (server=" + RakeMultiplayerPlugin.isServer +
+                                               ", scene='" + Application.loadedLevelName +
+                                               "', rakeOwner=P" + LobbyState.RakeOwnerId + ")");
 
             // Start lighting transition
             _lightTransitionTimer = 0f;
@@ -435,7 +454,9 @@ namespace RakeMultiplayer
             // Fire event for local listeners
             OnPhaseChanged?.Invoke(_currentPhase, packet.RemainingTime, _nightNumber);
 
-            RakeMultiplayerPlugin.Log?.LogInfo($"[DayNightManager] Client received phase: {_currentPhase}, Remaining: {packet.RemainingTime:F1}s, Night: {_nightNumber + 1}");
+            RakeMultiplayerPlugin.Log?.LogInfo($"[DayNightManager] Client received phase: {_currentPhase}, Remaining: {packet.RemainingTime:F1}s, Night: {_nightNumber + 1}" +
+                                               " (scene='" + Application.loadedLevelName +
+                                               "', matches=" + LevelMatchesPhase(_currentPhase, Application.loadedLevelName) + ")");
         }
 
         private void LateUpdate()

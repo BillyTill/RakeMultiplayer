@@ -364,6 +364,16 @@ namespace RakeMultiplayer
 
         private void OnServerClientConnected(int connectionId)
         {
+            // Telepathy can raise Connected twice for the same id (a reconnect).
+            // Handling it twice registered the player, spawned the proxy and broadcast
+            // PlayerConnected two times for one person.
+            if (_connectedClients.Contains(connectionId))
+            {
+                RakeMultiplayerPlugin.Log?.LogWarning("[Net] duplicate Connected for C" + connectionId +
+                                                      " - ignored");
+                return;
+            }
+
             try
             {
                 RakeMultiplayerPlugin.Log?.LogInfo($"[Net] Server: client {connectionId} connected");
@@ -393,7 +403,21 @@ namespace RakeMultiplayer
                 Vector3 hostPos = _hostSpawnPositionSet ? _hostSpawnPosition : Vector3.zero;
                 if (!_hostSpawnPositionSet)
                 {
-                    RakeMultiplayerPlugin.Log?.LogWarning("[Net] Host spawn pos not set. Sending Vector3.zero.");
+                    // The host may be the Rake and have no hunter body at all. Sending
+                    // (0,0,0) made every client put a phantom at the world origin.
+                    var rakeBody = RakeHighlight.FindRake();
+                    if (RakePlayerController.IsActive && rakeBody != null)
+                    {
+                        hostPos = rakeBody.position;
+                        _hostSpawnPosition = hostPos;
+                        _hostSpawnPositionSet = true;
+                        RakeMultiplayerPlugin.Log?.LogInfo("[Net] Host is the Rake - spawn position " +
+                                                           hostPos.ToString("F1"));
+                    }
+                    else
+                    {
+                        RakeMultiplayerPlugin.Log?.LogWarning("[Net] Host spawn pos not set. Sending Vector3.zero.");
+                    }
                 }
                 _playerNames[1] = RakeMultiplayerPlugin.PlayerName.Value;
                 var hostPacket = new PlayerConnectedPacket

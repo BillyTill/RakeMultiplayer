@@ -792,6 +792,8 @@ namespace RakeMultiplayer.Core
                 sb.Append(",\"paused\":").Append(pauseMenu != null && pauseMenu.isPaused ? "true" : "false");
                 sb.Append(",\"invariants\":").Append(Invariants.Violations);
                 sb.Append(",\"protocol\":").Append(RakeMultiplayer.Networking.Protocol.Version);
+                var dayNight = DayNightManager.Instance;
+                sb.Append(",\"dayNightPhase\":\"").Append(dayNight != null && dayNight.IsRunning ? dayNight.CurrentPhase.ToString() : "idle").Append('"');
                 sb.Append(",\"rakeOwner\":").Append(LobbyState.RakeOwnerId);
                 sb.Append(",\"localId\":").Append(LobbyState.LocalPlayerId);
                 sb.Append(",\"rakePlaying\":").Append(RakePlayerController.IsActive ? "true" : "false");

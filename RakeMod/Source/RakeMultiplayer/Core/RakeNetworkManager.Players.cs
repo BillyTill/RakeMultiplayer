@@ -659,6 +659,36 @@ namespace RakeMultiplayer
                 return;
             }
 
+            // Never make a body for ourselves. The host announces the joining player to
+            // everybody with IsYou=false, so this packet arrives back at its own client and
+            // used to spawn a second copy of the local player.
+            int selfId = _pendingLocalPlayerId;
+            if (selfId <= 0 && PlayerSpawner.Instance.LocalPlayer != null)
+            {
+                selfId = PlayerSpawner.Instance.LocalPlayer.PlayerId;
+            }
+            if (packet.PlayerId == selfId)
+            {
+                if (PlayerSpawner.Instance.TryGetRemotePlayer(packet.PlayerId, out _))
+                {
+                    PlayerSpawner.Instance.RemoveRemotePlayer(packet.PlayerId);
+                    RakeMultiplayerPlugin.Log?.LogInfo("[Visual] dropped self-proxy P" + packet.PlayerId);
+                }
+                return;
+            }
+
+            // The Rake owner has no hunter body on any peer.
+            if (LobbyState.IsRakeOwner(packet.PlayerId))
+            {
+                if (PlayerSpawner.Instance.TryGetRemotePlayer(packet.PlayerId, out _))
+                {
+                    PlayerSpawner.Instance.RemoveRemotePlayer(packet.PlayerId);
+                    RakeMultiplayerPlugin.Log?.LogInfo("[Visual] dropped hunter proxy P" + packet.PlayerId +
+                                                       " (owns the Rake)");
+                }
+                return;
+            }
+
             // Otherwise spawn remote player
             PlayerSpawner.Instance.SpawnRemotePlayer(packet.PlayerId, packet.SpawnPosition);
         }

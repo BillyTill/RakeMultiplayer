@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.8-alpha.1-Main - 2026-11-17
+
+Client no longer spawns a proxy for itself or for the Rake owner; a client cannot
+start or advance the day/night cycle; one Connected event per client; host-as-Rake
+announces the Rake position instead of the world origin.
+
 ## 1.1.7-alpha.1-Main - 2026-11-17
 
 Install integrity: the installer writes a SHA-256 manifest and the mod verifies it,

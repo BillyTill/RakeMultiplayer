@@ -366,7 +366,15 @@ namespace RakeMultiplayer
                 }
                 else
                 {
-                    RakeMultiplayerPlugin.Log?.LogWarning($"[NetworkedCamera] CameraId {_cameraId} already in registry, replacing");
+                    NetworkedCamera existing;
+                    bool other = _cameraRegistry.TryGetValue(_cameraId, out existing) &&
+                                 existing != null && existing != this;
+
+                    if (other)
+                    {
+                        RakeMultiplayerPlugin.Log?.LogWarning($"[NetworkedCamera] CameraId {_cameraId} already in registry, replacing");
+                    }
+
                     _cameraRegistry[_cameraId] = this;
                 }
             }

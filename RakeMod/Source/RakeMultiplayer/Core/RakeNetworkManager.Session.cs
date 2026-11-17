@@ -106,6 +106,9 @@ namespace RakeMultiplayer
 
         private void ApplyNetworkLevelChange(int levelIndex)
         {
+            RakeMultiplayerPlugin.Log?.LogInfo("[Level] applying network level " + levelIndex +
+                                               " (server=" + RakeMultiplayerPlugin.isServer +
+                                               ", current=" + UnityEngine.Application.loadedLevel + ")");
             IsApplyingNetworkLevelChange = true;
             try
             {

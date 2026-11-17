@@ -1,4 +1,4 @@
-# Rake Multiplayer 1.1.7-alpha.1-Main
+# Rake Multiplayer 1.1.8-alpha.1-Main
 
 > **Main build.** This release is built from the `master` (Main) branch: graphics
 > presets, the day/night level change, the HUD phase fix and the climbing guards.
@@ -195,6 +195,28 @@ and a client no longer disconnects itself when it clicks the button.
 - Dropped loot is deduplicated per weapon type; trap placement is bounds- and distance-checked.
 - HUD night counter follows the configured night count; the weapon diagnostic dump moved to
   F9 (it shared F8 with the performance overlay); the lobby title is no longer overwritten.
+
+## What changed in 1.1.8
+
+**No more phantom players on the client.** The host announces a joining player to everybody
+with `IsYou=false`, so that player's own client made a hunter body for itself as well - and
+the host, who owns the Rake, got one too. That is the "two players next to the Rake" report.
+A client now never builds a body for its own id, and never for the Rake owner; an existing
+proxy is removed when either fact becomes known.
+
+**A client cannot move the day/night clock.** `StartCycle` and the phase transition are
+host-only now and refuse on a client, logging the refusal. A client that changed its own
+phase is what "the day is skipped only for me" looks like.
+
+**One connection event per client.** A repeated `Connected` from the transport used to
+register the player, spawn the proxy and broadcast `PlayerConnected` twice.
+
+**Host-as-Rake announces the Rake position.** With no hunter body the host sent `(0,0,0)`
+as its spawn, which put a phantom at the world origin on every client.
+
+**Quieter, more useful log.** Each phase transition now logs the side, the scene and the Rake
+owner; `/state` reports the phase. If a phase problem survives, those lines say which side
+did what.
 
 ## What changed in 1.1.7
 
