@@ -19,12 +19,15 @@ namespace RakeMultiplayer.Patches
         [HarmonyPatch(typeof(Application), "LoadLevel", new Type[] { typeof(string) })]
         public class ApplicationLoadLevelPatch
         {
-            static void Prefix(string name)
+            static bool Prefix(string name)
             {
-                if (!RakeMultiplayerPlugin.Enabled.Value) return;
+                if (!RakeMultiplayerPlugin.Enabled.Value) return true;
+                if (BlockClientLevelLoad(name)) return false;
+
                 RakeMultiplayerPlugin.Log?.LogInfo($"[GameEntryPatch] Scene load requested: {name}");
                 _isSceneLoading = true;
                 OnSceneChangeStart(name);
+                return true;
             }
 
             static void Postfix(string name)
@@ -64,12 +67,15 @@ namespace RakeMultiplayer.Patches
         [HarmonyPatch(typeof(Application), "LoadLevel", new Type[] { typeof(int) })]
         public class ApplicationLoadLevelIntPatch
         {
-            static void Prefix(int index)
+            static bool Prefix(int index)
             {
-                if (!RakeMultiplayerPlugin.Enabled.Value) return;
+                if (!RakeMultiplayerPlugin.Enabled.Value) return true;
+                if (BlockClientLevelLoad(index.ToString())) return false;
+
                 RakeMultiplayerPlugin.Log?.LogInfo($"[GameEntryPatch] Scene load requested (index): {index}");
                 _isSceneLoading = true;
                 OnSceneChangeStart(index.ToString());
+                return true;
             }
 
             static void Postfix(int index)
@@ -81,6 +87,41 @@ namespace RakeMultiplayer.Patches
         /// <summary>
         /// Called when scene change starts - cleanup networking state BEFORE new scene loads
         /// </summary>
+        /// <summary>
+        /// In a session only the host decides which level is loaded. A client that loads a
+        /// level locally - the vanilla GameTimer, a stray menu path, anything - ends up in a
+        /// different level than everybody else, which reads as "the day was skipped only for
+        /// me". The main menu is always allowed, so leaving still works.
+        /// </summary>
+        private static bool BlockClientLevelLoad(string what)
+        {
+            if (!RakeMultiplayerPlugin.Enabled.Value) return false;
+            if (!RakeMultiplayerPlugin.isConnected) return false;
+            if (RakeMultiplayerPlugin.isServer) return false;
+            if (RakeNetworkManager.IsApplyingNetworkLevelChange) return false;
+            if (what == "0" || what.StartsWith("MainMenu", StringComparison.OrdinalIgnoreCase) ||
+                what.StartsWith("Menu", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            string caller = "?";
+            try
+            {
+                var frames = new System.Diagnostics.StackTrace(1, false);
+                if (frames.FrameCount > 0 && frames.GetFrame(0).GetMethod() != null)
+                {
+                    caller = frames.GetFrame(0).GetMethod().DeclaringType.Name + "." +
+                             frames.GetFrame(0).GetMethod().Name;
+                }
+            }
+            catch { }
+
+            RakeMultiplayerPlugin.Log?.LogWarning("[Level] client refused a local load of '" + what +
+                                                  "' (asked by " + caller + "); the host owns level changes");
+            return true;
+        }
+
         private static void OnSceneChangeStart(string sceneName)
         {
             // A load can start while someone is paused (Time.timeScale = 0). The new

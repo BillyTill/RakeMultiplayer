@@ -170,6 +170,8 @@ namespace RakeMultiplayer
             RakeMultiplayerPlugin.Log?.LogInfo("[DayNightManager] Cycle stopped");
         }
 
+        private float _lastDiagTime = -30f;
+
         private void Update()
         {
             if (!_isRunning || !_initialized) return;
@@ -189,6 +191,16 @@ namespace RakeMultiplayer
             if (Mathf.FloorToInt(_phaseTimer) != Mathf.FloorToInt(before))
             {
                 BroadcastPhaseChange();
+            }
+
+            // A silent countdown made "the host phase never changed" impossible to tell
+            // apart from "the host phase is fine, the client is wrong". One line every 30 s.
+            if (_phaseTimer - _lastDiagTime >= 30f)
+            {
+                _lastDiagTime = _phaseTimer;
+                RakeMultiplayerPlugin.Log?.LogInfo("[DayNight] tick: " + _currentPhase +
+                                                   ", " + Mathf.Max(0f, phaseDuration - _phaseTimer).ToString("F0") +
+                                                   "s left, server=" + RakeMultiplayerPlugin.isServer);
             }
 
             // Check for phase transition

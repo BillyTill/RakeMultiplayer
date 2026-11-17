@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.1.9-alpha.1-Main - 2026-11-17
+
+A client can no longer load a level on its own (the host owns level changes); the
+host logs its countdown every 30 seconds so "phase did not change" is visible.
+
 ## 1.1.8-alpha.1-Main - 2026-11-17
 
 Client no longer spawns a proxy for itself or for the Rake owner; a client cannot

@@ -1,4 +1,4 @@
-# Rake Multiplayer 1.1.8-alpha.1-Main
+# Rake Multiplayer 1.1.9-alpha.1-Main
 
 > **Main build.** This release is built from the `master` (Main) branch: graphics
 > presets, the day/night level change, the HUD phase fix and the climbing guards.
@@ -195,6 +195,29 @@ and a client no longer disconnects itself when it clicks the button.
 - Dropped loot is deduplicated per weapon type; trap placement is bounds- and distance-checked.
 - HUD night counter follows the configured night count; the weapon diagnostic dump moved to
   F9 (it shared F8 with the performance overlay); the lobby title is no longer overwritten.
+
+## What changed in 1.1.9
+
+**A client can no longer load a level on its own.** Every `Application.LoadLevel` on a
+client that is not part of a network level change is now refused, with the caller in the log:
+
+```
+[Level] client refused a local load of 'Level_1(Night)' (asked by GameTimer.loadLevel);
+        the host owns level changes
+```
+
+This is the class behind "the day is skipped only for me": whoever asked for the load - the
+vanilla GameTimer, a stray menu path, a stale coroutine - the client now stays in the level
+the host put it in. The main menu is always allowed, so leaving still works.
+
+**The host countdown is visible.** Once every 30 seconds:
+
+```
+[DayNight] tick: Day, 245s left, server=True
+```
+
+If the phase never changes again, this line tells whether the host clock is stopped (the
+same number forever) or the client was simply ahead.
 
 ## What changed in 1.1.8
 
