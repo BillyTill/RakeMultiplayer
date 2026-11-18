@@ -71,6 +71,9 @@ namespace RakeMultiplayer
                 SceneScope.CheckCleanState("after load");
                 RegisterSceneObjects(manager);
 
+                // Items the players already took must not come back with the new level.
+                WorldPersistence.ApplyConsumedItems();
+
                 // Any player may own the Rake: host, client or the AI.
                 RakeControlSync.Apply("scene loaded");
 

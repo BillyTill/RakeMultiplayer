@@ -137,6 +137,9 @@ namespace RakeMultiplayer.Patches
             {
                 WorldPersistence.SaveWorld();
             }
+
+            // Both sides: which items are already taken. The new level rebuilds its items.
+            WorldPersistence.SaveConsumedItems();
             // Every process-wide subsystem that belongs to the old level. Input locks,
             // network ids, cameras, traps and deaths used to be reset by hand in different
             // patches; one missed line left state in the next level. The snapshot above must

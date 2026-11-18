@@ -1,4 +1,4 @@
-# Rake Multiplayer 1.1.18-alpha.1-Main
+# Rake Multiplayer 1.1.19-alpha.1-Main
 
 > **Main build.** This release is built from the `master` (Main) branch: graphics
 > presets, the day/night level change, the HUD phase fix and the climbing guards.
@@ -195,6 +195,20 @@ and a client no longer disconnects itself when it clicks the button.
 - Dropped loot is deduplicated per weapon type; trap placement is bounds- and distance-checked.
 - HUD night counter follows the configured night count; the weapon diagnostic dump moved to
   F9 (it shared F8 with the performance overlay); the lobby title is no longer overwritten.
+
+## What changed in 1.1.19
+
+**Items you picked up no longer come back at dawn.** The day/night change reloads the level,
+which rebuilds every item object, and the list of what was already taken was cleared with the
+old scene - so the whole map refilled. The list of taken item ids is now captured before the
+level unloads and re-applied after the new level registers its items:
+
+```
+[Scene] 3 picked-up item(s) stay gone after the level change
+```
+
+Both sides keep their own list: the host records a pickup when it handles it, a client records
+the `ItemDestroyed` it receives (and a late joiner gets the full list in the join snapshot).
 
 ## What changed in 1.1.18
 

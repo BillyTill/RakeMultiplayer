@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.1.19-alpha.1-Main - 2026-11-18
+
+Items picked up stay gone after a level change instead of reappearing at dawn.
+
 ## 1.1.18-alpha.1-Main - 2026-11-18
 
 Skipping the phase from a client now asks the host (PhaseSkipRequest) instead of

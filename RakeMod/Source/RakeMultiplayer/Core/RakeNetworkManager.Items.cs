@@ -182,6 +182,40 @@ namespace RakeMultiplayer
         }
 
         /// <summary>Server: register a dropped item with a shared id.</summary>
+        /// <summary>Copy the ids of items that are already gone (for the level snapshot).</summary>
+        public void CaptureConsumedItems(List<int> into)
+        {
+            into.Clear();
+            foreach (var id in _consumedItemIds) into.Add(id);
+        }
+
+        /// <summary>
+        /// The new level re-created every item object. Remove the ones that were picked up
+        /// before the level change, so a new day does not hand the loot back.
+        /// </summary>
+        public void RemoveSceneItems(List<int> ids)
+        {
+            int removed = 0;
+
+            for (int i = 0; i < ids.Count; i++)
+            {
+                Item item;
+                if (!_networkedItems.TryGetValue(ids[i], out item) || item == null) continue;
+
+                _networkedItems.Remove(ids[i]);
+                _itemToNetworkId.Remove(item);
+                _consumedItemIds.Add(ids[i]);
+                UnityEngine.Object.Destroy(item.gameObject);
+                removed++;
+            }
+
+            if (removed > 0)
+            {
+                RakeMultiplayerPlugin.Log?.LogInfo("[Scene] " + removed +
+                                                   " picked-up item(s) stay gone after the level change");
+            }
+        }
+
         public int RegisterDroppedItem(Item item)
         {
             if (item == null || !RakeMultiplayerPlugin.isServer) return 0;
@@ -213,6 +247,10 @@ namespace RakeMultiplayer
                 }
             }
             _pendingPickups.Remove(packet.ItemNetworkId);
+
+            // Remember it locally too: the new level rebuilds its items, and a client has no
+            // other way to know what it already took (the host only broadcasts on pickup).
+            if (packet.ItemNetworkId > 0) _consumedItemIds.Add(packet.ItemNetworkId);
 
             string itemType = !string.IsNullOrEmpty(packet.ItemType)
                 ? packet.ItemType

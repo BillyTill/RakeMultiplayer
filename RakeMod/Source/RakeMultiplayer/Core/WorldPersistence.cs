@@ -33,6 +33,10 @@ namespace RakeMultiplayer
         private static readonly Dictionary<int, List<int>> _inventories = new Dictionary<int, List<int>>();
         private static float _rakeHealth = -1f;
 
+        // Item ids that were already picked up. The level rebuilds its items on every load,
+        // so without this list everything you picked up came back at dawn.
+        private static readonly List<int> _consumedItems = new List<int>();
+
         /// <summary>Capture cameras, traps and Rake health (server only for world state).</summary>
         public static void SaveWorld()
         {
@@ -130,6 +134,24 @@ namespace RakeMultiplayer
         }
 
         /// <summary>Restore the local player's weapon ammo list after a scene change.</summary>
+        /// <summary>Remember which items are gone. Runs on every peer, before the level unloads.</summary>
+        public static void SaveConsumedItems()
+        {
+            _consumedItems.Clear();
+
+            var manager = RakeNetworkManager.Instance;
+            if (manager != null) manager.CaptureConsumedItems(_consumedItems);
+        }
+
+        /// <summary>After the new level rebuilt its items, remove the ones already taken.</summary>
+        public static void ApplyConsumedItems()
+        {
+            if (_consumedItems.Count == 0) return;
+
+            var manager = RakeNetworkManager.Instance;
+            if (manager != null) manager.RemoveSceneItems(_consumedItems);
+        }
+
         public static void RestoreInventory(NetworkedPlayer player)
         {
             if (player == null) return;
@@ -161,6 +183,7 @@ namespace RakeMultiplayer
             _cameraStates.Clear();
             _trapStates.Clear();
             _inventories.Clear();
+            _consumedItems.Clear();
             _rakeHealth = -1f;
         }
     }

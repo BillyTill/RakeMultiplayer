@@ -605,6 +605,26 @@ namespace RakeMultiplayer.Core
                     }));
                     return;
                 }
+                if (target == "/item")
+                {
+                    string consume = Get(args, "consume");
+
+                    SendJson(client, RunOnMain(delegate
+                    {
+                        var manager = RakeNetworkManager.Instance;
+                        if (manager == null) return "{\"ok\":false,\"error\":\"no network manager\"}";
+                        if (string.IsNullOrEmpty(consume))
+                            return "{\"ok\":false,\"error\":\"pass ?consume=<itemNetworkId>\"}";
+
+                        int id;
+                        if (!int.TryParse(consume, out id) || id <= 0)
+                            return "{\"ok\":false,\"error\":\"bad id\"}";
+
+                        manager.RemoveSceneItems(new System.Collections.Generic.List<int> { id });
+                        return "{\"ok\":true,\"consumed\":" + id + "}";
+                    }));
+                    return;
+                }
                 if (target == "/ai")
                 {
                     string go = Get(args, "go");
