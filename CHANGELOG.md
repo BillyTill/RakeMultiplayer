@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.1.11-alpha.1-Main - 2026-11-18
+
+Daytime Rake: patrol, run away when a hunter comes closer than 60 m, stop at 90 m,
+patrol again. Day skip keeps the phase and the level in sync (verified on a solo host).
+
 ## 1.1.10-alpha.1-Main - 2026-11-17
 
 Daytime Rake walks away from hunters instead of teleporting, and roams the forest

@@ -1,4 +1,4 @@
-# Rake Multiplayer 1.1.10-alpha.1-Main
+# Rake Multiplayer 1.1.11-alpha.1-Main
 
 > **Main build.** This release is built from the `master` (Main) branch: graphics
 > presets, the day/night level change, the HUD phase fix and the climbing guards.
@@ -195,6 +195,24 @@ and a client no longer disconnects itself when it clicks the button.
 - Dropped loot is deduplicated per weapon type; trap placement is bounds- and distance-checked.
 - HUD night counter follows the configured night count; the weapon diagnostic dump moved to
   F9 (it shared F8 with the performance overlay); the lobby title is no longer overwritten.
+
+## What changed in 1.1.11
+
+**The daytime Rake patrols and runs away on a 60 m trigger.** It walks between points in the
+forest; the moment a hunter comes closer than 60 m it runs to a spot 130 m out and does not
+stop until the hunter is 90 m behind (without that hysteresis it froze exactly on the 60 m
+line). Then it patrols again. That is the loop that was asked for.
+
+**Day skip: phase and level stay in agreement.** Verified on a solo host: skipping the day
+now gives `dayNightPhase: Night`, scene `Level_1(Night)`, `phaseMatchesLevel: true`, and the
+timer restarts at the night duration. If a level ever refuses to load, the host says so in the
+log and keeps the phase matching the level it is actually standing in, instead of showing a
+phase the world does not have.
+
+Note for the previous build: `Application.LoadLevel` applies the scene on the next frame here,
+so a "the name is still the old one" check right after the call is meaningless - the mismatch
+watcher compares over time instead. That check existed for one build and reverted the phase by
+mistake; it is gone.
 
 ## What changed in 1.1.10
 

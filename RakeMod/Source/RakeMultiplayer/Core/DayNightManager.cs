@@ -361,6 +361,11 @@ namespace RakeMultiplayer
             // The load is synchronous, so nothing else closes the overlay: without this
             // the screen stayed at 90% over the new level and swallowed the input.
             UI.LoadingScreen.Hide();
+
+            // Deliberately no check here: Application.LoadLevel applies the scene on the next
+            // frame in this build, so "the name is still the old one" right after the call
+            // means nothing. A genuinely failed load is caught by the mismatch watcher,
+            // which compares phase and level over time instead of guessing from one frame.
         }
 
         /// <summary>

@@ -574,7 +574,7 @@ namespace RakeMultiplayer
         /// Move it to the forest instead, once per day phase.
         /// </summary>
         [Tooltip("During the day the AI Rake keeps at least this far from every hunter.")]
-        public float dayKeepAwayDistance = 90f;
+        public float dayKeepAwayDistance = 60f;
 
         private void UpdateDaySpawn()
         {
@@ -648,7 +648,9 @@ namespace RakeMultiplayer
             Vector3 nearest;
             float distance = NearestPlayerDistance(transform.position, out nearest);
 
-            if (distance < 0f || distance >= dayKeepAwayDistance)
+            // Start at 60 m, keep running until 90 m: stopping exactly at the start
+            // threshold made the Rake freeze mid-run the moment it crossed 60 m.
+            if (distance < 0f || distance >= dayKeepAwayDistance + 30f)
             {
                 if (_dayRetreatActive)
                 {
