@@ -588,6 +588,22 @@ namespace RakeMultiplayer.Core
                     }));
                     return;
                 }
+                if (target == "/aipanel")
+                {
+                    string on = Get(args, "on");
+                    SendJson(client, RunOnMain(delegate
+                    {
+                        var panel = UnityEngine.Object.FindObjectOfType<UI.RakeStatusPanel>();
+                        if (panel == null) return "{\"ok\":false,\"error\":\"no panel\"}";
+
+                        bool want = on == "1" || string.Equals(on, "true", StringComparison.OrdinalIgnoreCase);
+                        panel.SetVisibleFromBridge(want);
+
+                        return "{\"ok\":true,\"visible\":" + (want ? "true" : "false") +
+                               ",\"highlight\":" + (RakeHighlight.IsActive ? "true" : "false") + "}";
+                    }));
+                    return;
+                }
                 if (target == "/ai")
                 {
                     string go = Get(args, "go");

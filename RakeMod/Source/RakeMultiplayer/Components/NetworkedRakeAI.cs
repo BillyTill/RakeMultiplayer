@@ -689,15 +689,13 @@ namespace RakeMultiplayer
 
             if (_dayRoamActive)
             {
-                // Arrived: stand for a moment before the next leg.
+                // Arrived: a short pause, not a long stand.
                 _dayRoamActive = false;
-                _dayRoamNext = Time.time + UnityEngine.Random.Range(6f, 14f);
+                _dayRoamNext = Time.time + UnityEngine.Random.Range(2f, 5f);
                 return;
             }
 
-            _dayRoamNext = Time.time + UnityEngine.Random.Range(15f, 30f);
-
-            for (int attempt = 0; attempt < 6; attempt++)
+            for (int attempt = 0; attempt < 8; attempt++)
             {
                 Vector2 offset = UnityEngine.Random.insideUnitCircle * 55f;
                 Vector3 candidate = transform.position + new Vector3(offset.x, 0f, offset.y);
@@ -711,15 +709,27 @@ namespace RakeMultiplayer
                 if (path.status != NavMeshPathStatus.PathComplete) continue;
 
                 _dayRoamActive = true;
+                _dayRoamNext = Time.time + UnityEngine.Random.Range(12f, 22f);
                 MoveToTarget(hit.position, true, GetWalkSpeed());
+                RakeMultiplayerPlugin.Log?.LogInfo("[AI] Day patrol: walking to " +
+                                                   hit.position.ToString("F1"));
                 return;
             }
+
+            // Nothing walkable was found this time; try again soon instead of standing
+            // for the whole patrol interval.
+            _dayRoamNext = Time.time + 3f;
         }
 
         private void StopDayRetreat(string reason)
         {
             _dayRetreatActive = false;
             _dayRetreatRepath = 0f;
+
+            // The patrol timers were set before the flee. Without this the Rake stood still
+            // for up to 30 s after getting away, which read as "it ran and then froze".
+            _dayRoamActive = false;
+            _dayRoamNext = 0f;
 
             var agent = GetEnemyAgent();
             if (agent != null && agent.isOnNavMesh)
@@ -2684,6 +2694,13 @@ namespace RakeMultiplayer
 
             sb.AppendLine("HEALTH     " + GetCurrentHealth().ToString("F0") + "/" + MaxHealth.ToString("F0"));
             sb.AppendLine("ATTACK     cooldown=" + _attackCooldown.ToString("F2") + " s   swing=" + _attackSwing + "   struck=" + _attackStruck + "   range=" + attackRange.ToString("F1") + " m");
+            var dayCycle = DayNightManager.Instance;
+            bool isDay = dayCycle != null && dayCycle.IsRunning && dayCycle.CurrentPhase == Phase.Day;
+            sb.AppendLine("DAY        phase=" + (isDay ? "Day" : "Night") +
+                          "   flee=" + _dayRetreatActive +
+                          "   patrol=" + _dayRoamActive +
+                          "   next=" + Mathf.Max(0f, _dayRoamNext - Time.time).ToString("F1") + " s" +
+                          "   keepAway=" + dayKeepAwayDistance.ToString("F0") + " m");
             sb.AppendLine("NOISE      cooldown=" + _noiseCooldown.ToString("F1") + " s   hearRange=" + noiseHearRange.ToString("F0") + " m");
             return sb.ToString();
         }

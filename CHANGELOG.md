@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.1.13-alpha.1-Main - 2026-11-18
+
+Daytime Rake resumes patrolling right after a flee; the F7 AI panel highlights the Rake
+while it is open.
+
 ## 1.1.12-alpha.1-Main - 2026-11-18
 
 Daytime Rake never teleports: it outruns the hunter (9+ m/s vs 8) and keeps running

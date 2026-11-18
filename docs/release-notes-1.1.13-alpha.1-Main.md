@@ -1,4 +1,4 @@
-# Rake Multiplayer 1.1.12-alpha.1-Main
+# Rake Multiplayer 1.1.13-alpha.1-Main
 
 > **Main build.** This release is built from the `master` (Main) branch: graphics
 > presets, the day/night level change, the HUD phase fix and the climbing guards.
@@ -195,6 +195,24 @@ and a client no longer disconnects itself when it clicks the button.
 - Dropped loot is deduplicated per weapon type; trap placement is bounds- and distance-checked.
 - HUD night counter follows the configured night count; the weapon diagnostic dump moved to
   F9 (it shared F8 with the performance overlay); the lobby title is no longer overwritten.
+
+## What changed in 1.1.13
+
+**It no longer freezes after running away.** The patrol timers were set before the flee, so
+after stopping at 90 m it stood still for up to 30 s. Stopping a flee now clears them and the
+patrol starts immediately, with a short 2-5 s pause between legs instead of a long stand.
+
+**F7 now highlights the Rake.** The panel already existed (`RAKE // AI STATE`, F7) and shows
+the same report the dev bridge returns: state, previous state, role, target and distance,
+encounter and why it ended, next task countdown, lurk watch, agent speed and remaining path,
+health, attack cooldown, and a day line with `flee` / `patrol` flags. While it is open the
+Rake is highlighted so the numbers can be matched to a body in the world; closing the panel
+releases the highlight (only if the panel turned it on).
+
+```
+STATE      Idle   (prev Flee, 1.2 s)
+DAY        phase=Day   flee=False   patrol=True   next=3.4 s   keepAway=60 m
+```
 
 ## What changed in 1.1.12
 

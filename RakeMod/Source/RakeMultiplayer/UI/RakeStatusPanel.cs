@@ -19,6 +19,7 @@ namespace RakeMultiplayer.UI
 
         private Transform _rake;
         private NetworkedRakeAI _ai;
+        private bool _highlightOwned;
         private float _refreshTimer;
         private string _report = "";
 
@@ -28,8 +29,7 @@ namespace RakeMultiplayer.UI
                 (!DebugConsole.ConsoleOpen && !MultiplayerMenu.IsOpen) &&
                 Application.loadedLevel >= 1)
             {
-                _visible = !_visible;
-                if (_visible) _refreshTimer = 0f;
+                SetVisible(!_visible);
             }
 
             if (!_visible) return;
@@ -50,6 +50,38 @@ namespace RakeMultiplayer.UI
             }
 
             _report = _ai.GetAiStatusReport();
+        }
+
+        /// <summary>
+        /// While the panel is open the Rake is highlighted, so the numbers on the right can
+        /// be matched to a body in the world. The highlight is released again on close, and
+        /// only if the panel was the one that turned it on.
+        /// </summary>
+        private void SetVisible(bool visible)
+        {
+            _visible = visible;
+
+            if (visible)
+            {
+                _refreshTimer = 0f;
+
+                if (!RakeHighlight.IsActive)
+                {
+                    RakeHighlight.SetEnabled(true);
+                    _highlightOwned = true;
+                }
+            }
+            else if (_highlightOwned)
+            {
+                RakeHighlight.SetEnabled(false);
+                _highlightOwned = false;
+            }
+        }
+
+        /// <summary>Dev bridge: open/close the panel from a script.</summary>
+        internal void SetVisibleFromBridge(bool visible)
+        {
+            SetVisible(visible);
         }
 
         private void EnsureStyles()
@@ -97,7 +129,7 @@ namespace RakeMultiplayer.UI
             GUI.DrawTexture(new Rect(rect.x, rect.y, rect.width, 3f), _accent, ScaleMode.StretchToFill);
 
             GUI.Label(new Rect(rect.x, rect.y + 3f, rect.width, 22f),
-                      "RAKE // AI STATE      [F7]", _title);
+                      "RAKE // AI STATE      [F7]   highlighted", _title);
 
             GUI.Label(new Rect(rect.x + 2f, rect.y + 26f, rect.width - 4f, rect.height - 30f),
                       _report, _body);
@@ -105,6 +137,7 @@ namespace RakeMultiplayer.UI
 
         private void OnDestroy()
         {
+            if (_highlightOwned) RakeHighlight.SetEnabled(false);
             if (_background != null) Destroy(_background);
             if (_accent != null) Destroy(_accent);
         }
