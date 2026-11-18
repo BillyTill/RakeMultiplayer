@@ -2355,6 +2355,20 @@ namespace RakeMultiplayer
         /// Host-side animation for the mod brain. The vanilla Enemy_AI is disabled, so
         /// the stalk/crouch/freeze poses are driven from the state machine.
         /// </summary>
+        /// <summary>
+        /// Vanilla animator scale: 0 idle, 1 walk, 2 run. Taken from the agent's actual
+        /// velocity, because the state alone does not say whether the body is moving.
+        /// </summary>
+        private float MovementSpeedParameter()
+        {
+            var agent = GetEnemyAgent();
+            float velocity = agent != null ? agent.velocity.magnitude : 0f;
+
+            if (velocity < 0.25f) return 0f;
+            if (velocity >= 6f) return 2f;
+            return 1f;
+        }
+
         private void UpdateAiAnimation()
         {
             if (animator == null) return;
@@ -2414,10 +2428,20 @@ namespace RakeMultiplayer
                     break;
 
                 case RakeState.Idle:
+                    // During the day the combat state stays Idle while the body walks its
+                    // patrol (or runs away), so a hard Speed = 0 played the idle clip and the
+                    // Rake slid across the ground. Drive it from real movement.
                     animator.speed = 1f;
                     animator.SetBool("bCrouch", false);
                     animator.SetBool("bAttack", false);
                     animator.SetInteger("WalkType", 1);
+                    animator.SetFloat("Speed", MovementSpeedParameter());
+                    break;
+
+                case RakeState.Stunned:
+                case RakeState.Dead:
+                    animator.speed = 1f;
+                    animator.SetBool("bAttack", false);
                     animator.SetFloat("Speed", 0f);
                     break;
             }
@@ -2745,6 +2769,14 @@ namespace RakeMultiplayer
                           "   patrol=" + patrolState +
                           "   next=" + Mathf.Max(0f, _dayRoamNext - Time.time).ToString("F1") + " s" +
                           "   keepAway=" + dayKeepAwayDistance.ToString("F0") + " m");
+            if (animator != null)
+            {
+                sb.AppendLine("ANIM       speed=" + animator.GetFloat("Speed").ToString("F0") +
+                              "   walkType=" + animator.GetInteger("WalkType") +
+                              "   crouch=" + animator.GetBool("bCrouch") +
+                              "   attack=" + animator.GetBool("bAttack") +
+                              "   rate=" + animator.speed.ToString("F1"));
+            }
             sb.AppendLine("NOISE      cooldown=" + _noiseCooldown.ToString("F1") + " s   hearRange=" + noiseHearRange.ToString("F0") + " m");
             return sb.ToString();
         }

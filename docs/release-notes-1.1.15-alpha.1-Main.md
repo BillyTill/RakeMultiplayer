@@ -1,4 +1,4 @@
-# Rake Multiplayer 1.1.14-alpha.1-Main
+# Rake Multiplayer 1.1.15-alpha.1-Main
 
 > **Main build.** This release is built from the `master` (Main) branch: graphics
 > presets, the day/night level change, the HUD phase fix and the climbing guards.
@@ -195,6 +195,24 @@ and a client no longer disconnects itself when it clicks the button.
 - Dropped loot is deduplicated per weapon type; trap placement is bounds- and distance-checked.
 - HUD night counter follows the configured night count; the weapon diagnostic dump moved to
   F9 (it shared F8 with the performance overlay); the lobby title is no longer overwritten.
+
+## What changed in 1.1.15
+
+**The Rake stopped sliding in the idle animation.** While it is not hunting, the state machine
+sits in `Idle`, and the animator was forced to `Speed = 0` there. During the day the body
+walks its patrol and runs away from hunters, so the model glided across the ground playing the
+idle clip.
+
+The animator speed now follows the body's actual velocity (`0` idle, `1` walk, `2` run), and
+`Stunned` / `Dead` explicitly hold `Speed = 0`. Clients get the same values through the
+existing snapshot (the host already publishes the animator parameters), so a remote Rake
+animates correctly too.
+
+The F7 panel gained an animator line, so this is checkable:
+
+```
+ANIM       speed=1   walkType=1   crouch=False   attack=False   rate=1.0
+```
 
 ## What changed in 1.1.14
 

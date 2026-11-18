@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.1.15-alpha.1-Main - 2026-11-18
+
+The Rake no longer slides in the idle animation: the animator speed follows the body
+when the combat state is Idle (day patrol and fleeing).
+
 ## 1.1.14-alpha.1-Main - 2026-11-18
 
 AI panel says what the Rake is actually doing (patrol/flee/hunt) instead of a bare
