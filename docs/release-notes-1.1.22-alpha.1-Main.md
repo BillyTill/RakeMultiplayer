@@ -1,4 +1,4 @@
-# Rake Multiplayer 1.1.21-alpha.1-Main
+# Rake Multiplayer 1.1.22-alpha.1-Main
 
 > **Main build.** This release is built from the `master` (Main) branch: graphics
 > presets, the day/night level change, the HUD phase fix and the climbing guards.
@@ -195,6 +195,24 @@ and a client no longer disconnects itself when it clicks the button.
 - Dropped loot is deduplicated per weapon type; trap placement is bounds- and distance-checked.
 - HUD night counter follows the configured night count; the weapon diagnostic dump moved to
   F9 (it shared F8 with the performance overlay); the lobby title is no longer overwritten.
+
+## What changed in 1.1.22
+
+**A client that changes level on its own is put back.** The host used to log and ignore the
+client's `LevelChange`, which left that client on a black screen. It now answers with the level
+the session is actually on and the current phase:
+
+```
+[Scene] ignored LevelChange from client C1 (asked for 2, host is on 1): only the host changes levels
+[Scene] C1 sent back to level 1
+```
+
+**The phase endpoint says what it decided.** `/phase?skip=1` now reports `forwarded`, `server`
+and `clientOnly`, and logs the same. If a client does not forward the skip, one look at that
+response says why.
+
+**Skip refusal is logged.** When the clock is not owned locally, `SkipPhase` says so with the
+flags instead of silently doing nothing.
 
 ## What changed in 1.1.21
 

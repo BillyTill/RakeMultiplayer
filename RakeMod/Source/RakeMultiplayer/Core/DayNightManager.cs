@@ -342,7 +342,16 @@ namespace RakeMultiplayer
         /// <summary>Dev bridge: force the next phase without waiting for the timer.</summary>
         public void SkipPhase()
         {
-            if (!OwnsClock()) return;
+            if (!OwnsClock())
+            {
+                var net = RakeNetworkManager.Instance;
+                RakeMultiplayerPlugin.Log?.LogWarning("[DayNight] skip refused here: server=" +
+                                                      RakeMultiplayerPlugin.isServer +
+                                                      " clientOnly=" + (net != null && net.IsClientOnly) +
+                                                      " - the host owns the clock");
+                return;
+            }
+
             TransitionPhase();
         }
 

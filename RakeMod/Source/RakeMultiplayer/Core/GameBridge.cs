@@ -663,9 +663,10 @@ namespace RakeMultiplayer.Core
                         if (dayNight == null) return "{\"ok\":false,\"error\":\"no cycle\"}";
 
                         bool forwarded = false;
+                        var net = RakeNetworkManager.Instance;
+
                         if (!string.IsNullOrEmpty(skip))
                         {
-                            var net = RakeNetworkManager.Instance;
                             bool ownsClock = RakeMultiplayerPlugin.isServer &&
                                              (net == null || !net.IsClientOnly);
 
@@ -683,8 +684,14 @@ namespace RakeMultiplayer.Core
                             }
                         }
 
+                        RakeMultiplayerPlugin.Log?.LogInfo("[Bridge] /phase skip: forwarded=" + forwarded +
+                                                           " server=" + RakeMultiplayerPlugin.isServer +
+                                                           " clientOnly=" + (net != null && net.IsClientOnly));
+
                         return "{\"ok\":true,\"phase\":\"" + dayNight.CurrentPhase +
                                "\",\"forwarded\":" + (forwarded ? "true" : "false") +
+                               ",\"server\":" + (RakeMultiplayerPlugin.isServer ? "true" : "false") +
+                               ",\"clientOnly\":" + (net != null && net.IsClientOnly ? "true" : "false") +
                                ",\"night\":" + dayNight.NightNumber +
                                ",\"running\":" + (dayNight.IsRunning ? "true" : "false") +
                                ",\"scene\":\"" + UnityEngine.Application.loadedLevelName + "\"}";

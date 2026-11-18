@@ -72,10 +72,26 @@ namespace RakeMultiplayer
         {
             // Level changes are host-authoritative. A client used to be able to reload an
             // arbitrary scene for everyone (or spam reloads and kill the session).
+            int hostLevel = UnityEngine.Application.loadedLevel;
+
             RakeMultiplayerPlugin.Log?.LogWarning("[Scene] ignored LevelChange from client C" + connectionId +
-                                                  ": only the host changes levels. If a client is trying to move " +
-                                                  "the level, that PC runs an older mod - install the same " +
-                                                  "version on every machine.");
+                                                  " (asked for " + packet.LevelIndex + ", host is on " + hostLevel +
+                                                  "): only the host changes levels");
+
+            // A client that moved itself is now in the wrong level (usually a black screen).
+            // Do not leave it there: tell that one client which level the session is on.
+            if (packet.LevelIndex != hostLevel && packet.LevelIndex >= 0)
+            {
+                if (_server != null)
+                {
+                    _server.Send(connectionId, new LevelChangePacket { LevelIndex = hostLevel }.Serialize());
+                }
+
+                DayNightManager.Instance?.SendPhaseTo(connectionId + 1);
+
+                RakeMultiplayerPlugin.Log?.LogInfo("[Scene] C" + connectionId +
+                                                   " sent back to level " + hostLevel);
+            }
         }
 
         private void HandleClientLevelChange(LevelChangePacket packet)

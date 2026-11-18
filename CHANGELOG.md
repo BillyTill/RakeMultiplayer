@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.1.22-alpha.1-Main - 2026-11-18
+
+A client that changes level on its own is pulled back to the host level instead of
+sitting on a black screen; the phase endpoint reports server/clientOnly.
+
 ## 1.1.21-alpha.1-Main - 2026-11-18
 
 Installer: removes stale files from older builds, refuses to run while Rake is open.
