@@ -1,4 +1,4 @@
-# Rake Multiplayer 1.1.11-alpha.1-Main
+# Rake Multiplayer 1.1.12-alpha.1-Main
 
 > **Main build.** This release is built from the `master` (Main) branch: graphics
 > presets, the day/night level change, the HUD phase fix and the climbing guards.
@@ -195,6 +195,29 @@ and a client no longer disconnects itself when it clicks the button.
 - Dropped loot is deduplicated per weapon type; trap placement is bounds- and distance-checked.
 - HUD night counter follows the configured night count; the weapon diagnostic dump moved to
   F9 (it shared F8 with the performance overlay); the lobby title is no longer overwritten.
+
+## What changed in 1.1.12
+
+**No teleports in the daytime behaviour at all.** The last warp (a hunter closer than 20 m)
+is gone, and so is the day-start reposition. The only remaining reposition is the rescue of a
+Rake that was left outside the map (more than 1200 m from every hunter).
+
+**The Rake outruns the hunter.** A hunter runs at 8 m/s, so running away at the Rake's normal
+speed could never actually create distance - that is why the warp existed. The daytime escape
+now uses `max(runSpeed × 1.4, 9 m/s)`. Measured in game, a hunter starting 12 m away never got
+closer:
+
+```
+[AI] Day keep-away: walking away from a hunter at 12 m ...
+[AI] Day keep-away: walking away from a hunter at 18 m ...
+[AI] Day keep-away: walking away from a hunter at 35 m ...
+[AI] Day keep-away: walking away from a hunter at 54 m ...
+[AI] Day keep-away: walking away from a hunter at 77 m ...
+[AI] Day keep-away stopped (hunter is 90 m away)
+```
+
+**The loop is exactly as asked:** patrol the forest, flee when a hunter is closer than 60 m,
+keep running until 90 m, patrol again.
 
 ## What changed in 1.1.11
 

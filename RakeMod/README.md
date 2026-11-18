@@ -1,6 +1,6 @@
 # Rake Multiplayer Mod
 
-Developer notes for the **1.1.11-alpha.1-Main** cooperative mod.
+Developer notes for the **1.1.12-alpha.1-Main** cooperative mod.
 
 ## Build
 

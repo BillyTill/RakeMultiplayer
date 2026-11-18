@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.1.12-alpha.1-Main - 2026-11-18
+
+Daytime Rake never teleports: it outruns the hunter (9+ m/s vs 8) and keeps running
+away from 60 m until 90 m, then patrols again.
+
 ## 1.1.11-alpha.1-Main - 2026-11-18
 
 Daytime Rake: patrol, run away when a hunter comes closer than 60 m, stop at 90 m,

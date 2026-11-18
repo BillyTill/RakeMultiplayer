@@ -608,11 +608,9 @@ namespace RakeMultiplayer
                 _daySpawnChecked = true;
                 _lastDayWarp = Time.time;
 
-                // The day spawn used to teleport the Rake to the forest marker, which is
-                // the hunter's own camp. The day gate stops it from hunting, so it stood
-                // there motionless at arm's length and read as a broken AI.
+                // Only place the body when it is outside the playable area (the staging
+                // platform). Every other reposition is the walker's job - no teleports.
                 if (NearestPlayerDistance(transform.position) > 1200f) MoveToForestSpawn();
-                RepositionAwayFromHunters(dayKeepAwayDistance);
                 return;
             }
 
@@ -621,17 +619,11 @@ namespace RakeMultiplayer
             if (Time.time - _lastDayWarp < 10f) return;
             _lastDayWarp = Time.time;
 
+            // Only a broken state (the Rake left outside the map) is corrected here; the
+            // distance itself is the walker's business and never a teleport.
             if (NearestPlayerDistance(transform.position) > 1200f)
             {
                 MoveToForestSpawn();
-                return;
-            }
-
-            // The walker above handles the distance; the 10 s safety net only re-warpes when
-            // a hunter is standing on top of the Rake and walking away is not an option.
-            if (NearestPlayerDistance(transform.position) < 20f)
-            {
-                RepositionAwayFromHunters(dayKeepAwayDistance);
             }
         }
 
@@ -663,15 +655,6 @@ namespace RakeMultiplayer
                 return;
             }
 
-            // A hunter on top of the Rake: there is no time to walk out of that, warp.
-            if (distance < 20f)
-            {
-                if (Time.time < _dayRetreatRepath) return;
-                _dayRetreatRepath = Time.time + 5f;
-                if (RepositionAwayFromHunters(dayKeepAwayDistance)) StopDayRetreat("warped out");
-                return;
-            }
-
             if (_dayRetreatActive && Time.time < _dayRetreatRepath) return;
             _dayRetreatRepath = Time.time + 1.5f;
 
@@ -685,7 +668,7 @@ namespace RakeMultiplayer
 
             _dayRetreatActive = true;
             _dayRoamActive = false;
-            MoveToTarget(point, false, GetRunSpeed());
+            MoveToTarget(point, false, GetDayFleeSpeed());
             RakeMultiplayerPlugin.Log?.LogInfo("[AI] Day keep-away: walking away from a hunter at " +
                                                distance.ToString("F0") + " m to " +
                                                point.ToString("F1"));
@@ -782,28 +765,6 @@ namespace RakeMultiplayer
             }
 
             return false;
-        }
-
-        private bool RepositionAwayFromHunters(float minDistance)
-        {
-            Vector3 nearest;
-            float distance = NearestPlayerDistance(transform.position, out nearest);
-            if (distance < 0f || distance >= minDistance) return false;
-
-            Vector3 point;
-            if (!TryFindRetreatPoint(nearest, minDistance, out point))
-            {
-                RakeMultiplayerPlugin.Log?.LogWarning("[AI] Day keep-away: no safe spot found for a hunter at " +
-                                                      distance.ToString("F0") + " m");
-                return false;
-            }
-
-            WarpAiBody(point);
-            RakeMultiplayerPlugin.Log?.LogInfo("[AI] Day keep-away: hunter at " +
-                                               distance.ToString("F0") + " m, Rake warped to " +
-                                               point.ToString("F1") + " (" +
-                                               NearestPlayerDistance(point).ToString("F0") + " m away)");
-            return true;
         }
 
         private float NearestPlayerDistance(Vector3 position)
@@ -2105,6 +2066,16 @@ namespace RakeMultiplayer
             if (enemyAI != null && enemyAI.runSpeed > 0.1f) return enemyAI.runSpeed;
             if (originalAgentSpeed > 0.1f) return originalAgentSpeed;
             return 5f;
+        }
+
+        /// <summary>
+        /// Daytime escape speed. A hunter runs at 8 m/s (PlayerMovement), so the Rake has to
+        /// beat that or it can never actually get away - which is what made the old warp
+        /// necessary in the first place.
+        /// </summary>
+        private float GetDayFleeSpeed()
+        {
+            return Mathf.Max(GetRunSpeed() * 1.4f, 9f);
         }
 
         private float GetSneakSpeed()
