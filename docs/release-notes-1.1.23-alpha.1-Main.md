@@ -1,4 +1,4 @@
-# Rake Multiplayer 1.1.22-alpha.1-Main
+# Rake Multiplayer 1.1.23-alpha.1-Main
 
 > **Main build.** This release is built from the `master` (Main) branch: graphics
 > presets, the day/night level change, the HUD phase fix and the climbing guards.
@@ -195,6 +195,27 @@ and a client no longer disconnects itself when it clicks the button.
 - Dropped loot is deduplicated per weapon type; trap placement is bounds- and distance-checked.
 - HUD night counter follows the configured night count; the weapon diagnostic dump moved to
   F9 (it shared F8 with the performance overlay); the lobby title is no longer overwritten.
+
+## What changed in 1.1.23
+
+**A refused level load is no longer announced to the host.** Harmony runs a postfix even when
+a prefix cancels the method, so a client whose `Application.LoadLevel` was correctly refused
+still sent `LevelChange` to the host:
+
+```
+[Scene] ignored LevelChange from client C1 ...
+```
+
+That line looked like a stale build, but it was our own guard reporting a load that never
+happened. The refusal is now remembered for that one call and the postfix stays quiet, so the
+host only hears about level changes that actually came from the host.
+
+The client's own log still names the caller of the refused load, which is the interesting part:
+
+```
+[Level] client refused a local load of 'Level_1(Night)' (asked by MultiplayerMenu.LoadGameScene);
+        the host owns level changes
+```
 
 ## What changed in 1.1.22
 

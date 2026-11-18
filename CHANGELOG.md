@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.1.23-alpha.1-Main - 2026-11-18
+
+A level load refused on a client is no longer reported to the host as a real level
+change (Harmony ran the postfix anyway).
+
 ## 1.1.22-alpha.1-Main - 2026-11-18
 
 A client that changes level on its own is pulled back to the host level instead of

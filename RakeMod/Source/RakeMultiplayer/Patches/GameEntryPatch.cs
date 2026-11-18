@@ -32,6 +32,12 @@ namespace RakeMultiplayer.Patches
 
             static void Postfix(string name)
             {
+                if (_loadBlocked)
+                {
+                    _loadBlocked = false;
+                    return;
+                }
+
                 // If this was a local (non-network) load, tell the other players.
                 // Loading by name (level transitions do that) used to be swallowed here
                 // because only numeric names were broadcast, so peers stayed on the old level.
@@ -80,6 +86,12 @@ namespace RakeMultiplayer.Patches
 
             static void Postfix(int index)
             {
+                if (_loadBlocked)
+                {
+                    _loadBlocked = false;
+                    return;
+                }
+
                 RakeNetworkManager.Instance?.NotifyLocalLevelLoad(index);
             }
         }
@@ -93,6 +105,11 @@ namespace RakeMultiplayer.Patches
         /// different level than everybody else, which reads as "the day was skipped only for
         /// me". The main menu is always allowed, so leaving still works.
         /// </summary>
+        // Harmony runs the postfix even when a prefix returns false, so a refused load would
+        // still be reported to the host as "this client changed the level". That is exactly
+        // the "ignored LevelChange from client" line that looked like an old build.
+        private static bool _loadBlocked;
+
         private static bool BlockClientLevelLoad(string what)
         {
             if (!RakeMultiplayerPlugin.Enabled.Value) return false;
@@ -119,6 +136,7 @@ namespace RakeMultiplayer.Patches
 
             RakeMultiplayerPlugin.Log?.LogWarning("[Level] client refused a local load of '" + what +
                                                   "' (asked by " + caller + "); the host owns level changes");
+            _loadBlocked = true;
             return true;
         }
 
