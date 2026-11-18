@@ -138,7 +138,7 @@ namespace RakeMultiplayer
         /// </summary>
         public void StartCycle(bool isNight = false, int startingNight = 0)
         {
-            if (!RakeMultiplayerPlugin.isServer)
+            if (!OwnsClock())
             {
                 // The client learns the phase from PhaseChangePacket; a local cycle
                 // would give it a second, independent clock.
@@ -227,7 +227,7 @@ namespace RakeMultiplayer
         {
             // Only the host owns the clock. A client that reached this point changed
             // its own phase, which is exactly "the day was skipped only for me".
-            if (!RakeMultiplayerPlugin.isServer)
+            if (!OwnsClock())
             {
                 RakeMultiplayerPlugin.Log?.LogWarning("[DayNight] client tried to transition the phase - ignored");
                 return;
@@ -342,14 +342,14 @@ namespace RakeMultiplayer
         /// <summary>Dev bridge: force the next phase without waiting for the timer.</summary>
         public void SkipPhase()
         {
-            if (!RakeMultiplayerPlugin.isServer) return;
+            if (!OwnsClock()) return;
             TransitionPhase();
         }
 
         /// <summary>Server: loads the level that matches the new phase.</summary>
         private void LoadLevelForPhase(Phase phase)
         {
-            if (!RakeMultiplayerPlugin.isServer) return;
+            if (!OwnsClock()) return;
 
             string current = Application.loadedLevelName;
             string target = PhaseSceneFor(current, phase);
@@ -480,6 +480,20 @@ namespace RakeMultiplayer
             };
 
             RakeNetworkManager.Instance?.ServerBroadcast(packet.Serialize());
+        }
+
+        /// <summary>
+        /// The host owns the clock. Uses the transport as well as the flag: a client that
+        /// somehow carries isServer=true still must not drive phases.
+        /// </summary>
+        private static bool OwnsClock()
+        {
+            if (!RakeMultiplayerPlugin.isServer) return false;
+
+            var net = RakeNetworkManager.Instance;
+            if (net != null && net.IsClientOnly) return false;
+
+            return true;
         }
 
         /// <summary>

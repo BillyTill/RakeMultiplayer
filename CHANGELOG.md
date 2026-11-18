@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.1.18-alpha.1-Main - 2026-11-18
+
+Skipping the phase from a client now asks the host (PhaseSkipRequest) instead of
+loading a level locally, which left that client on a black screen.
+
 ## 1.1.17-alpha.1-Main - 2026-11-18
 
 At night the Rake charges when it is spotted instead of running away, and the pause

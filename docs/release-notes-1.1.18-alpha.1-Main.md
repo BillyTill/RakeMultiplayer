@@ -1,4 +1,4 @@
-# Rake Multiplayer 1.1.17-alpha.1-Main
+# Rake Multiplayer 1.1.18-alpha.1-Main
 
 > **Main build.** This release is built from the `master` (Main) branch: graphics
 > presets, the day/night level change, the HUD phase fix and the climbing guards.
@@ -195,6 +195,32 @@ and a client no longer disconnects itself when it clicks the button.
 - Dropped loot is deduplicated per weapon type; trap placement is bounds- and distance-checked.
 - HUD night counter follows the configured night count; the weapon diagnostic dump moved to
   F9 (it shared F8 with the performance overlay); the lobby title is no longer overwritten.
+
+## What changed in 1.1.18
+
+**Skipping the phase from a client asks the host instead of doing it locally.** A client that
+ran the skip itself loaded the next level on its own - a black screen for that player, an
+ignored `LevelChange` for the host, and everybody else still in the old phase.
+
+Now the client sends `PhaseSkipRequest`; the host performs the skip and broadcasts the phase
+and the level as usual:
+
+```
+[DayNight] C1 asked to skip the phase
+[DayNightManager] Phase transition: Night, Night #1 ...
+```
+
+The dev endpoint reports what happened: `forwarded:true` when the request went to the host.
+
+**The player marker is a red chevron.** From the Rake's view, animals were already marked
+with a bone-coloured chevron that points along the target's direction; players had a large
+pulsing ring instead. Players now use the same chevron with the same behaviour, in red - one
+marker language, and the colour is the only thing that says what the target is. Traps keep
+their red cross.
+
+**The clock is owned by the transport, not by a flag.** `SkipPhase`, `StartCycle` and the
+transition now also check that this process is not a client-only peer. If a client somehow
+carries `isServer = true`, it still cannot load a level on its own.
 
 ## What changed in 1.1.17
 

@@ -540,8 +540,8 @@ namespace RakeMultiplayer
         public const string GUID = "com.rake.multiplayer";
         public const string NAME = "Rake Multiplayer";
         // BepInPlugin.Version is a System.Version: it must stay numeric.
-        public const string VERSION = "1.1.17";
+        public const string VERSION = "1.1.18";
         // Shown in the UI and logs; the alpha suffix is valid here.
-        public const string DISPLAY_VERSION = "1.1.17-alpha.1-Main";
+        public const string DISPLAY_VERSION = "1.1.18-alpha.1-Main";
     }
 }

@@ -250,6 +250,16 @@ namespace RakeMultiplayer.Networking
         }
     }
 
+    /// <summary>Client -> server: ask the host to advance the phase. The client never does
+    /// it locally - its own copy of the level would diverge from everybody else's.</summary>
+    public class PhaseSkipRequestPacket : NetworkPacket
+    {
+        public override PacketType Type => PacketType.PhaseSkipRequest;
+
+        public override void Write(BinaryWriter writer) { }
+        public override void Read(BinaryReader reader) { }
+    }
+
     /// <summary>Server -> client: the host cannot talk to this build, and why.</summary>
     public class ProtocolRejectPacket : NetworkPacket
     {

@@ -110,6 +110,17 @@ namespace RakeMultiplayer
             UnityEngine.Object.DontDestroyOnLoad(gameObject);
         }
 
+        /// <summary>
+        /// True when this process is only a client: it has a transport client and no server.
+        /// The isServer flag alone cannot be trusted here - a wrong value made a client own the
+        /// day/night clock and load a level on its own, which is a black screen for that player
+        /// and an unexplained LevelChange for the host.
+        /// </summary>
+        public bool IsClientOnly
+        {
+            get { return _client != null && _server == null; }
+        }
+
         public void StartHost()
         {
             if (IntegrityCheck.BlocksMultiplayer)
@@ -597,6 +608,9 @@ namespace RakeMultiplayer
                         break;
                     case PacketType.ClientReady:
                         HandleServerClientReady(connectionId, (ClientReadyPacket)packet);
+                        break;
+                    case PacketType.PhaseSkipRequest:
+                        HandleServerPhaseSkipRequest(connectionId, (PhaseSkipRequestPacket)packet);
                         break;
                     case PacketType.DoorAction:
                         DoorSync.HandleServerRequest((DoorActionPacket)packet);

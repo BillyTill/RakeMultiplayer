@@ -70,6 +70,7 @@ namespace RakeMultiplayer.Networking
                     PacketType.ClientReady => new ClientReadyPacket(),
                     PacketType.ItemSpawn => new ItemSpawnPacket(),
                     PacketType.ProtocolReject => new ProtocolRejectPacket(),
+                    PacketType.PhaseSkipRequest => new PhaseSkipRequestPacket(),
                     _ => throw new InvalidOperationException($"Unknown packet type: {type} (byte value: {(byte)type})")
                 };
                 packet.Read(reader);

@@ -10,6 +10,7 @@ using System.Threading;
 using UnityEngine;
 using UnityEngine.UI;
 using RakeMultiplayer.UI;
+using RakeMultiplayer.Networking;
 
 namespace RakeMultiplayer.Core
 {
@@ -641,10 +642,30 @@ namespace RakeMultiplayer.Core
                         var dayNight = DayNightManager.Instance;
                         if (dayNight == null) return "{\"ok\":false,\"error\":\"no cycle\"}";
 
-                        if (!string.IsNullOrEmpty(skip)) dayNight.SkipPhase();
+                        bool forwarded = false;
+                        if (!string.IsNullOrEmpty(skip))
+                        {
+                            var net = RakeNetworkManager.Instance;
+                            bool ownsClock = RakeMultiplayerPlugin.isServer &&
+                                             (net == null || !net.IsClientOnly);
+
+                            if (ownsClock)
+                            {
+                                dayNight.SkipPhase();
+                            }
+                            else
+                            {
+                                // The host owns the clock. Skipping locally loaded a level on
+                                // this client only (black screen, everyone else in the old
+                                // phase), so the request goes to the host instead.
+                                RakeNetworkManager.Instance?.ClientSend(new PhaseSkipRequestPacket().Serialize());
+                                forwarded = true;
+                            }
+                        }
 
                         return "{\"ok\":true,\"phase\":\"" + dayNight.CurrentPhase +
-                               "\",\"night\":" + dayNight.NightNumber +
+                               "\",\"forwarded\":" + (forwarded ? "true" : "false") +
+                               ",\"night\":" + dayNight.NightNumber +
                                ",\"running\":" + (dayNight.IsRunning ? "true" : "false") +
                                ",\"scene\":\"" + UnityEngine.Application.loadedLevelName + "\"}";
                     }));

@@ -120,6 +120,23 @@ namespace RakeMultiplayer
             }
         }
 
+        /// <summary>Server: a client (dev tooling) asked to advance the phase.</summary>
+        private void HandleServerPhaseSkipRequest(int connectionId, PhaseSkipRequestPacket packet)
+        {
+            RakeMultiplayerPlugin.Log?.LogInfo("[DayNight] C" + connectionId + " asked to skip the phase");
+
+            if (!RakeMultiplayerPlugin.isServer) return;
+
+            var cycle = DayNightManager.Instance;
+            if (cycle == null || !cycle.IsRunning)
+            {
+                RakeMultiplayerPlugin.Log?.LogWarning("[DayNight] skip request ignored: no running cycle");
+                return;
+            }
+
+            cycle.SkipPhase();
+        }
+
         private void HandleServerStartGame(int connectionId, StartGamePacket packet, byte[] rawData)
         {
             RakeMultiplayerPlugin.Log?.LogInfo($"[Net] Server received StartGame from C{connectionId}: scene={packet.SceneName}");

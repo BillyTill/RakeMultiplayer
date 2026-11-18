@@ -588,16 +588,16 @@ namespace RakeMultiplayer.UI
             float pulse = 0.5f + 0.5f * Mathf.Sin(_time * 2.6f + index);
             float alpha = 0.5f + 0.4f * (1f - distance / 100f);
 
-            // Red = player or trap; animals stay bone-coloured.
+            // Red = player or trap; animals stay bone-coloured. Players use the same
+            // directional chevron as the animals so the Rake reads one marker language -
+            // only the colour says what the target is.
             if (kind == 0)
             {
-                icon.sprite = Tex.PreyRing();
-                icon.color = new Color(0.86f, 0.10f, 0.07f, Mathf.Lerp(0.75f, 1f, pulse));
-                icon.rectTransform.sizeDelta = new Vector2(124f, 124f);
-                _markerText[index].color = new Color(0.90f, 0.24f, 0.18f, 0.95f);
-
-                float scale = 1f + 0.06f * pulse;
-                icon.rectTransform.localScale = new Vector3(scale, scale, 1f);
+                icon.sprite = Tex.Chevrons();
+                icon.color = new Color(0.90f, 0.11f, 0.07f, Mathf.Lerp(0.8f, 1f, pulse));
+                icon.rectTransform.sizeDelta = new Vector2(58f, 58f);
+                icon.rectTransform.localScale = Vector3.one;
+                _markerText[index].color = new Color(0.92f, 0.26f, 0.20f, 0.95f);
             }
             else if (kind == 1)
             {

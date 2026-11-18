@@ -59,5 +59,7 @@ namespace RakeMultiplayer.Networking
         ItemSpawn = 50,
         /// <summary>Server -> client: your mod build is not compatible with this host.</summary>
         ProtocolReject = 51,
+        /// <summary>Client -> server: please advance the day/night phase (dev tooling).</summary>
+        PhaseSkipRequest = 52,
     }
 }
