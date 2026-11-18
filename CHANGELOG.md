@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.1.21-alpha.1-Main - 2026-11-18
+
+Installer: removes stale files from older builds, refuses to run while Rake is open.
+
 ## 1.1.20-alpha.1-Main - 2026-11-18
 
 Protocol version 2: a client from an older build is refused with a readable message

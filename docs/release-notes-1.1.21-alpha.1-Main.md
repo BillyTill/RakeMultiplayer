@@ -1,4 +1,4 @@
-# Rake Multiplayer 1.1.20-alpha.1-Main
+# Rake Multiplayer 1.1.21-alpha.1-Main
 
 > **Main build.** This release is built from the `master` (Main) branch: graphics
 > presets, the day/night level change, the HUD phase fix and the climbing guards.
@@ -195,6 +195,30 @@ and a client no longer disconnects itself when it clicks the button.
 - Dropped loot is deduplicated per weapon type; trap placement is bounds- and distance-checked.
 - HUD night counter follows the configured night count; the weapon diagnostic dump moved to
   F9 (it shared F8 with the performance overlay); the lobby title is no longer overwritten.
+
+## What changed in 1.1.21
+
+**The installer removes files from older builds and refuses to touch a running game.**
+
+How an upgrade behaves now:
+
+| Situation | What the installer does |
+| --- | --- |
+| file with the same name already exists | overwritten with the shipped one |
+| file we shipped before but no longer ship (an old `.pdb`, an old art file) | deleted |
+| file in `BepInEx\core` that we do not ship | moved to `BepInEx\_backup_<date>\core` |
+| foreign plugin in `BepInEx\plugins` | left alone, listed in the log |
+| `Rake.exe` is running | stops before writing anything, asks to close the game |
+
+That last one matters: `Rake.exe` keeps the plugin dll mapped, so a write fails halfway and
+leaves new core files next to the old plugin - which is exactly the "menu does not show" state.
+
+Every install writes `BepInEx\plugins\RakeMultiplayer.manifest` with a SHA-256 for each file,
+so the mod can tell you on the next launch whether the install is intact:
+
+```
+[Integrity] 31 files match the manifest (1.1.21.0)
+```
 
 ## What changed in 1.1.20
 

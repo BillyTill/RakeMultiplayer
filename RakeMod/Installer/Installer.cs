@@ -71,6 +71,19 @@ namespace RakeMultiplayerSetup
                 return false;
             }
 
+            // Rake.exe keeps BepInEx\plugins\RakeMultiplayer.dll mapped, so WriteAllBytes
+            // fails on it and the install stops half-applied (new core, old plugin). That is
+            // exactly the "menu is missing" state, so refuse before touching anything.
+            if (IsGameRunning())
+            {
+                if (log != null)
+                {
+                    log("Rake уже запущен.");
+                    log("Закройте игру и запустите установщик снова — иначе часть файлов не заменится.");
+                }
+                return false;
+            }
+
             string temp = Path.Combine(Path.GetTempPath(), "RakeMultiplayerSetup_" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(temp);
 
@@ -95,6 +108,7 @@ namespace RakeMultiplayerSetup
                 // methods. Core files that we do not ship are moved aside; foreign plugins
                 // are only reported, because they may be the player's other mods.
                 BackupForeignCoreFiles(gameDir, log);
+                RemoveStaleModFiles(gameDir, log);
                 ReportForeignPlugins(gameDir, log);
 
                 var installedFiles = new List<InstalledFile>();
@@ -232,6 +246,60 @@ namespace RakeMultiplayerSetup
                 var sb = new StringBuilder(hash.Length * 2);
                 for (int i = 0; i < hash.Length; i++) sb.Append(hash[i].ToString("x2"));
                 return sb.ToString();
+            }
+        }
+
+        /// <summary>
+        /// Files that earlier builds shipped under these names but the current payload does
+        /// not contain any more. They are deleted, so an upgrade cannot leave an old plugin
+        /// next to the new one (two RakeMultiplayer.dll-era leftovers is a classic).
+        /// </summary>
+        private static void RemoveStaleModFiles(string gameDir, Action<string> log)
+        {
+            string plugins = Path.Combine(Path.Combine(gameDir, "BepInEx"), "plugins");
+            if (!Directory.Exists(plugins)) return;
+
+            var current = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            List<string> payload = ReadPayloadNames();
+            for (int i = 0; i < payload.Count; i++)
+            {
+                string rel = payload[i].Replace('\\', '/');
+                if (rel.StartsWith("BepInEx/plugins/", StringComparison.OrdinalIgnoreCase))
+                {
+                    current.Add(rel.Substring("BepInEx/plugins/".Length));
+                }
+            }
+
+            string[] ours =
+            {
+                "RakeMultiplayer.dll", "RakeMultiplayer.pdb", "RakeMultiplayer.manifest",
+                "Telepathy.dll",
+                "RakePlayerModel.bin", "RakePlayerRifle.bin", "RakePlayerSkin.png", "rifle.png"
+            };
+
+            int removed = 0;
+            for (int i = 0; i < ours.Length; i++)
+            {
+                if (current.Contains(ours[i])) continue;
+
+                string path = Path.Combine(plugins, ours[i]);
+                if (!File.Exists(path)) continue;
+
+                try
+                {
+                    File.Delete(path);
+                    removed++;
+                    if (log != null) log("  устаревший файл удалён: " + ours[i]);
+                }
+                catch (Exception ex)
+                {
+                    if (log != null) log("  не удалось удалить " + ours[i] + ": " + ex.Message);
+                }
+            }
+
+            if (removed > 0 && log != null)
+            {
+                log("Удалено устаревших файлов: " + removed + ".");
             }
         }
 
