@@ -52,8 +52,8 @@ namespace RakeMultiplayer
         public float lurkWatchDuration = 20f;
 
         [Tooltip("Pause between two stalk tasks. The timer starts when a task ENDS.")]
-        public float lurkIntervalMin = 60f;
-        public float lurkIntervalMax = 90f;
+        public float lurkIntervalMin = 20f;
+        public float lurkIntervalMax = 35f;
 
         [Tooltip("Below this distance the Rake starts the crouched approach.")]
         public float sneakStartDistance = 30f;
@@ -576,6 +576,12 @@ namespace RakeMultiplayer
         [Tooltip("During the day the AI Rake keeps at least this far from every hunter.")]
         public float dayKeepAwayDistance = 60f;
 
+        [Tooltip("How far from the hunters the Rake starts the day")]
+        public float deepSpawnDistance = 200f;
+
+        [Tooltip("Never place the daytime spawn farther than this (stay inside the map)")]
+        public float deepSpawnMaxDistance = 420f;
+
         private void UpdateDaySpawn()
         {
             DayNightManager dayNight = DayNightManager.Instance;
@@ -922,6 +928,15 @@ namespace RakeMultiplayer
                 return;
             }
 
+            // The forest marker sits close to the player camp, so the Rake used to start the
+            // day in the hunter's face. Push it deeper along the line away from the hunters.
+            Vector3 deeper;
+            if (TryDeepenSpawn(target, out deeper))
+            {
+                target = deeper;
+                source += " (deepened)";
+            }
+
             WarpAiBody(target);
 
             RakeMultiplayerPlugin.Log?.LogInfo("[AI] Day spawn: Rake moved to the forest at " +
@@ -955,6 +970,50 @@ namespace RakeMultiplayer
                                                      target.ToString("F1") + " (isOnNavMesh=" +
                                                      agent.isOnNavMesh + ")");
             }
+        }
+
+        /// <summary>
+        /// Moves a spawn point away from the nearest hunter until it is at least
+        /// <see cref="deepSpawnDistance"/> out, staying on the NavMesh and inside the map.
+        /// </summary>
+        private bool TryDeepenSpawn(Vector3 from, out Vector3 point)
+        {
+            point = from;
+
+            Vector3 nearest;
+            float distance = NearestPlayerDistance(from, out nearest);
+            if (distance < 0f) return false;
+            if (distance >= deepSpawnDistance) return true;
+
+            Vector3 away = from - nearest;
+            away.y = 0f;
+            if (away.sqrMagnitude < 1f) away = UnityEngine.Random.insideUnitSphere;
+            away.y = 0f;
+            away = away.sqrMagnitude > 0.001f ? away.normalized : Vector3.forward;
+
+            float[] angles = { 0f, 15f, -15f, 30f, -30f, 45f, -45f, 60f, -60f, 90f, -90f, 120f, -120f, 150f, -150f, 180f };
+
+            for (int i = 0; i < angles.Length; i++)
+            {
+                Vector3 dir = Quaternion.Euler(0f, angles[i], 0f) * away;
+
+                for (float dist = deepSpawnDistance; dist <= deepSpawnMaxDistance; dist += 40f)
+                {
+                    Vector3 candidate = nearest + dir * dist;
+
+                    NavMeshHit hit;
+                    if (!NavMesh.SamplePosition(candidate, out hit, 25f, NavMesh.AllAreas)) continue;
+
+                    float candidateDistance = NearestPlayerDistance(hit.position);
+                    if (candidateDistance < deepSpawnDistance) continue;
+                    if (candidateDistance > deepSpawnMaxDistance) continue;
+
+                    point = hit.position;
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private bool TryFindForestSpawn(out Vector3 position, out string source)
@@ -1412,10 +1471,13 @@ namespace RakeMultiplayer
                 return;
             }
 
-            // The hunter is actually looking at the Rake: break contact.
+            // Being spotted while watching used to send the Rake running, which at night
+            // read as "it always runs away". At night it is a hunter: being seen escalates
+            // to the charge. Fleeing stays for taking damage from a distance.
             if (IsRakeSeenCached())
             {
-                TransitionToState(RakeState.Flee);
+                RakeMultiplayerPlugin.Log?.LogInfo("[AI] Spotted while watching - charging");
+                TransitionToState(RakeState.Chase);
                 return;
             }
 
@@ -2762,7 +2824,8 @@ namespace RakeMultiplayer
             sb.AppendLine("ATTACK     cooldown=" + _attackCooldown.ToString("F2") + " s   swing=" + _attackSwing + "   struck=" + _attackStruck + "   range=" + attackRange.ToString("F1") + " m");
             var dayCycle = DayNightManager.Instance;
             bool isDay = dayCycle != null && dayCycle.IsRunning && dayCycle.CurrentPhase == Phase.Day;
-            string patrolState = _dayRetreatActive ? "fleeing"
+            string patrolState = !isDay ? "n/a"
+                               : _dayRetreatActive ? "fleeing"
                                : _dayRoamActive ? "walking"
                                : "pausing";
             sb.AppendLine("DAY        phase=" + (isDay ? "Day" : "Night") +

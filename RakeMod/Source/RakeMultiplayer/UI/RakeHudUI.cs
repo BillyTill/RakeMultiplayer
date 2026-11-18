@@ -428,9 +428,7 @@ namespace RakeMultiplayer.UI
 
             bool hasCycle = dayNight != null && dayNight.IsRunning;
             float left = hasCycle ? dayNight.GetRemainingTime() : 0f;
-            float total = dayNight != null
-                ? (dayNight.CurrentPhase == Phase.Day ? dayNight.DayDuration : dayNight.NightDuration)
-                : 0f;
+            float total = dayNight != null ? dayNight.CurrentPhaseDuration : 0f;
 
             _timer.text = hasCycle
                 ? Mathf.FloorToInt(left / 60f).ToString("00") + ":" + Mathf.FloorToInt(left % 60f).ToString("00")

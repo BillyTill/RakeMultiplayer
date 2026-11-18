@@ -19,6 +19,12 @@ namespace RakeMultiplayer
         [Tooltip("Duration of night phase in seconds")]
         public float NightDuration = 300f; // 5 minutes default
 
+        [Tooltip("Duration of the final nights (night 2 and 3 by default)")]
+        public float LateNightDuration = 1800f; // 30 minutes
+
+        [Tooltip("First night that uses LateNightDuration; 0 = derive from the session (last two nights)")]
+        public int LateNightFrom = 0;
+
         [Header("Lighting")]
         [Tooltip("Directional light to animate (sun/moon)")]
         public Light DirectionalLight;
@@ -181,7 +187,7 @@ namespace RakeMultiplayer
             // Only server runs the timer
             if (!RakeMultiplayerPlugin.isServer) return;
 
-            float phaseDuration = (_currentPhase == Phase.Day) ? DayDuration : NightDuration;
+            float phaseDuration = DurationFor(_currentPhase, _nightNumber);
 
             // Real time on purpose: one peer opening the pause menu used to freeze the
             // 300 s night for everybody, with no phase packet ever sent again.
@@ -477,11 +483,32 @@ namespace RakeMultiplayer
         }
 
         /// <summary>
+        /// How long a phase lasts. Days are fixed; the last two nights are the long ones.
+        /// </summary>
+        public float DurationFor(Phase phase, int nightNumber)
+        {
+            if (phase == Phase.Day) return DayDuration;
+
+            int totalNights = 3;
+            var session = SessionManager.Instance;
+            if (session != null && session.TotalNightsConfig > 0) totalNights = session.TotalNightsConfig;
+
+            int lateFrom = LateNightFrom > 0 ? LateNightFrom : Mathf.Max(1, totalNights - 1);
+            return nightNumber >= lateFrom ? LateNightDuration : NightDuration;
+        }
+
+        /// <summary>Duration of the phase that is running right now (for the HUD arc).</summary>
+        public float CurrentPhaseDuration
+        {
+            get { return DurationFor(_currentPhase, _nightNumber); }
+        }
+
+        /// <summary>
         /// Get remaining time in current phase
         /// </summary>
         public float GetRemainingTime()
         {
-            float phaseDuration = (_currentPhase == Phase.Day) ? DayDuration : NightDuration;
+            float phaseDuration = DurationFor(_currentPhase, _nightNumber);
             return Mathf.Max(0f, phaseDuration - _phaseTimer);
         }
 
@@ -494,7 +521,7 @@ namespace RakeMultiplayer
             bool isNight = packet.Phase == Phase.Night;
 
             _currentPhase = packet.Phase;
-            _phaseTimer = (_currentPhase == Phase.Day ? DayDuration : NightDuration) - packet.RemainingTime;
+            _phaseTimer = DurationFor(_currentPhase, _nightNumber) - packet.RemainingTime;
             _nightNumber = packet.NightNumber;
 
             // The server owns the timer, but the client still has to treat the cycle as
@@ -667,7 +694,7 @@ namespace RakeMultiplayer
         {
             _currentPhase = phase;
             _nightNumber = nightNumber;
-            float phaseDuration = (phase == Phase.Day) ? DayDuration : NightDuration;
+            float phaseDuration = DurationFor(phase, nightNumber);
             _phaseTimer = phaseDuration - remainingTime;
 
             if (RakeMultiplayerPlugin.isServer)

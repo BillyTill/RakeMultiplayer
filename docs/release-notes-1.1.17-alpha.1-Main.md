@@ -1,4 +1,4 @@
-# Rake Multiplayer 1.1.15-alpha.1-Main
+# Rake Multiplayer 1.1.17-alpha.1-Main
 
 > **Main build.** This release is built from the `master` (Main) branch: graphics
 > presets, the day/night level change, the HUD phase fix and the climbing guards.
@@ -195,6 +195,35 @@ and a client no longer disconnects itself when it clicks the button.
 - Dropped loot is deduplicated per weapon type; trap placement is bounds- and distance-checked.
 - HUD night counter follows the configured night count; the weapon diagnostic dump moved to
   F9 (it shared F8 with the performance overlay); the lobby title is no longer overwritten.
+
+## What changed in 1.1.17
+
+**The Rake no longer runs away at night when it is spotted.** That retreat was the *combat*
+state `Flee`, not the daytime keep-away: while watching from cover, a hunter looking at it sent
+it running 100 m. At night it is the hunter, so being seen now escalates to the charge:
+
+```
+[AI] Spotted while watching - charging
+```
+
+`Flee` remains for taking damage from a distance and for the daytime behaviour.
+
+**The pause between tasks is 20-35 seconds** instead of 60-90. That pause is what made the
+night feel empty after every short encounter; together with the charge-on-spot it keeps the
+pressure on.
+
+## What changed in 1.1.16
+
+**The Rake starts the day deeper in the forest.** The level's forest marker sits close to the
+hunter camp, so the Rake used to begin the day on the doorstep and immediately run away. The
+spawn is now pushed away from the nearest hunter to at least 200 m (never beyond 420 m, so it
+stays inside the map), sampled on the NavMesh with a spread of directions. Both numbers are
+tunable fields on the AI component.
+
+**The last two nights last 30 minutes.** Night 1 stays at 5 minutes; nights 2 and 3 use
+`LateNightDuration = 1800 s`. The "last two" is derived from the session's night count, so it
+follows the config if the number of nights changes. The HUD arc and the countdown use the
+same table, so the timer no longer looks wrong on the long nights.
 
 ## What changed in 1.1.15
 

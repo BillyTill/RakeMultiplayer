@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.1.17-alpha.1-Main - 2026-11-18
+
+At night the Rake charges when it is spotted instead of running away, and the pause
+between tasks is 20-35 s instead of 60-90.
+
+## 1.1.16-alpha.1-Main - 2026-11-18
+
+The Rake starts the day deeper in the forest (200+ m from the hunters instead of on
+the camp doorstep), and the last two nights last 30 minutes.
+
 ## 1.1.15-alpha.1-Main - 2026-11-18
 
 The Rake no longer slides in the idle animation: the animator speed follows the body
