@@ -14,7 +14,10 @@ namespace RakeMultiplayer.Networking
     /// </summary>
     public static class Protocol
     {
-        public const int Version = 1;
+        // 2: PhaseSkipRequest, item replay and the strict client-side level rules. A build
+        // below this connects fine but cannot join the phase logic, which showed up as
+        // "the client skips the day locally and the host never moves".
+        public const int Version = 2;
 
         public static bool IsCompatible(int clientVersion)
         {

@@ -64,11 +64,18 @@ namespace RakeMultiplayer
             }
         }
 
+        /// <summary>
+        /// Only the host changes levels. A client that asks for it is running a build that
+        /// still thinks it owns the level (anything before 1.1.19); both PCs must be updated.
+        /// </summary>
         private void HandleServerLevelChange(int connectionId, LevelChangePacket packet, byte[] rawData)
         {
             // Level changes are host-authoritative. A client used to be able to reload an
             // arbitrary scene for everyone (or spam reloads and kill the session).
-            RakeMultiplayerPlugin.Log?.LogWarning("[Scene] ignored LevelChange from client C" + connectionId);
+            RakeMultiplayerPlugin.Log?.LogWarning("[Scene] ignored LevelChange from client C" + connectionId +
+                                                  ": only the host changes levels. If a client is trying to move " +
+                                                  "the level, that PC runs an older mod - install the same " +
+                                                  "version on every machine.");
         }
 
         private void HandleClientLevelChange(LevelChangePacket packet)

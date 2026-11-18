@@ -1,4 +1,4 @@
-# Rake Multiplayer 1.1.19-alpha.1-Main
+# Rake Multiplayer 1.1.20-alpha.1-Main
 
 > **Main build.** This release is built from the `master` (Main) branch: graphics
 > presets, the day/night level change, the HUD phase fix and the climbing guards.
@@ -195,6 +195,29 @@ and a client no longer disconnects itself when it clicks the button.
 - Dropped loot is deduplicated per weapon type; trap placement is bounds- and distance-checked.
 - HUD night counter follows the configured night count; the weapon diagnostic dump moved to
   F9 (it shared F8 with the performance overlay); the lobby title is no longer overwritten.
+
+## What changed in 1.1.20
+
+**The protocol version is now 2.** Packet layouts and level rules changed a lot since 1.1.7,
+but the handshake still said version 1 - so a client from an older build connected normally and
+then behaved like the old build: it skipped the phase on its own side and sent the host a
+`LevelChange` that the host ignores. That looks exactly like "the day does not skip".
+
+Now such a client is refused before it joins:
+
+```
+[Net] rejected C1: Mod version mismatch: client protocol 1, host protocol 2. Update the mod on every PC.
+```
+
+Install the same build on every machine; that is the point of the check.
+
+Also, when the host does see a client asking to change the level, it now says why instead of a
+bare "ignored":
+
+```
+[Scene] ignored LevelChange from C1: only the host changes levels. If a client is trying to
+        move the level, that PC runs an older mod - install the same version on every machine.
+```
 
 ## What changed in 1.1.19
 

@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.1.20-alpha.1-Main - 2026-11-18
+
+Protocol version 2: a client from an older build is refused with a readable message
+instead of connecting and skipping the phase on its own side.
+
 ## 1.1.19-alpha.1-Main - 2026-11-18
 
 Items picked up stay gone after a level change instead of reappearing at dawn.
