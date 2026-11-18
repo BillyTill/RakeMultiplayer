@@ -1,4 +1,4 @@
-# Rake Multiplayer 1.1.13-alpha.1-Main
+# Rake Multiplayer 1.1.14-alpha.1-Main
 
 > **Main build.** This release is built from the `master` (Main) branch: graphics
 > presets, the day/night level change, the HUD phase fix and the climbing guards.
@@ -195,6 +195,22 @@ and a client no longer disconnects itself when it clicks the button.
 - Dropped loot is deduplicated per weapon type; trap placement is bounds- and distance-checked.
 - HUD night counter follows the configured night count; the weapon diagnostic dump moved to
   F9 (it shared F8 with the performance overlay); the lobby title is no longer overwritten.
+
+## What changed in 1.1.14
+
+**The AI panel now says what the Rake is doing.** It used to lead with `STATE Idle`, which
+during the day is the *combat* state - the body was often walking to a patrol point at that
+very moment, so the panel looked like "the AI is frozen". Now:
+
+```
+ACTIVITY   PATROLLING (11 m to the next point)
+COMBAT     Idle   (prev Flee, 22.6 s)
+DAY        phase=Day   patrol=walking   next=3.9 s   keepAway=60 m
+```
+
+`ACTIVITY` is the plain answer (patrolling / patrolling pause / fleeing / hunting, with the
+sub-state), `COMBAT` is the state machine, and `DAY.patrol` shows walking, pausing or fleeing
+instead of a bare boolean.
 
 ## What changed in 1.1.13
 

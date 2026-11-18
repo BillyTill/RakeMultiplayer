@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.1.14-alpha.1-Main - 2026-11-18
+
+AI panel says what the Rake is actually doing (patrol/flee/hunt) instead of a bare
+combat state that read as "standing still".
+
 ## 1.1.13-alpha.1-Main - 2026-11-18
 
 Daytime Rake resumes patrolling right after a flee; the F7 AI panel highlights the Rake

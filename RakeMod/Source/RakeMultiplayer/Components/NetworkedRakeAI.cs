@@ -2653,6 +2653,44 @@ namespace RakeMultiplayer
         }
 
         /// <summary>Full multi-line state dump for the F7 status panel.</summary>
+        /// <summary>One phrase that says what the body is doing right now.</summary>
+        private string DescribeActivity()
+        {
+            var agent = GetEnemyAgent();
+            float remaining = agent != null && agent.hasPath ? agent.remainingDistance : 0f;
+
+            if (_dayRetreatActive)
+            {
+                return "FLEEING from the hunter";
+            }
+
+            if (_dayRoamActive)
+            {
+                return "PATROLLING (" + remaining.ToString("F0") + " m to the next point)";
+            }
+
+            var cycle = DayNightManager.Instance;
+            bool daytime = cycle != null && cycle.IsRunning && cycle.CurrentPhase == Phase.Day;
+            if (daytime)
+            {
+                return "PATROL PAUSE (" + Mathf.Max(0f, _dayRoamNext - Time.time).ToString("F1") + " s)";
+            }
+
+            switch (currentState)
+            {
+                case RakeState.Chase: return "HUNTING (chasing)";
+                case RakeState.Attack: return "HUNTING (attacking)";
+                case RakeState.Lurk: return "HUNTING (watching from cover)";
+                case RakeState.Stealth: return "HUNTING (sneaking up)";
+                case RakeState.Flee: return "BREAKING CONTACT";
+                case RakeState.Stunned: return "STUNNED";
+                case RakeState.Dead: return "DEAD";
+                default:
+                    return "WAITING for the next task (" +
+                           Mathf.Max(0f, _lurkCooldownTimer).ToString("F0") + " s)";
+            }
+        }
+
         public string GetAiStatusReport()
         {
             var target = currentTarget;
@@ -2660,7 +2698,11 @@ namespace RakeMultiplayer
             var agent = GetEnemyAgent();
             var sb = new System.Text.StringBuilder(512);
 
-            sb.AppendLine("STATE      " + currentState + "   (prev " + previousState + ", " + stateTimer.ToString("F1") + " s)");
+            // "STATE Idle" read as "standing still", which is wrong during the day: Idle is
+            // the combat state, while the body may be patrolling. Say what it is doing.
+            sb.AppendLine("ACTIVITY   " + DescribeActivity());
+
+            sb.AppendLine("COMBAT     " + currentState + "   (prev " + previousState + ", " + stateTimer.ToString("F1") + " s)");
             sb.AppendLine("ROLE       " + (IsAiActive ? "AI ACTIVE" : "inactive") +
                           "   player=" + _playerControlled + "   remote=" + _remoteOwner + "   server=" + RakeMultiplayerPlugin.isServer);
             sb.AppendLine("TARGET     " + (target != null ? target.name : "-") +
@@ -2696,9 +2738,11 @@ namespace RakeMultiplayer
             sb.AppendLine("ATTACK     cooldown=" + _attackCooldown.ToString("F2") + " s   swing=" + _attackSwing + "   struck=" + _attackStruck + "   range=" + attackRange.ToString("F1") + " m");
             var dayCycle = DayNightManager.Instance;
             bool isDay = dayCycle != null && dayCycle.IsRunning && dayCycle.CurrentPhase == Phase.Day;
+            string patrolState = _dayRetreatActive ? "fleeing"
+                               : _dayRoamActive ? "walking"
+                               : "pausing";
             sb.AppendLine("DAY        phase=" + (isDay ? "Day" : "Night") +
-                          "   flee=" + _dayRetreatActive +
-                          "   patrol=" + _dayRoamActive +
+                          "   patrol=" + patrolState +
                           "   next=" + Mathf.Max(0f, _dayRoamNext - Time.time).ToString("F1") + " s" +
                           "   keepAway=" + dayKeepAwayDistance.ToString("F0") + " m");
             sb.AppendLine("NOISE      cooldown=" + _noiseCooldown.ToString("F1") + " s   hearRange=" + noiseHearRange.ToString("F0") + " m");
