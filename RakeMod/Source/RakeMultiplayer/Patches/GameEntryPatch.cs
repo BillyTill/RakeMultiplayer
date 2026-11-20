@@ -48,7 +48,10 @@ namespace RakeMultiplayer.Patches
                     return;
                 }
 
-                RakeNetworkManager.Instance?.NotifyLocalLevelLoad(UnityEngine.Application.loadedLevel);
+                // Load-by-name: right after LoadLevel the engine still reports the OLD level
+                // (the scene is applied on the next frame), so sending that index made every
+                // client dedupe the packet and stay one phase behind. Send the name instead.
+                RakeNetworkManager.Instance?.NotifyLocalLevelLoad(name);
             }
         }
 
@@ -58,12 +61,18 @@ namespace RakeMultiplayer.Patches
         [HarmonyPatch(typeof(Application), "LoadLevelAsync", new Type[] { typeof(string) })]
         public class ApplicationLoadLevelAsyncPatch
         {
-            static void Prefix(string levelName)
+            static bool Prefix(string levelName)
             {
-                if (!RakeMultiplayerPlugin.Enabled.Value) return;
+                if (!RakeMultiplayerPlugin.Enabled.Value) return true;
+
+                // Same rule as the synchronous overload: a client must not load a level on
+                // its own, even through the legacy async API (N14).
+                if (BlockClientLevelLoad(levelName)) return false;
+
                 RakeMultiplayerPlugin.Log?.LogInfo($"[GameEntryPatch] Async scene load requested: {levelName}");
                 _isSceneLoading = true;
                 OnSceneChangeStart(levelName);
+                return true;
             }
         }
 
@@ -158,6 +167,15 @@ namespace RakeMultiplayer.Patches
 
             // Both sides: which items are already taken. The new level rebuilds its items.
             WorldPersistence.SaveConsumedItems();
+
+            // Both sides: the local player's own inventory. The new level recreates the
+            // player, and nothing else captures the ammo list before it is destroyed -
+            // every phase change used to reset it (I-PHASE-1).
+            var localPlayer = PlayerSpawner.Instance != null ? PlayerSpawner.Instance.LocalPlayer : null;
+            if (localPlayer != null)
+            {
+                WorldPersistence.SaveInventory(localPlayer);
+            }
             // Every process-wide subsystem that belongs to the old level. Input locks,
             // network ids, cameras, traps and deaths used to be reset by hand in different
             // patches; one missed line left state in the next level. The snapshot above must

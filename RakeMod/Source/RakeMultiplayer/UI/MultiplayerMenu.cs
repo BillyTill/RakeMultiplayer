@@ -262,10 +262,11 @@ namespace RakeMultiplayer.UI
                 WeaponDiagnostics.Dump("F9 pressed");
             }
 
-            // Dump the local player prefab hierarchy (third-person model availability)
-            if (hotkeysFree && Input.GetKeyDown(KeyCode.F9))
+            // Dump the local player prefab hierarchy (third-person model availability).
+            // F12: F9 already dumps the weapon state, and both fired on one press (N20).
+            if (hotkeysFree && Input.GetKeyDown(KeyCode.F12))
             {
-                PlayerHierarchyDiagnostics.Dump("F9 pressed");
+                PlayerHierarchyDiagnostics.Dump("F12 pressed");
             }
 
             // Debug: preview the baked remote player body without a second game instance

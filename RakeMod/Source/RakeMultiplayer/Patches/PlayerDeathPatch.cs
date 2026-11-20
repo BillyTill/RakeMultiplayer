@@ -23,12 +23,13 @@ namespace RakeMultiplayer.Patches
             // is idempotent; if it cannot handle this hit, simply keep the body as is.
             bool handled = PlayerDeathSystem.BeginLocalDeath(__instance);
 
-            if (!handled && __instance != null && __instance.Health < 0)
+            if (!handled && __instance != null)
             {
-                // The death flow needs PlayerSpawner.LocalPlayer, which does not exist yet
-                // during a level load. Do not leave a negative-health body with the vanilla
-                // "Game over" suppressed: clamp it so the next hit can kill it properly.
-                __instance.Health = 1;
+                // The death flow needs PlayerSpawner.LocalPlayer, which may not exist yet
+                // during a level load. Retry every frame instead of clamping HP to 1, which
+                // left the body unkillable until the next hit (N18).
+                PlayerDeathSystem.MarkPendingLocalDeath(__instance);
+                if (__instance.Health < 0) __instance.Health = 0;
             }
 
             return false;

@@ -511,6 +511,10 @@ namespace RakeMultiplayer.Patches
             if (RakeMultiplayerPlugin.IsApplyingNetworkCameraState) return true; // network-driven visual update
             if (__instance.cameraState != RecordCamera_obj.Camera_state.Unsetup) return true;
 
+            // Single player: the mod must not take over the vanilla camera (§11, N1).
+            // Without this guard isServer=false sent the SP camera into the client branch.
+            if (!RakeMultiplayerPlugin.isConnected) return true;
+
             var netCam = __instance.GetComponent<NetworkedCamera>() ?? __instance.GetComponentInParent<NetworkedCamera>();
             if (netCam == null) return true; // not a networked camera - run vanilla logic
 
@@ -555,6 +559,9 @@ namespace RakeMultiplayer.Patches
             if (RakeMultiplayerPlugin.IsApplyingNetworkCameraState) return true; // network-driven visual update
             if (__instance.cameraState != RecordCamera_obj.Camera_state.Setup) return true;
 
+            // Single player: vanilla un-setup (§11, N1).
+            if (!RakeMultiplayerPlugin.isConnected) return true;
+
             var netCam = __instance.GetComponent<NetworkedCamera>() ?? __instance.GetComponentInParent<NetworkedCamera>();
             if (netCam == null) return true;
 
@@ -594,6 +601,9 @@ namespace RakeMultiplayer.Patches
             if (!RakeMultiplayerPlugin.Enabled.Value) return;
             if (__instance.cameraState != RecordCamera_obj.Camera_state.Unsetup) return;
 
+            // Single player keeps the vanilla quota (N1).
+            if (!RakeMultiplayerPlugin.isConnected) return;
+
             bool canPlace = NetworkedCamera.CanPlaceCamera();
             if (__result != canPlace)
             {
@@ -621,6 +631,10 @@ namespace RakeMultiplayer.Patches
         {
             if (!RakeMultiplayerPlugin.Enabled.Value) return true;
             if (point == null) return true;
+
+            // Single player: bait works as in vanilla (N1).
+            if (!RakeMultiplayerPlugin.isConnected) return true;
+
             if (RakeMultiplayerPlugin.isServer) return true; // server owns the AI
 
             var marker = new RakeMultiplayer.Networking.MapMarkerPacket
@@ -758,8 +772,16 @@ namespace RakeMultiplayer.Patches
         {
             if (!RakeMultiplayerPlugin.Enabled.Value) return true;
 
+            // Single player first, before the role check: isServer is false there, and the
+            // old order disabled the vanilla trap entirely (N13).
+            if (!RakeMultiplayerPlugin.isConnected) return true;
+
             // Clients never resolve trap damage/effects
             if (!RakeMultiplayerPlugin.isServer) return false;
+
+            // A sprung trap is spent (I-RAKE-3). Vanilla only checks bSetup and never
+            // clears it, so one trap stunned the Rake on every step through it.
+            if (!__instance.bSetup) return false;
 
             return true; // server runs the original damage logic
         }
@@ -769,7 +791,11 @@ namespace RakeMultiplayer.Patches
         {
             if (!RakeMultiplayerPlugin.Enabled.Value) return;
             if (!RakeMultiplayerPlugin.isServer) return;
+            if (!RakeMultiplayerPlugin.isConnected) return;
             if (info == null) return;
+
+            // One shot for every victim type; vanilla never cleared this flag.
+            __instance.bSetup = false;
 
             // Extra effect required by the mechanic spec: trap stuns the Rake for 3s
             var rake = info.GetComponentInParent<NetworkedRakeAI>();
@@ -878,9 +904,19 @@ namespace RakeMultiplayer.Patches
     public class AnimalTakeDamageAuthorityPatch
     {
         [HarmonyPrefix]
-        static bool Prefix(Animal_AI __instance)
+        static bool Prefix(Animal_AI __instance, string damageType)
         {
             if (!RakeMultiplayerPlugin.Enabled.Value) return true;
+
+            // Same rule as the Rake (I-DMG-6): a weapon hit is resolved by the
+            // authoritative projectile; the vanilla instant raycast must not add a second
+            // hit on top of it. The projectile sets ApplyingImpact around its own call.
+            if (!ProjectileSystem.ApplyingImpact &&
+                (damageType == "SniperShot" || damageType == "Bullet"))
+            {
+                return false;
+            }
+
             if (!RakeMultiplayerPlugin.isConnected) return true;
             return RakeMultiplayerPlugin.isServer;
         }

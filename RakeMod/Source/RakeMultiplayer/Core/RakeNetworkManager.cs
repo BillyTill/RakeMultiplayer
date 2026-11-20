@@ -50,7 +50,22 @@ namespace RakeMultiplayer
 
         private Dictionary<int, PlayerStatePacket> _playerStates = new Dictionary<int, PlayerStatePacket>();
 
+        // Last weapon each client reported holding. The server validates a shotgun/sniper
+        // DamageRequest against it instead of trusting the client's DamageType (N3).
+        private readonly Dictionary<int, byte> _playerWeaponIds = new Dictionary<int, byte>();
+
         private HashSet<int> _connectedClients = new HashSet<int>();
+
+        // Connections that have not introduced themselves yet. The host sends no world
+        // state (and no StartGame) until the handshake arrives, so a build with another
+        // protocol is refused before it can load a level (I-NET-6).
+        private const float HandshakeTimeoutSeconds = 8f;
+        private readonly Dictionary<int, float> _awaitingHandshake = new Dictionary<int, float>();
+
+        // World-state packets held back until the handshake validates the build. Without
+        // this an old client received PlayerConnected/RakeOwner/items before the version
+        // check (N11, I-NET-6).
+        private readonly Dictionary<int, List<byte[]>> _pendingPreHandshake = new Dictionary<int, List<byte[]>>();
 
         private Vector3 _hostSpawnPosition = Vector3.zero;
 
@@ -219,6 +234,13 @@ namespace RakeMultiplayer
 
         private void Update()
         {
+            // A connection that never introduces itself is an old build (it cannot send a
+            // packet it does not know). Refuse it instead of leaving a half-joined client.
+            if (RakeMultiplayerPlugin.isServer && _awaitingHandshake.Count > 0)
+            {
+                CheckHandshakeTimeouts();
+            }
+
             // The match level follows the engine, not the request that started the load: a
             // request can name a scene, be dropped while another load finishes, or land on a
             // different index. A stale value here is what made level-dependent logic use the
@@ -240,6 +262,9 @@ namespace RakeMultiplayer
 
             // Retry door states that arrived while a door was still animating.
             DoorSync.Update();
+
+            // Retry a lethal hit that could not start the death flow yet (N18).
+            PlayerDeathSystem.TickPendingLocalDeath();
 
             TickRespawns();
 
@@ -264,6 +289,8 @@ namespace RakeMultiplayer
             }
 
             _playerStates.Clear();
+            _playerWeaponIds.Clear();
+            _pendingPreHandshake.Clear();
             _connectedClients.Clear();
             _knownPlayerIds.Clear();
             _pendingConnects.Clear();
@@ -335,9 +362,107 @@ namespace RakeMultiplayer
                         RakeMultiplayerPlugin.Log?.LogInfo($"[Net] Server: client {msg.ConnectionId} disconnected");
                         _connectedClients.Remove(msg.ConnectionId);
                         _playerStates.Remove(msg.ConnectionId);
+                        _playerWeaponIds.Remove(msg.ConnectionId + 1);
+                        _awaitingHandshake.Remove(msg.ConnectionId);
+                        _pendingPreHandshake.Remove(msg.ConnectionId);
                         OnServerClientDisconnected(msg.ConnectionId);
                         break;
                 }
+            }
+        }
+
+        /// <summary>Server: the client introduced itself; check the build before handing out the world.</summary>
+        private void HandleServerHandshake(int connectionId, HandshakePacket packet)
+        {
+            _awaitingHandshake.Remove(connectionId);
+
+            if (!Protocol.IsCompatible(packet.ProtocolVersion))
+            {
+                string reason = Protocol.MismatchMessage(packet.ProtocolVersion);
+                RakeMultiplayerPlugin.Log?.LogError("[Net] rejected C" + connectionId +
+                                                    " on handshake: " + reason);
+                RejectConnection(connectionId, packet.ProtocolVersion, reason);
+                return;
+            }
+
+            if (!string.IsNullOrEmpty(packet.Name))
+            {
+                string name = packet.Name.Trim();
+                if (name.Length > 24) name = name.Substring(0, 24);
+                _playerNames[connectionId + 1] = name;
+            }
+
+            RakeMultiplayerPlugin.Log?.LogInfo("[Net] C" + connectionId + " handshake ok (protocol " +
+                                               packet.ProtocolVersion + ")");
+
+            // Flush the world state that was held back while the build was unverified (N11).
+            List<byte[]> queued;
+            if (_pendingPreHandshake.TryGetValue(connectionId, out queued))
+            {
+                _pendingPreHandshake.Remove(connectionId);
+                if (_server != null && queued != null)
+                {
+                    for (int i = 0; i < queued.Count; i++) _server.Send(connectionId, queued[i]);
+                }
+            }
+
+            // A late joiner learns the level now; the snapshot follows once it reports ready.
+            if (SessionManager.Instance != null && SessionManager.Instance.IsRunning &&
+                UnityEngine.Application.loadedLevel > 0)
+            {
+                _server.Send(connectionId,
+                    new StartGamePacket(UnityEngine.Application.loadedLevel.ToString()).Serialize());
+            }
+        }
+
+        private void RejectConnection(int connectionId, int clientVersion, string reason)
+        {
+            try
+            {
+                if (_server != null)
+                {
+                    _server.Send(connectionId, new ProtocolRejectPacket
+                    {
+                        HostVersion = Protocol.Version,
+                        ClientVersion = clientVersion,
+                        Message = reason
+                    }.Serialize());
+                }
+            }
+            catch (Exception ex)
+            {
+                RakeMultiplayerPlugin.Log?.LogWarning("[Net] could not send the reject: " + ex.Message);
+            }
+
+            _awaitingHandshake.Remove(connectionId);
+            _pendingPreHandshake.Remove(connectionId);
+            if (_server != null) _server.Disconnect(connectionId);
+        }
+
+        private void CheckHandshakeTimeouts()
+        {
+            if (_server == null || _awaitingHandshake.Count == 0) return;
+
+            float now = Time.realtimeSinceStartup;
+            List<int> expired = null;
+
+            foreach (var pair in _awaitingHandshake)
+            {
+                if (now <= pair.Value) continue;
+                if (expired == null) expired = new List<int>();
+                expired.Add(pair.Key);
+            }
+
+            if (expired == null) return;
+
+            for (int i = 0; i < expired.Count; i++)
+            {
+                int connId = expired[i];
+                RakeMultiplayerPlugin.Log?.LogWarning("[Net] C" + connId + " did not handshake within " +
+                                                      HandshakeTimeoutSeconds + " s - refusing an old build");
+                RejectConnection(connId, 0,
+                                 "No handshake from the client: its mod build is older than protocol " +
+                                 Protocol.Version + ". Update the mod on every PC.");
             }
         }
 
@@ -351,6 +476,14 @@ namespace RakeMultiplayer
                     case NetEventType.Connected:
                         RakeMultiplayerPlugin.Log?.LogInfo("[Net] Client: connected to server");
                         RakeMultiplayerPlugin.isConnected = true;
+
+                        // Introduce ourselves before the host sends anything: the protocol
+                        // version is checked on this first packet (I-NET-6).
+                        _client.Send(new HandshakePacket
+                        {
+                            ProtocolVersion = Protocol.Version,
+                            Name = RakeMultiplayerPlugin.PlayerName.Value
+                        }.Serialize());
                         break;
                     case NetEventType.Data:
                         OnClientDataReceived(msg.Data);
@@ -405,6 +538,10 @@ namespace RakeMultiplayer
 
                 _connectedClients.Add(connectionId);
 
+                // Armed before ANY send: from here on broadcasts skip this connection and
+                // targeted world state is buffered until the handshake validates it (N11).
+                _awaitingHandshake[connectionId] = Time.realtimeSinceStartup + HandshakeTimeoutSeconds;
+
                 // ID scheme: Host = 1, Clients = connectionId + 1
                 int assignedPlayerId = connectionId + 1;
                 PlayerHealthMap[assignedPlayerId] = 100f;
@@ -438,9 +575,8 @@ namespace RakeMultiplayer
                     IsYou = false,
                     Name = _playerNames[1]
                 };
-                _server.Send(connectionId, hostPacket.Serialize());
-            _server.Send(connectionId, new RakeOwnerPacket { OwnerId = LobbyState.RakeOwnerId }.Serialize());
-
+                SendToConnection(connectionId, hostPacket.Serialize());
+                SendToConnection(connectionId, new RakeOwnerPacket { OwnerId = LobbyState.RakeOwnerId }.Serialize());
                 // Late join: send the current door states, otherwise every door is closed
                 // for the newcomer until somebody touches it again.
                 DoorSync.SendSnapshotToPlayer(connectionId + 1);
@@ -449,7 +585,7 @@ namespace RakeMultiplayer
                 // see ghost items that cannot be picked up.
                 foreach (var consumedId in _consumedItemIds)
                 {
-                    _server.Send(connectionId, new ItemDestroyedPacket
+                    SendToConnection(connectionId, new ItemDestroyedPacket
                     {
                         ItemNetworkId = consumedId,
                         PickerId = 0,
@@ -457,15 +593,10 @@ namespace RakeMultiplayer
                     }.Serialize());
                 }
 
-                // Joining a match that is already running: load the level now. The client
-                // sends ClientReady once its scene/registries exist.
-                if (SessionManager.Instance != null && SessionManager.Instance.IsRunning &&
-                    UnityEngine.Application.loadedLevel > 0)
-                {
-                    _server.Send(connectionId,
-                        new StartGamePacket(UnityEngine.Application.loadedLevel.ToString()).Serialize());
-                }
-                RakeMultiplayerPlugin.Log?.LogInfo($"[Net] Sent Host info to C{connectionId}: pos={hostPos}");
+                // Joining a match that is already running: the level is sent AFTER the
+                // handshake proves the build is compatible (I-NET-6). Sending StartGame
+                // here let an old client load the level before being refused.
+                RakeMultiplayerPlugin.Log?.LogInfo($"[Net] C{connectionId} connected, worlds held (awaiting handshake)");
 
                 // 1. Send existing CLIENTS to the NEW client (use assignedPlayerId = existingId + 1)
                 foreach (var existingId in _connectedClients)
@@ -493,7 +624,7 @@ namespace RakeMultiplayer
                         SpawnPosition = existingPos,
                         IsYou = false
                     };
-                    _server.Send(connectionId, existingPacket.Serialize());
+                    SendToConnection(connectionId, existingPacket.Serialize());
                 }
 
                 // 2. Broadcast NEW player to ALL
@@ -504,7 +635,7 @@ namespace RakeMultiplayer
                     IsYou = true,
                     Name = _playerNames[assignedPlayerId]
                 };
-                _server.Send(connectionId, newPacketForNew.Serialize());
+                SendToConnection(connectionId, newPacketForNew.Serialize());
 
                 var newPacketForOthers = new PlayerConnectedPacket
                 {
@@ -608,6 +739,9 @@ namespace RakeMultiplayer
                         break;
                     case PacketType.ClientReady:
                         HandleServerClientReady(connectionId, (ClientReadyPacket)packet);
+                        break;
+                    case PacketType.Handshake:
+                        HandleServerHandshake(connectionId, (HandshakePacket)packet);
                         break;
                     case PacketType.PhaseSkipRequest:
                         HandleServerPhaseSkipRequest(connectionId, (PhaseSkipRequestPacket)packet);
@@ -834,6 +968,17 @@ namespace RakeMultiplayer
 
         private float _lastRakeAttackTime = -999f;
 
+        // Per-kind attack cooldowns for the player-driven Rake. The owning client keeps its
+        // own timers for the HUD, but the server enforces them too: otherwise a modified
+        // client can swing every second and the "host-authoritative" promise is a lie
+        // (MECHANICS_INTERACTIONS.md, I-ROLE-3).
+        private const float RakePlayerAttackCooldown = 20f;
+        private const float RakeAnimalAttackCooldown = 10f;
+        private const float RakeCameraAttackCooldown = 50f;
+        private float _lastRakePlayerAttackTime = -999f;
+        private float _lastRakeAnimalAttackTime = -999f;
+        private float _lastRakeCameraAttackTime = -999f;
+
 // Public methods for RakeMultiplayerPlugin static helpers
         public void SendToServer(byte[] data)
         {
@@ -854,9 +999,33 @@ namespace RakeMultiplayer
             {
                 foreach (var connId in _connectedClients)
                 {
+                    // No world state before the version handshake (N11).
+                    if (_awaitingHandshake.ContainsKey(connId)) continue;
                     _server.Send(connId, data);
                 }
             }
+        }
+
+        /// <summary>
+        /// Target one connection, holding the packet until the handshake is validated.
+        /// </summary>
+        private void SendToConnection(int connectionId, byte[] data)
+        {
+            if (_server == null || data == null) return;
+
+            if (_awaitingHandshake.ContainsKey(connectionId))
+            {
+                List<byte[]> queue;
+                if (!_pendingPreHandshake.TryGetValue(connectionId, out queue))
+                {
+                    queue = new List<byte[]>();
+                    _pendingPreHandshake[connectionId] = queue;
+                }
+                queue.Add(data);
+                return;
+            }
+
+            _server.Send(connectionId, data);
         }
 
 // Aliases for NetworkedPlayer

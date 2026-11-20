@@ -1,5 +1,45 @@
 # Changelog
 
+## 1.1.25-alpha.1-Main - 2026-11-20
+
+The server now enforces the player-Rake attack cooldowns (20 s hunter, 10 s animal,
+50 s camera) instead of the old 1 s rate limit, so a modified client can no longer
+swing every second. A broken camera is removed from the host's monitor list as well,
+so five occupied slots always mean five buttons.
+
+A phase change now runs after the frame instead of replacing the level in the middle of
+the tick. Ammo and sprung traps survive the transition instead of resetting, and the
+Rake keeps its health between scenes - it used to be healed back to the session value at
+every nightfall, and every trap came back armed. The world snapshot is applied once per
+level from a single entry point, so cameras and traps cannot be lost to hook ordering.
+
+The trailer's "skip to the next hunt" button now advances the phase for everybody: the
+host queues the transition, a client asks the host with PhaseSkipRequest. Before, a
+client's button did nothing (its local level load was refused) and the host's button
+changed the level behind the phase clock's back.
+
+Protocol 3: a client introduces itself with a handshake before the host hands out any
+world state, so a mismatched build is refused before it can load a level. The host now
+announces level changes by scene name (the index is still stale right after LoadLevel in
+this engine), which fixes the client lagging one phase behind. A joining player now also
+receives dead players and the remaining camera-box count, respawn points keep clear of
+the Rake, a sprung vanilla trap is spent, and bullets no longer damage animals twice.
+
+The AI Rake no longer camps a downed hunter: a landed hit switches its task straight to
+Flee, it ignores the same hunter for a few seconds after they get up, and it cannot hit
+the same person twice within nine seconds. Before, it stood next to the ragdoll and swung
+again the moment the hunter stood up.
+
+Audit fixes (see docs/audit/2026-11-20-mechanics-vs-implementation.md): single player no
+longer has its cameras, bait or traps hijacked by the multiplayer patches; the host
+validates a client's shot profile against the weapon it reports holding (protocol 4);
+world state is held back until the handshake validates the build; a late joiner receives
+real camera state, dead players and the camera-box remainder; a sprung vanilla trap stays
+sprung across a phase change; the respawn point keeps a full 25 m from the Rake; shotgun
+pellets are sampled in a cone instead of a square; a lethal hit that cannot start the death
+flow is retried instead of leaving the body at 1 HP; console teleport and simulated hits
+are host-only.
+
 ## 1.1.23-alpha.1-Main - 2026-11-18
 
 A level load refused on a client is no longer reported to the host as a real level

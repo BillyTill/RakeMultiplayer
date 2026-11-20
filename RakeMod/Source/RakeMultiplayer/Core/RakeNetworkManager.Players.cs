@@ -65,6 +65,7 @@ namespace RakeMultiplayer
 
             // Store state by connectionId
             _playerStates[connectionId] = packet;
+            _playerWeaponIds[assignedPlayerId] = packet.WeaponId;
 
             // Re-serialize with corrected PlayerId for broadcast
             var data = packet.Serialize();
@@ -146,6 +147,23 @@ namespace RakeMultiplayer
             int amount;
             int pellets;
             float spread;
+
+            // The profile must match the weapon the shooter reports holding: a shotgun user
+            // cannot claim a sniper shot for 200 damage (N3). Weapon id 6 is the sniper.
+            byte heldWeapon;
+            if (_playerWeaponIds.TryGetValue(shooterId, out heldWeapon) && heldWeapon > 0)
+            {
+                bool sniperHeld = heldWeapon == 6;
+                bool claimsSniper = string.Equals(damageType, "SniperShot",
+                                                  System.StringComparison.OrdinalIgnoreCase);
+                if (sniperHeld != claimsSniper)
+                {
+                    RakeMultiplayerPlugin.Log?.LogWarning("[Ballistics] rejected shot: weapon " + heldWeapon +
+                                                          " does not match damage type " + damageType);
+                    return;
+                }
+            }
+
             if (string.Equals(damageType, "SniperShot", System.StringComparison.OrdinalIgnoreCase))
             {
                 amount = 200; pellets = 1; spread = 0f;
@@ -738,6 +756,19 @@ namespace RakeMultiplayer
 
             packet.PlayerId = playerId;
 
+            // A death the server did not see coming must not produce loot: otherwise a
+            // client could "die" every 8 s from full health and farm the whitelist (N8).
+            float serverHealth;
+            if (!PlayerHealthMap.TryGetValue(playerId, out serverHealth)) serverHealth = 100f;
+            bool deathVerified = serverHealth <= 0.5f || packet.Health <= 0.5f;
+            if (!deathVerified)
+            {
+                RakeMultiplayerPlugin.Log?.LogWarning("[Death] P" + playerId + " reported death at " +
+                                                      serverHealth.ToString("F0") + " HP - accepted without loot");
+                packet.WeaponIds = new int[0];
+                packet.WeaponAmmo = new int[0];
+            }
+
             // Never trust the loot list from a client: whitelist item ids, clamp ammo.
             packet.WeaponIds = SanitizeDroppedWeapons(packet.WeaponIds, packet.WeaponAmmo,
                                                       out var cleanAmmo);
@@ -784,7 +815,7 @@ namespace RakeMultiplayer
                 for (int i = 0; i < ids.Length && outIds.Count < 8; i++)
                 {
                     int id = ids[i];
-                    if (id != 1 && id != 2 && id != 4 && id != 5 && id != 6 && id != 8) continue;
+                    if (id != 1 && id != 2 && id != 3 && id != 4 && id != 5 && id != 6 && id != 8) continue;
 
                     // One weapon of each kind: the server cannot see a client's real
                     // inventory, but it can refuse the all-sniper-rifles loot spam.
@@ -867,6 +898,11 @@ namespace RakeMultiplayer
             // The level changed: everyone is alive again. Keeping the old zeros made the
             // next trap or bullet on a client force a 9999-damage death.
             PlayerHealthMap.Clear();
+
+            // I-PHASE-6: a level change revives everybody through MatchState.ResetCombat,
+            // so deaths, health and respawn timers cannot survive a phase change on any
+            // path that reaches the scene reset.
+            if (MatchState.IsActive) MatchState.Current.ResetCombat();
 
             if (health > 0 || pending > 0)
             {

@@ -356,6 +356,10 @@ namespace RakeMultiplayer
 
             if (!active)
             {
+                // Remember that this box is gone for good: without the consumed flag the
+                // next level recreated it full of cameras (N10, I-ITEM-3).
+                if (!_consumedItemIds.Contains(itemNetworkId)) _consumedItemIds.Add(itemNetworkId);
+
                 _networkedItems.Remove(itemNetworkId);
                 foreach (var kvp in _itemToNetworkId)
                 {
@@ -421,6 +425,11 @@ namespace RakeMultiplayer
 
                 if (!packet.IsActive)
                 {
+                    // Keep the client's own view consistent with the host (N10).
+                    if (!_consumedItemIds.Contains(packet.ItemNetworkId))
+                    {
+                        _consumedItemIds.Add(packet.ItemNetworkId);
+                    }
                     _networkedItems.Remove(packet.ItemNetworkId);
                     _itemToNetworkId.Remove(item);
                 }

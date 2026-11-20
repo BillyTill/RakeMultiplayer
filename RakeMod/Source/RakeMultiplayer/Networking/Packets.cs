@@ -26,6 +26,8 @@ namespace RakeMultiplayer.Networking
         public Quaternion Rotation;
         public byte AnimState;
         public float Health;
+        /// <summary>Weapon id the sender had in hand; the server validates DamageRequest against it (N3).</summary>
+        public byte WeaponId;
 
         public override void Write(BinaryWriter writer)
         {
@@ -39,6 +41,7 @@ namespace RakeMultiplayer.Networking
             writer.Write(Rotation.w);
             writer.Write(AnimState);
             writer.Write(Health);
+            writer.Write(WeaponId);
         }
 
         public override void Read(BinaryReader reader)
@@ -48,6 +51,7 @@ namespace RakeMultiplayer.Networking
             Rotation = new Quaternion(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
             AnimState = reader.ReadByte();
             Health = reader.ReadSingle();
+            WeaponId = reader.ReadByte();
         }
     }
 
@@ -261,6 +265,32 @@ namespace RakeMultiplayer.Networking
     }
 
     /// <summary>Server -> client: the host cannot talk to this build, and why.</summary>
+    /// <summary>
+    /// Client -> server: sent immediately after the transport connects, before the host
+    /// hands out any world state. The version used to be checked only on ClientReady,
+    /// which arrives after StartGame - so an incompatible build could already load a
+    /// level before being refused (I-NET-6).
+    /// </summary>
+    public class HandshakePacket : NetworkPacket
+    {
+        public override PacketType Type => PacketType.Handshake;
+
+        public int ProtocolVersion;
+        public string Name;
+
+        public override void Write(BinaryWriter writer)
+        {
+            writer.Write(ProtocolVersion);
+            writer.Write(Name ?? string.Empty);
+        }
+
+        public override void Read(BinaryReader reader)
+        {
+            ProtocolVersion = reader.ReadInt32();
+            Name = PacketSerializer.ReadSafeString(reader);
+        }
+    }
+
     public class ProtocolRejectPacket : NetworkPacket
     {
         public override PacketType Type => PacketType.ProtocolReject;
@@ -796,15 +826,19 @@ namespace RakeMultiplayer.Networking
         public override PacketType Type => PacketType.LevelChange;
 
         public int LevelIndex;
+        /// <summary>Scene name when the host loaded by name; Unity 5.0 has no name-to-index API.</summary>
+        public string SceneName;
 
         public override void Write(BinaryWriter writer)
         {
             writer.Write(LevelIndex);
+            writer.Write(SceneName ?? string.Empty);
         }
 
         public override void Read(BinaryReader reader)
         {
             LevelIndex = reader.ReadInt32();
+            SceneName = PacketSerializer.ReadSafeString(reader);
         }
     }
 

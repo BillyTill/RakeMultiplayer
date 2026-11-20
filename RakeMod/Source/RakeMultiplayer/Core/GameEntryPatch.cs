@@ -71,16 +71,20 @@ namespace RakeMultiplayer
                 SceneScope.CheckCleanState("after load");
                 RegisterSceneObjects(manager);
 
-                // Items the players already took must not come back with the new level.
-                WorldPersistence.ApplyConsumedItems();
+                // Items the players already took must not come back with the new level,
+                // and cameras/traps have to be rebuilt before anything is spawned or
+                // replicated. One idempotent entry point: this hook and the scene manager
+                // race, and the snapshot is one-shot (I-PHASE-3).
+                WorldPersistence.EnsureWorldRestored("scene entry");
 
                 // Any player may own the Rake: host, client or the AI.
                 RakeControlSync.Apply("scene loaded");
 
-                // Restore persisted cameras/traps for the new scene
                 if (RakeMultiplayerPlugin.isServer)
                 {
-                    WorldPersistence.RestoreWorld();
+                    // Health carried across the phase change; a no-op until the Rake body
+                    // of this scene exists (then the scene manager applies it).
+                    WorldPersistence.ApplySavedRakeHealth("scene entry");
                 }
 
                 if (RakeMultiplayerPlugin.isServer)

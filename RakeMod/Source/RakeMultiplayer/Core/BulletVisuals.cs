@@ -41,8 +41,11 @@ namespace RakeMultiplayer
             float radius = Mathf.Tan(Mathf.Clamp(spreadDegrees, 0f, 10f) * Mathf.Deg2Rad);
             for (int i = 0; i < pellets; i++)
             {
-                float x = UnityEngine.Random.Range(-radius, radius);
-                float y = UnityEngine.Random.Range(-radius, radius);
+                // Same disc sampling as the authoritative projectile (N17).
+                float r = radius * Mathf.Sqrt(UnityEngine.Random.value);
+                float angle = UnityEngine.Random.value * Mathf.PI * 2f;
+                float x = Mathf.Cos(angle) * r;
+                float y = Mathf.Sin(angle) * r;
                 SpawnTracer(origin, (direction + right * x + up * y).normalized);
             }
 

@@ -76,6 +76,16 @@ namespace RakeMultiplayer
         [Tooltip("A gunshot within this range can start a lurk cycle.")]
         public float noiseHearRange = 300f;
 
+        [Header("Attack Pacing (anti-stunlock)")]
+        [Tooltip("The same hunter cannot be hit again sooner than this, even after getting up.")]
+        public float reHitInterval = 9f;
+
+        [Tooltip("After a hunter stands up from the hit ragdoll, the Rake holds off this long.")]
+        public float postGetUpGrace = 2.5f;
+
+        [Tooltip("Extra time the Rake ignores the hunter it just hit, on top of the flee.")]
+        public float hitRetreatDuration = 3f;
+
         [Range(0f, 1f)]
         [Tooltip("Chance the Rake uses the crouched (frozen) pose while watching.")]
         public float lurkCrouchChance = 0.7f;
@@ -138,6 +148,15 @@ namespace RakeMultiplayer
         private bool _attackStruck;
         private bool _grabSent;
         private bool _clientAttackSwingPrev;
+
+        // Anti-stunlock pacing: one hit is an event, not the start of a loop. The Rake
+        // leaves right after the hit and the same hunter is safe for a while.
+        private readonly Dictionary<int, float> _lastHitTimes = new Dictionary<int, float>();
+        private Transform _downCheckTarget;
+        private bool _wasTargetDown;
+        private Transform _graceTarget;
+        private float _graceUntil;
+        private float _disengageUntil;
 
         // AI State Machine
         public enum RakeState : byte
@@ -566,7 +585,43 @@ namespace RakeMultiplayer
         {
             if (victim == null) return false;
             DealRakeDamage(victim, damage, damageType);
+
+            // AI hit pacing (I-RAKE-9): the grab delivers the damage here, not in
+            // UpdateAttack, so this is where the "hit landed" bookkeeping belongs.
+            // A player-controlled Rake keeps full control - the server already enforces
+            // its own cooldowns.
+            if (!RakePlayerController.IsActive)
+            {
+                RegisterHit(victim);
+            }
+
             return true;
+        }
+
+        /// <summary>
+        /// Remember a landed hit and break contact for a moment. Without this the Rake kept
+        /// standing over the ragdoll and swung again the instant it stood up.
+        /// </summary>
+        private void RegisterHit(Transform victim)
+        {
+            int hitId = TargetPlayerId(victim);
+            if (hitId > 0) _lastHitTimes[hitId] = Time.time;
+
+            currentTarget = victim;
+            _attackCooldown = Mathf.Max(_attackCooldown, 5f);
+
+            // After breaking contact the Rake must not re-acquire the hunter standing next
+            // to it: at 2 m the Idle state used to jump straight back into Chase.
+            _disengageUntil = Time.time + Mathf.Max(hitRetreatDuration + 3f, 7f);
+
+            // Immediately switch the task to Flee: the vanilla Rake strikes once and is
+            // gone instead of waiting next to the ragdoll until it stands up (I-RAKE-9).
+            if (RakePlayerController.IsActive) return;
+            if (currentState != RakeState.Flee)
+            {
+                RakeMultiplayerPlugin.Log?.LogInfo("[AI] Hit landed - the task becomes Flee");
+                TransitionToState(RakeState.Flee);
+            }
         }
 
         /// <summary>
@@ -1251,6 +1306,7 @@ namespace RakeMultiplayer
             }
 
             _attackCooldown = Mathf.Max(0f, _attackCooldown - dt);
+            TrackTargetRecovery(currentTarget);
 
             float stateTimeout = currentState == RakeState.Chase ? 120f
                                 : currentState == RakeState.Stealth ? 90f
@@ -1431,7 +1487,9 @@ namespace RakeMultiplayer
 
             // Point blank: even between cycles the Rake will not ignore a hunter
             // standing in its face. Otherwise the lurk cycle owns the decision.
-            if (distance < 6f)
+            // Exception: right after a hit it deliberately breaks contact and must not
+            // re-acquire the same hunter standing next to it (I-RAKE-9).
+            if (distance < 6f && Time.time >= _disengageUntil)
             {
                 TransitionToState(RakeState.Chase);
                 return;
@@ -1710,7 +1768,7 @@ namespace RakeMultiplayer
                 FaceTarget(lookDir, 10f);
             }
 
-            if (distance <= attackRange && !IsTargetDown(currentTarget) && _attackCooldown <= 0f)
+            if (distance <= attackRange && _attackCooldown <= 0f && CanAttackTarget(currentTarget))
             {
                 TransitionToState(RakeState.Attack);
                 return;
@@ -1733,6 +1791,13 @@ namespace RakeMultiplayer
             // A hunter who is already in the hit-reaction ragdoll (or dead) must not be
             // hammered. Vanilla hits once and then breaks contact; wait for them to get up.
             if (IsTargetDown(currentTarget))
+            {
+                TransitionToState(RakeState.Chase);
+                return;
+            }
+
+            // Same pacing gate as Chase: no second hit on a hunter who just stood up.
+            if (!CanAttackTarget(currentTarget))
             {
                 TransitionToState(RakeState.Chase);
                 return;
@@ -1812,15 +1877,26 @@ namespace RakeMultiplayer
                                             currentTarget);
 
             // Vanilla reaches 5 m, our attack range is the melee distance.
+            bool hitLanded = false;
             if (strikeDistance <= attackRange + 2f && inFront && clearLine &&
                 !IsTargetDown(currentTarget))
             {
                 DealRakeDamage(currentTarget);
                 PlayAttackImpact();
+                hitLanded = true;
             }
 
+            if (hitLanded)
+            {
+                // Fallback path: a direct melee strike (not the grab) still counts.
+                RegisterHit(currentTarget);
+            }
+
+            // RegisterHit already switched the task to Flee; do not drag it back to Chase.
+            if (currentState == RakeState.Flee) return;
+
             // One hit and out, like the vanilla hunt: the grab is over, the hunter gets
-            // time to get up before the Rake can grab again.
+            // time to get up before the Rake can come back.
             _attackCooldown = 5f;
             TransitionToState(RakeState.Chase);
         }
@@ -1851,6 +1927,57 @@ namespace RakeMultiplayer
             var net = target.GetComponent<NetworkedPlayer>();
             if (net == null) return false;
             return PlayerDeathSystem.IsDead(net.PlayerId) || PlayerRagdoll.IsDown(net.PlayerId);
+        }
+
+        private static int TargetPlayerId(Transform target)
+        {
+            if (target == null) return 0;
+            var net = target.GetComponent<NetworkedPlayer>();
+            return net != null ? net.PlayerId : 0;
+        }
+
+        /// <summary>
+        /// Anti-stunlock gate (I-RAKE-9): a hunter who just got up gets a moment to act, and
+        /// the same hunter cannot be hit again until their re-hit interval has passed.
+        /// </summary>
+        private bool CanAttackTarget(Transform target)
+        {
+            if (target == null) return false;
+            if (IsTargetDown(target)) return false;
+
+            if (_graceTarget == target && Time.time < _graceUntil) return false;
+
+            int id = TargetPlayerId(target);
+            float lastHit;
+            if (id > 0 && _lastHitTimes.TryGetValue(id, out lastHit) &&
+                Time.time - lastHit < reHitInterval)
+            {
+                return false;
+            }
+
+            return true;
+        }
+
+        /// <summary>Remembers when a hunter stops being a ragdoll, so the AI gives them time.</summary>
+        private void TrackTargetRecovery(Transform target)
+        {
+            if (target == null)
+            {
+                _downCheckTarget = null;
+                _wasTargetDown = false;
+                return;
+            }
+
+            bool down = IsTargetDown(target);
+
+            if (_downCheckTarget == target && _wasTargetDown && !down)
+            {
+                _graceTarget = target;
+                _graceUntil = Time.time + postGetUpGrace;
+            }
+
+            _downCheckTarget = target;
+            _wasTargetDown = down;
         }
         /// <summary>
         /// Flee: run directly away from the hunter until it is farther than
@@ -1885,7 +2012,9 @@ namespace RakeMultiplayer
                 away.Normalize();
 
                 Vector3 sampled;
-                bool found = TrySampleNavMesh(target.position + away * fleeDestinationDistance, 25f, out sampled);
+                bool found = TrySampleEscapePoint(target.position,
+                                                  target.position + away * fleeDestinationDistance,
+                                                  25f, out sampled);
 
                 if (!found)
                 {
@@ -1895,14 +2024,18 @@ namespace RakeMultiplayer
                     for (int i = 0; i < angles.Length && !found; i++)
                     {
                         Vector3 dir = Quaternion.Euler(0f, angles[i], 0f) * away;
-                        found = TrySampleNavMesh(target.position + dir * fleeDestinationDistance, 20f, out sampled);
+                        found = TrySampleEscapePoint(target.position,
+                                                     target.position + dir * fleeDestinationDistance,
+                                                     20f, out sampled);
                     }
                 }
 
                 if (!found)
                 {
                     // Last chance: a shorter retreat inside the current area.
-                    found = TrySampleNavMesh(target.position + away * 60f, 25f, out sampled);
+                    found = TrySampleEscapePoint(target.position,
+                                                 target.position + away * 60f,
+                                                 25f, out sampled);
                 }
 
                 if (!found)
@@ -1918,8 +2051,40 @@ namespace RakeMultiplayer
 
             if (_lurkPointValid)
             {
-                MoveToTarget(_lurkPoint, false, GetRunSpeed());
+                // The flee point was already sampled onto the NavMesh by
+                // TrySampleEscapePoint; re-sampling it through MoveToTarget (8 m clamp)
+                // made the Rake refuse to move and "flee" on the spot.
+                MoveToNavMeshPoint(_lurkPoint, GetRunSpeed());
             }
+        }
+
+        /// <summary>Drives the agent to a point that is already on the NavMesh.</summary>
+        private void MoveToNavMeshPoint(Vector3 point, float speed)
+        {
+            var agent = GetEnemyAgent();
+            if (agent == null) return;
+            if (!agent.isOnNavMesh && !TryRecoverAgent()) return;
+
+            agent.speed = speed;
+            agent.stoppingDistance = 0.5f;
+            agent.SetDestination(point);
+
+            _lastDestination = point;
+            _repathTimer = Time.time;
+        }
+
+        /// <summary>Minimum distance from the hunter for a retreat destination to count.</summary>
+        private const float MinEscapeDistance = 25f;
+
+        /// <summary>
+        /// Samples a retreat point and rejects it when NavMesh clamped it back next to the
+        /// hunter: otherwise the Rake "flees" in place and finishes the task standing in
+        /// front of the player (I-RAKE-9).
+        /// </summary>
+        private bool TrySampleEscapePoint(Vector3 hunterPosition, Vector3 wanted, float radius, out Vector3 point)
+        {
+            if (!TrySampleNavMesh(wanted, radius, out point)) return false;
+            return HorizontalDistance(point, hunterPosition) >= MinEscapeDistance;
         }
 
         /// <summary>Start a lurk cycle against the current hunter.</summary>
@@ -2656,6 +2821,16 @@ namespace RakeMultiplayer
 
             stunDuration = Mathf.Max(0.1f, seconds);
 
+            // A human Rake is moved by RakePlayerController and its state machine is paused:
+            // entering Stunned here froze stateTimer and turned into an extra full stun when
+            // the role came back to the AI (N6, I-ROLE-4).
+            if (_playerControlled)
+            {
+                RakePlayerController.ApplyStun(stunDuration);
+                RakeMultiplayerPlugin.Log?.LogInfo($"[3.11] Player-Rake stunned for {stunDuration:F1}s");
+                return;
+            }
+
             if (currentState == RakeState.Stunned)
             {
                 stateTimer = 0f; // refresh the stun
@@ -2666,10 +2841,6 @@ namespace RakeMultiplayer
             }
 
             SetStunnedPhysics(true);
-
-            // A human Rake is moved by RakePlayerController, which never ticks this state
-            // machine: hand it the stun so the trap actually holds the body.
-            if (_playerControlled) RakePlayerController.ApplyStun(stunDuration);
 
             RakeMultiplayerPlugin.Log?.LogInfo($"[3.11] Rake stunned for {stunDuration:F1}s");
         }

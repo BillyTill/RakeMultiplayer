@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using UnityEngine;
 using RakeMultiplayer.Networking;
 
@@ -180,6 +181,12 @@ namespace RakeMultiplayer
         private float _phaseCheckTimer;
         private float _phaseMismatchSince = -1f;
 
+        // I-TICK-1: the phase does not change inside the tick. When the timer expires the
+        // transition is queued and runs at the end of the frame, after the network tick
+        // (message processing + replication) has finished.
+        private bool _phaseTransitionPending;
+        private bool _phaseTransitionRunning;
+
         private void Update()
         {
             if (!_isRunning || !_initialized) return;
@@ -213,17 +220,56 @@ namespace RakeMultiplayer
                                                    "s left, server=" + RakeMultiplayerPlugin.isServer);
             }
 
-            // Check for phase transition
-            if (_phaseTimer >= phaseDuration)
+            // Check for phase transition. It is only QUEUED here: steps 5-12 of the tick
+            // (including replication) still have to run before the level is replaced.
+            if (_phaseTimer >= phaseDuration && !_phaseTransitionPending)
             {
-                TransitionPhase();
+                QueuePhaseTransition();
             }
+        }
+
+        /// <summary>
+        /// I-TICK-1: queue the phase change and execute it once the tick is over. The
+        /// transition used to call Application.LoadLevel straight from Update, i.e. in the
+        /// middle of the tick, with the tick taking the level from under it.
+        /// </summary>
+        private void QueuePhaseTransition()
+        {
+            if (!OwnsClock() || _phaseTransitionPending || _phaseTransitionRunning) return;
+
+            _phaseTransitionPending = true;
+            StartCoroutine(TransitionAfterTick());
+        }
+
+        private IEnumerator TransitionAfterTick()
+        {
+            // WaitForEndOfFrame runs after every Update/LateUpdate of this frame, so the
+            // network tick of RakeNetworkManager has already been applied.
+            yield return new WaitForEndOfFrame();
+
+            _phaseTransitionPending = false;
+            TransitionPhase();
         }
 
         /// <summary>
         /// Transition to the next phase (Day -> Night or Night -> Day)
         /// </summary>
         private void TransitionPhase()
+        {
+            if (_phaseTransitionRunning) return;
+            _phaseTransitionRunning = true;
+
+            try
+            {
+                TransitionPhaseCore();
+            }
+            finally
+            {
+                _phaseTransitionRunning = false;
+            }
+        }
+
+        private void TransitionPhaseCore()
         {
             // Only the host owns the clock. A client that reached this point changed
             // its own phase, which is exactly "the day was skipped only for me".
@@ -352,7 +398,9 @@ namespace RakeMultiplayer
                 return;
             }
 
-            TransitionPhase();
+            // Dev "skip phase" goes through the same queue: even a forced change must not
+            // replace the level in the middle of a tick.
+            QueuePhaseTransition();
         }
 
         /// <summary>Server: loads the level that matches the new phase.</summary>
@@ -432,19 +480,26 @@ namespace RakeMultiplayer
         /// Night start: keep the Rake's health across nights (Task 4.5).
         /// Health is only reset when a brand-new session starts.
         /// </summary>
+        /// <summary>
+        /// Night start: the Rake keeps the health it ended the day with (Task 4.5).
+        /// This hook runs BEFORE the phase level is loaded, so it cannot apply anything to
+        /// a body that is about to be destroyed - it captures the live health, and
+        /// GameEntryPatch puts the new scene's Rake back on it after the load (I-PHASE-1).
+        /// </summary>
         private void ApplyPersistentRakeHealth()
         {
-            if (SessionManager.Instance == null) return;
-
-            float health = SessionManager.Instance.RakeHealth;
-            if (health <= 0f) return;
+            float health = -1f;
 
             var rake = UnityEngine.Object.FindObjectOfType<NetworkedRakeAI>();
-            if (rake != null)
-            {
-                rake.ApplyHealth(health);
-                RakeMultiplayerPlugin.Log?.LogInfo($"[4.5] Restored Rake health for night {_nightNumber + 1}: {health:F1}");
-            }
+            if (rake != null) health = rake.CurrentHealth;
+
+            // No body in this scene: fall back to what the session knows.
+            if (health <= 0f && SessionManager.Instance != null) health = SessionManager.Instance.RakeHealth;
+            if (health <= 0f) return;
+
+            WorldPersistence.SaveRakeHealth(health);
+            RakeMultiplayerPlugin.Log?.LogInfo("[4.5] Rake health captured for night " +
+                                               (_nightNumber + 1) + ": " + health.ToString("F1"));
         }
 
         /// <summary>

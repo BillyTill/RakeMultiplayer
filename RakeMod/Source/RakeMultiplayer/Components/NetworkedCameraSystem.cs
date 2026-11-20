@@ -507,6 +507,13 @@ namespace RakeMultiplayer
 
             IsBroken = true;
             RakeMultiplayerPlugin.Log?.LogInfo($"[NetworkedCamera] Camera {CameraId} broken by player {brokenByPlayerId}");
+
+            // Take the camera out of CameraManager on the host as well. Clients already do
+            // this in HandleCameraDestroy; without the same call here the host keeps a
+            // broken camera in the monitor list while the slot quota is already free, so
+            // a sixth camera could be placed against five monitor buttons (I-RAKE-2).
+            ApplyUnsetupVisuals();
+
             SendCameraBreak();
             // Send QuestTriggerPacket to alert Rake AI (CameraBreak = 0)
             SendQuestTrigger(0);
@@ -586,8 +593,9 @@ namespace RakeMultiplayer
         public void RestoreState(bool active, bool broken, float battery, int placedByPlayerId)
         {
             if (!RakeMultiplayerPlugin.isServer) return;
-            if (!_isPlaced && !CanPlaceCamera()) return; // do not bypass the quota on restore
 
+            // A restored camera was already accepted before the phase change, so the quota
+            // must not reject it - and a broken one must not re-enter CameraManager (N8).
             _isPlaced = true;
             _batteryLevel = Mathf.Clamp(battery, 0f, 100f);
             _isBroken = broken;
@@ -599,7 +607,9 @@ namespace RakeMultiplayer
                 _cameraRegistry[_cameraId] = this;
             }
 
-            ApplySetupVisuals();
+            if (broken) ApplyUnsetupVisuals();
+            else ApplySetupVisuals();
+
             UpdateCameraVisuals();
             SendCameraSpawn();
             SendCameraUpdate();
@@ -651,6 +661,10 @@ namespace RakeMultiplayer
             _placedByPlayerId = packet.PlacedByPlayerId;
 
             UpdateCameraVisuals();
+
+            // A camera broken while we were away must leave CameraManager on the client too
+            // (N23, I-RAKE-2).
+            if (brokenChanged && _isBroken) ApplyUnsetupVisuals();
 
             // Fire events for changes
             if (batteryChanged)
@@ -736,8 +750,7 @@ namespace RakeMultiplayer
 
         #region Network Sync
 
-        /// <summary>
-        /// Send camera state update (periodic or on state change)
+        /// <summary>Send camera state update (periodic or on state change)
         /// Uses Packets.cs CameraSyncPacket (no Action field)
         /// </summary>
         private void SendCameraUpdate()
@@ -755,6 +768,23 @@ namespace RakeMultiplayer
                 return; // No significant change
             }
 
+            SendCameraStatePacket();
+        }
+
+        /// <summary>
+        /// Send the full camera state regardless of the delta gate. Used by the late-join
+        /// snapshot: CameraSpawn alone resets the client to "working, 100%" (N7).
+        /// </summary>
+        public void ForceSendState()
+        {
+            if (!RakeMultiplayerPlugin.isConnected) return;
+            if (!RakeMultiplayerPlugin.isServer) return;
+
+            SendCameraStatePacket();
+        }
+
+        private void SendCameraStatePacket()
+        {
             var packet = new CameraSyncPacket
             {
                 CameraId = _cameraId,

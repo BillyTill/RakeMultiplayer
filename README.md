@@ -1,6 +1,6 @@
 # Rake Multiplayer
 
-**1.1.23-alpha.1-Main** · Windows x86 · Rake (2015)
+**1.1.25-alpha.1-Main** · Windows x86 · Rake (2015)
 
 A cooperative multiplayer mod for **Rake (2015)**: one player takes the Rake,
 up to three hunters try to survive the woods. Host-authoritative AI and world
@@ -100,6 +100,8 @@ powershell -ExecutionPolicy Bypass -File RakeMod/Tests/run-tests.ps1
 - `RakeMod/ModelBake` — player model pipeline.
 - `RakeMod/tools` — developer tools (game MCP bridge, display-dialog patch).
 - `GAME_MECHANICS.md` — authoritative gameplay/system notes.
+- `MECHANICS_INTERACTIONS.md` — how the systems interact in multiplayer (tick order,
+  conflict priorities, scenario contracts, module boundaries).
 - `CHANGELOG.md` — release-level changes only.
 
 ## Credits

@@ -61,5 +61,7 @@ namespace RakeMultiplayer.Networking
         ProtocolReject = 51,
         /// <summary>Client -> server: please advance the day/night phase (dev tooling).</summary>
         PhaseSkipRequest = 52,
+        /// <summary>Client -> server: the first packet after connecting, carries the protocol version.</summary>
+        Handshake = 53,
     }
 }

@@ -49,8 +49,12 @@ namespace RakeMultiplayer
             float radius = Mathf.Tan(Mathf.Clamp(spreadDegrees, 0f, 10f) * Mathf.Deg2Rad);
             for (int i = 0; i < pellets; i++)
             {
-                float x = UnityEngine.Random.Range(-radius, radius);
-                float y = UnityEngine.Random.Range(-radius, radius);
+                // Uniform inside the cone's circle, not a square: the old X/Y sampling let
+                // pellets reach ~6.4 deg at the corners instead of 4.5 (N17, §7).
+                float r = radius * Mathf.Sqrt(UnityEngine.Random.value);
+                float angle = UnityEngine.Random.value * Mathf.PI * 2f;
+                float x = Mathf.Cos(angle) * r;
+                float y = Mathf.Sin(angle) * r;
                 Vector3 pelletDirection = (direction + right * x + up * y).normalized;
                 SpawnServerProjectile(origin, pelletDirection, amount, damageType, ownerId);
             }
@@ -226,14 +230,20 @@ namespace RakeMultiplayer
             var window = hit.collider.GetComponentInParent<Window_obj>();
             if (window != null)
             {
-                window.TakeDamage(_amount, _damageType);
+                // Marked as a projectile impact so authority patches know this hit is the
+                // authoritative one (I-DMG-6).
+                ProjectileSystem.ApplyingImpact = true;
+                try { window.TakeDamage(_amount, _damageType); }
+                finally { ProjectileSystem.ApplyingImpact = false; }
                 return;
             }
 
             var unit = hit.collider.GetComponentInParent<Unit_obj>();
             if (unit != null)
             {
-                unit.TakeDamage(_amount, _damageType);
+                ProjectileSystem.ApplyingImpact = true;
+                try { unit.TakeDamage(_amount, _damageType); }
+                finally { ProjectileSystem.ApplyingImpact = false; }
             }
         }
     }

@@ -33,6 +33,7 @@ namespace RakeMultiplayer
         private Vector3 lastSentPosition;
         private Quaternion lastSentRotation;
         private byte lastSentAnimState;
+        private float lastSentHealth = -1f;
 
         // Player ID (assigned by server)
         public int PlayerId { get; private set; }
@@ -270,16 +271,24 @@ namespace RakeMultiplayer
             bool rotChanged = Quaternion.Angle(currentRot, lastSentRotation) > 0.5f;
             bool animChanged = currentAnimState != lastSentAnimState;
 
-            if (!force && !posChanged && !rotChanged && !animChanged) return;
-
             var selfFps = GetComponent<FPSController>();
+            float currentHealth = selfFps != null ? Mathf.Clamp(selfFps.Health, 0, 100) : 100f;
+
+            // Health changes must reach the server even when the body is standing still:
+            // it kept a stale 100 and could not judge a reported death (N8).
+            bool healthChanged = Mathf.Abs(currentHealth - lastSentHealth) > 0.5f;
+
+            if (!force && !posChanged && !rotChanged && !animChanged && !healthChanged) return;
+
+            var wmForPacket = GetWeaponManager();
             var packet = new PlayerStatePacket
             {
                 PlayerId = PlayerId,
                 Position = currentPos,
                 Rotation = currentRot,
                 AnimState = currentAnimState,
-                Health = selfFps != null ? Mathf.Clamp(selfFps.Health, 0, 100) : 100f
+                Health = currentHealth,
+                WeaponId = (byte)Mathf.Clamp(wmForPacket != null ? wmForPacket.currentWeaponID : 0, 0, 255)
             };
 
             var data = packet.Serialize();
@@ -302,6 +311,7 @@ namespace RakeMultiplayer
             lastSentPosition = currentPos;
             lastSentRotation = currentRot;
             lastSentAnimState = currentAnimState;
+            lastSentHealth = currentHealth;
         }
 
         private byte GetCurrentAnimState()

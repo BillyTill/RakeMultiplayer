@@ -111,6 +111,27 @@ namespace RakeMultiplayer
             if (Time.time - _lastRakeAttackTime < 1f) return;
             _lastRakeAttackTime = Time.time;
 
+            // Per-kind cooldown: the client shows 20/10/50 s, the server is the authority
+            // (I-ROLE-3). A swing consumes its cooldown even if it misses, exactly like the
+            // owning client does.
+            float cooldown = packet.Kind == 0 ? RakePlayerAttackCooldown
+                           : packet.Kind == 1 ? RakeAnimalAttackCooldown
+                                              : RakeCameraAttackCooldown;
+            float lastSwing = packet.Kind == 0 ? _lastRakePlayerAttackTime
+                            : packet.Kind == 1 ? _lastRakeAnimalAttackTime
+                                               : _lastRakeCameraAttackTime;
+            if (Time.time - lastSwing < cooldown)
+            {
+                RakeMultiplayerPlugin.Log?.LogInfo("[RakePlay] kind " + packet.Kind +
+                                                   " on cooldown (" + cooldown.ToString("F0") +
+                                                   " s), request ignored");
+                return;
+            }
+
+            if (packet.Kind == 0) _lastRakePlayerAttackTime = Time.time;
+            else if (packet.Kind == 1) _lastRakeAnimalAttackTime = Time.time;
+            else _lastRakeCameraAttackTime = Time.time;
+
             var rake = RakeHighlight.FindRake();
             if (rake == null) return;
             Vector3 rakePos = rake.position;

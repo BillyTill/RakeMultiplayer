@@ -65,6 +65,32 @@ namespace RakeMultiplayer
         }
 
         /// <summary>
+        /// Host loaded a scene BY NAME. The index cannot be read from Application at this
+        /// point: in this Unity 5 build LoadLevel applies the scene on the next frame, so
+        /// "loadedLevel" is still the old one and the client deduped the packet away -
+        /// every phase change left the client one level behind (I-PHASE-12).
+        /// </summary>
+        public void NotifyLocalLevelLoad(string sceneName)
+        {
+            if (!RakeMultiplayerPlugin.isConnected) return;
+            if (IsApplyingNetworkLevelChange) return;
+            if (string.IsNullOrEmpty(sceneName)) return;
+            if (sceneName.StartsWith("MainMenu", StringComparison.OrdinalIgnoreCase)) return;
+
+            var packet = new LevelChangePacket { LevelIndex = -1, SceneName = sceneName };
+            if (RakeMultiplayerPlugin.isServer)
+            {
+                ServerBroadcast(packet.Serialize());
+            }
+            else
+            {
+                ClientSend(packet.Serialize());
+            }
+
+            RakeMultiplayerPlugin.Log?.LogInfo("[Level] host loaded '" + sceneName + "', clients notified");
+        }
+
+        /// <summary>
         /// Only the host changes levels. A client that asks for it is running a build that
         /// still thinks it owns the level (anything before 1.1.19); both PCs must be updated.
         /// </summary>
@@ -96,6 +122,14 @@ namespace RakeMultiplayer
 
         private void HandleClientLevelChange(LevelChangePacket packet)
         {
+            // A named load is exact: the host told us which scene it moved to.
+            if (!string.IsNullOrEmpty(packet.SceneName))
+            {
+                if (packet.SceneName == UnityEngine.Application.loadedLevelName) return;
+                ApplyNetworkLevelChange(packet.SceneName);
+                return;
+            }
+
             // Level 0 = back to the lobby/menu after the match.
             if (packet.LevelIndex < 0) return;
 
@@ -136,6 +170,22 @@ namespace RakeMultiplayer
             try
             {
                 UnityEngine.Application.LoadLevel(levelIndex);
+            }
+            finally
+            {
+                IsApplyingNetworkLevelChange = false;
+            }
+        }
+
+        private void ApplyNetworkLevelChange(string sceneName)
+        {
+            RakeMultiplayerPlugin.Log?.LogInfo("[Level] applying network scene '" + sceneName +
+                                               "' (server=" + RakeMultiplayerPlugin.isServer +
+                                               ", current='" + UnityEngine.Application.loadedLevelName + "')");
+            IsApplyingNetworkLevelChange = true;
+            try
+            {
+                UnityEngine.Application.LoadLevel(sceneName);
             }
             finally
             {
@@ -208,6 +258,10 @@ namespace RakeMultiplayer
             UI.LoadingScreen.SetStatus("Loading the level");
             UI.LoadingScreen.SetProgress(1f);
             yield return new WaitForSeconds(0.35f);
+
+            // A new match on this peer: snapshots from the previous one must not leak into
+            // it (the host does this in StartSession, a client never did) - N2.
+            WorldPersistence.Clear();
 
             IsApplyingNetworkLevelChange = true;
             try
@@ -300,20 +354,36 @@ namespace RakeMultiplayer
             if (displayName.Length > 24) displayName = displayName.Substring(0, 24);
             _playerNames[playerId] = displayName;
 
-            // Tell everyone the real name now that the client has introduced itself.
+            // Tell everyone ELSE the real name now that the client has introduced itself.
+            // The newcomer already learned its own id (IsYou=true) at the handshake; sending
+            // this to it again made it count itself as another player (N24).
             Vector3 readyPos = _hostSpawnPositionSet ? _hostSpawnPosition : Vector3.zero;
             if (_playerStates.TryGetValue(connectionId, out var readyState)) readyPos = readyState.Position;
-            ServerBroadcast(new PlayerConnectedPacket
+
+            var readyPacket = new PlayerConnectedPacket
             {
                 PlayerId = playerId,
                 SpawnPosition = readyPos,
                 IsYou = false,
                 Name = displayName
-            }.Serialize());
+            }.Serialize();
+
+            foreach (var connId in _connectedClients)
+            {
+                if (connId == connectionId) continue;
+                if (_awaitingHandshake.ContainsKey(connId)) continue;
+                _server.Send(connId, readyPacket);
+            }
 
             // Cameras, traps and animals: rebroadcast current state (idempotent).
             var cameras = UnityEngine.Object.FindObjectsOfType<NetworkedCamera>();
-            for (int i = 0; i < cameras.Length; i++) cameras[i].BroadcastSpawn();
+            for (int i = 0; i < cameras.Length; i++)
+            {
+                cameras[i].BroadcastSpawn();
+                // CameraSpawn alone resets the client to "working, 100%": push the real
+                // state right after it so a late joiner sees broken cameras broken (N7).
+                cameras[i].ForceSendState();
+            }
             var pigs = UnityEngine.Object.FindObjectsOfType<NetworkedPig>();
             for (int i = 0; i < pigs.Length; i++) pigs[i].ForceSendState();
             foreach (var trap in NetworkedTrap.GetAllTraps()) trap.SendStateNow();
@@ -375,6 +445,54 @@ namespace RakeMultiplayer
                     PlayerId = existingId + 1,
                     SpawnPosition = pos,
                     IsYou = false
+                }.Serialize());
+            }
+
+            // Dead players must arrive dead, not as living bodies (I-ITEM-2). The corpse is
+            // built by PlayerDeathSystem.ApplyDeath on the client; the loot itself is
+            // replayed above as items, so this must not drop anything a second time.
+            if (MatchState.IsActive)
+            {
+                foreach (var deadId in MatchState.Current.DeadPlayers)
+                {
+                    if (deadId <= 0 || deadId == playerId) continue;
+
+                    Vector3 deadPos = hostPos;
+                    Quaternion deadRot = Quaternion.identity;
+                    if (_playerStates.TryGetValue(deadId - 1, out var deadState))
+                    {
+                        deadPos = deadState.Position;
+                        deadRot = deadState.Rotation;
+                    }
+
+                    _server.Send(connectionId, new PlayerDiedPacket
+                    {
+                        PlayerId = deadId,
+                        Position = deadPos,
+                        Rotation = deadRot,
+                        Direction = Vector3.zero,
+                        WeaponIds = new int[0],
+                        WeaponAmmo = new int[0],
+                        Health = 0f
+                    }.Serialize());
+                }
+            }
+
+            // Camera boxes: the joiner's copy of the level starts with a full box, so the
+            // remaining count has to be sent explicitly or the box "refills" for them
+            // (I-ITEM-2).
+            foreach (var pair in _networkedItems)
+            {
+                var box = pair.Value as BoxOfCameras_item;
+                if (box == null) continue;
+
+                _server.Send(connectionId, new ItemStatePacket
+                {
+                    ItemNetworkId = pair.Key,
+                    RemainingCount = Mathf.Max(0, box.count),
+                    IsActive = box.count > 0,
+                    PickerId = 0,
+                    ItemType = "BoxOfCameras_item"
                 }.Serialize());
             }
         }

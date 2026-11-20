@@ -33,6 +33,10 @@ namespace RakeMultiplayer
         private static readonly Dictionary<int, List<Collider>> _disabledColliders =
             new Dictionary<int, List<Collider>>();
 
+        // A lethal hit that arrived before the death flow could run (level load, no local
+        // player yet). Retried every frame instead of clamping HP to 1 (N18).
+        private static FPSController _pendingLocalDeath;
+
         public static bool IsDead(int playerId)
         {
             return playerId > 0 && DeadSet.Contains(playerId);
@@ -45,6 +49,28 @@ namespace RakeMultiplayer
             if (MatchState.IsActive) MatchState.Current.DeadPlayers.Clear();
             _disabledColliders.Clear();
             LastHitDirection = Vector3.zero;
+            _pendingLocalDeath = null;
+        }
+
+        public static void MarkPendingLocalDeath(FPSController fps)
+        {
+            if (fps != null) _pendingLocalDeath = fps;
+        }
+
+        /// <summary>Retry a lethal hit that could not start the death flow yet (N18).</summary>
+        public static void TickPendingLocalDeath()
+        {
+            var fps = _pendingLocalDeath;
+            if (fps == null)
+            {
+                _pendingLocalDeath = null;
+                return;
+            }
+
+            if (BeginLocalDeath(fps))
+            {
+                _pendingLocalDeath = null;
+            }
         }
 
         public static void SetLastHitDirection(Vector3 direction)
@@ -236,31 +262,77 @@ namespace RakeMultiplayer
                                                packet.Position.ToString("F1"));
         }
 
+        /// <summary>Respawns must not drop a hunter into the Rake's lap (I-DEATH-4).</summary>
+        private const float MinRespawnDistanceFromRake = 25f;
+
         /// <summary>Safehouse / spawn point for a respawning player.</summary>
         public static Vector3 GetRespawnPosition(int playerId)
         {
-            Vector3 position;
+            // Every configured point is a candidate; the Rake's position then decides which
+            // one is actually safe.
+            var candidates = new List<Vector3>();
             var settings = MapSettings.Current;
 
             if (settings != null && settings.hasSafehouse)
             {
-                position = settings.safehousePosition;
+                candidates.Add(settings.safehousePosition);
             }
-            else if (settings != null && settings.spawnPoints != null && settings.spawnPoints.Length > 0)
+
+            if (settings != null && settings.spawnPoints != null)
             {
-                position = settings.spawnPoints[Mathf.Abs(playerId) % settings.spawnPoints.Length];
+                for (int i = 0; i < settings.spawnPoints.Length; i++) candidates.Add(settings.spawnPoints[i]);
             }
-            else
+
+            var spawner = PlayerSpawner.Instance;
+            if (spawner != null && spawner.playerSpawnPoints != null)
             {
-                var spawner = PlayerSpawner.Instance;
-                if (spawner != null && spawner.playerSpawnPoints != null && spawner.playerSpawnPoints.Length > 0)
+                for (int i = 0; i < spawner.playerSpawnPoints.Length; i++)
                 {
-                    position = spawner.playerSpawnPoints[Mathf.Abs(playerId) % spawner.playerSpawnPoints.Length].position;
+                    if (spawner.playerSpawnPoints[i] != null)
+                    {
+                        candidates.Add(spawner.playerSpawnPoints[i].position);
+                    }
                 }
-                else
+            }
+
+            if (candidates.Count == 0)
+            {
+                var local = spawner != null ? spawner.LocalPlayer : null;
+                candidates.Add(local != null ? local.transform.position : Vector3.zero);
+            }
+
+            int index = Mathf.Abs(playerId) % candidates.Count;
+            Vector3 position = candidates[index];
+
+            Vector3 rakePosition;
+            bool hasRake = TryGetRakePosition(out rakePosition);
+
+            if (hasRake)
+            {
+                // Prefer a point that is already far enough from the Rake; if none is,
+                // take the farthest one and push it away from him.
+                float best = Vector3.Distance(position, rakePosition);
+
+                for (int i = 0; i < candidates.Count; i++)
                 {
-                    var local = spawner != null ? spawner.LocalPlayer : null;
-                    position = local != null ? local.transform.position : Vector3.zero;
+                    float distance = Vector3.Distance(candidates[i], rakePosition);
+                    if (distance >= MinRespawnDistanceFromRake)
+                    {
+                        position = candidates[i];
+                        best = distance;
+                        break;
+                    }
+
+                    if (distance > best)
+                    {
+                        best = distance;
+                        position = candidates[i];
+                    }
+                }
+
+                if (best < MinRespawnDistanceFromRake)
+                {
+                    position = PushAwayFrom(rakePosition, position, MinRespawnDistanceFromRake + 5f);
                 }
             }
 
@@ -272,7 +344,47 @@ namespace RakeMultiplayer
             {
                 position = hit.position;
             }
+
+            // Snapping to the NavMesh may have pulled the point back towards the Rake; the
+            // full 25 m gap is the contract, not 60% of it (N16).
+            if (hasRake && Vector3.Distance(position, rakePosition) < MinRespawnDistanceFromRake)
+            {
+                Vector3 pushed = PushAwayFrom(rakePosition, position, MinRespawnDistanceFromRake + 5f);
+                NavMeshHit safeHit;
+                if (NavMesh.SamplePosition(pushed, out safeHit, 20f, NavMesh.AllAreas))
+                {
+                    position = safeHit.position;
+                }
+                else
+                {
+                    position = pushed;
+                }
+            }
+
             return position;
+        }
+
+        /// <summary>A point at least <paramref name="distance"/> metres away from the Rake.</summary>
+        private static Vector3 PushAwayFrom(Vector3 rakePosition, Vector3 position, float distance)
+        {
+            Vector3 away = position - rakePosition;
+            away.y = 0f;
+            if (away.sqrMagnitude < 0.01f) away = Vector3.forward;
+
+            Vector3 pushed = rakePosition + away.normalized * distance;
+            pushed.y = position.y;
+            return pushed;
+        }
+
+        private static bool TryGetRakePosition(out Vector3 position)
+        {
+            position = Vector3.zero;
+
+            var rake = UnityEngine.Object.FindObjectOfType<NetworkedRakeAI>();
+            if (rake == null) return false;
+
+            position = rake.transform.position;
+            return true;
         }
 
         // ---------------------------------------------------------------- inventory
@@ -328,6 +440,7 @@ namespace RakeMultiplayer
             {
                 case 1: return typeof(Rifle_item);
                 case 2: return typeof(Camera_item);
+                case 3: return typeof(TabletComputer_item);
                 case 4: return typeof(Trap_item);
                 case 5: return typeof(Food_item);
                 case 6: return typeof(SniperRifle_item);

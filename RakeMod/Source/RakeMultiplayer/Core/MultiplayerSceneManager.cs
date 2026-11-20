@@ -68,14 +68,12 @@ namespace RakeMultiplayer
             RebindPersistentManagers();
 
             // "Skip day" and night transitions reload the level: every remote proxy was
-            // destroyed with the old scene, so recreate them for the new one.
-            if (RakeMultiplayerPlugin.isConnected)
+            // destroyed with the old scene. They are recreated in OnGameSceneLoaded AFTER
+            // the world snapshot has been applied - spawning them here put proxies into a
+            // world that was not restored yet (I-PHASE-3).
+            if (RakeMultiplayerPlugin.isConnected && playerSpawner != null)
             {
-                if (playerSpawner != null)
-                {
-                    playerSpawner.PruneDestroyedRemotePlayers();
-                }
-                RakeNetworkManager.Instance?.EnsureRemotePlayersSpawned();
+                playerSpawner.PruneDestroyedRemotePlayers();
             }
 
             // Rake ships Level_1(Day) .. Level_5(Night); the old case-sensitive
@@ -140,11 +138,12 @@ namespace RakeMultiplayer
                 playerSpawner.ApplyMapSettings(settings, nightIndex);
             }
 
-            // Spawn any remote players that connected before the scene loaded
-            RakeNetworkManager.Instance?.EnsureRemotePlayersSpawned();
+            // The world snapshot is applied first and exactly once, whichever scene-entry
+            // hook runs first (I-PHASE-3). Remote proxies, the Rake and the items must not
+            // be created in a world that still shows the previous level's state.
+            WorldPersistence.EnsureWorldRestored("scene manager");
 
-            // Restore world/inventory after a scene reload (Tasks 4.3 / 4.4)
-            WorldPersistence.RestoreWorld();
+            // Restore inventory after a scene reload (Task 4.3)
             if (playerSpawner != null && playerSpawner.LocalPlayer != null)
             {
                 WorldPersistence.RestoreInventory(playerSpawner.LocalPlayer);
@@ -154,7 +153,14 @@ namespace RakeMultiplayer
             {
                 playerSpawner.SpawnRake();
                 playerSpawner.SpawnItems();
+
+                // A no-op if the scene-entry hook already applied the saved health.
+                WorldPersistence.ApplySavedRakeHealth("scene manager");
             }
+
+            // Spawn any remote players that connected before the scene loaded, now that the
+            // world they spawn into has been restored.
+            RakeNetworkManager.Instance?.EnsureRemotePlayersSpawned();
 
             // If session is running, ensure DayNightManager is synced
             if (_sessionManager != null && _sessionManager.IsRunning && _dayNightManager != null)

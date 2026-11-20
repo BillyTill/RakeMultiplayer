@@ -17,7 +17,11 @@ namespace RakeMultiplayer.Networking
         // 2: PhaseSkipRequest, item replay and the strict client-side level rules. A build
         // below this connects fine but cannot join the phase logic, which showed up as
         // "the client skips the day locally and the host never moves".
-        public const int Version = 2;
+        // 3: the client introduces itself with Handshake before the host sends any world
+        // state, so a mismatched build is refused before it can load a level (I-NET-6).
+        // 4: PlayerState carries the held weapon id; the host validates DamageRequest
+        // against it instead of trusting the client's damage type (N3).
+        public const int Version = 4;
 
         public static bool IsCompatible(int clientVersion)
         {

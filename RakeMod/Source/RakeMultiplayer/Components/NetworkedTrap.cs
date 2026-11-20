@@ -215,6 +215,22 @@ namespace RakeMultiplayer
         /// <summary>Server: re-broadcast this trap (late join).</summary>
         public void SendStateNow() { BroadcastState(); }
 
+        /// <summary>
+        /// Server: a trap restored after a scene reload comes back in the state it was left
+        /// in. A sprung trap stays spent - it must not catch the same hunter again in the
+        /// next phase (I-PHASE-1).
+        /// </summary>
+        public void RestoreTriggeredState(bool triggered)
+        {
+            if (!RakeMultiplayerPlugin.isServer) return;
+
+            IsTriggered = triggered;
+            IsArmed = !triggered;
+
+            BroadcastState();
+            BroadcastMapMarker(!triggered);
+        }
+
         private void BroadcastState()
         {
             if (!RakeMultiplayerPlugin.isServer) return;

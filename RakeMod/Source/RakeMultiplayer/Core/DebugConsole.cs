@@ -256,6 +256,13 @@ namespace RakeMultiplayer
             {
                 if (args.Length < 3) return "usage: tp <x> <y> <z>";
 
+                // In a session the host owns positions; a client moving itself is a cheat
+                // that also bypasses ServerTeleportPlayer (N12, I-UI-4).
+                if (RakeMultiplayerPlugin.isConnected && !RakeMultiplayerPlugin.isServer)
+                {
+                    return "tp: host only while connected (positions are server-authoritative)";
+                }
+
                 float x, y, z;
                 if (!float.TryParse(args[0], out x) ||
                     !float.TryParse(args[1], out y) ||
@@ -355,6 +362,13 @@ namespace RakeMultiplayer
             {
                 var player = LocalPlayer();
                 if (player == null) return "rake hit: no local player";
+
+                // Server-authoritative analogue of `rake stun` (N12, I-UI-4): a client must
+                // not write its own HP or start a death on its own.
+                if (RakeMultiplayerPlugin.isConnected && !RakeMultiplayerPlugin.isServer)
+                {
+                    return "rake hit: host only while connected";
+                }
 
                 var fps = player.GetComponent<FPSController>();
                 if (fps == null) return "rake hit: no FPSController on the local player";
